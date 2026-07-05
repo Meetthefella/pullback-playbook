@@ -159,6 +159,25 @@ function assertCanonicalParity({scan, review, track}, sourceLabel){
   expect(track.normalized.trackCanonicalVerdict, `${sourceLabel}: Track must follow live canonical snapshot`).toBe('near_entry');
   expect(review.normalized.reviewCanonicalVerdict, `${sourceLabel}: Review and Track verdict parity`).toBe(track.normalized.trackCanonicalVerdict);
   expect(track.normalized.trackDiagnosticMatchesRenderedAuthority, `${sourceLabel}: Track diagnostic authority must match rendered Track card`).toBe(true);
+  expect(review.authority && review.authority.replayBuilder, `${sourceLabel}: App replay builder must be exposed in extracted authority state`).toBeTruthy();
+  expect(
+    review.authority && review.authority.replayBuilder && review.authority.replayBuilder.reviewCanonicalVerdict,
+    `${sourceLabel}: App replay builder must stay aligned with Review canonical authority`
+  ).toBe(review.normalized.reviewCanonicalVerdict);
+  expect(
+    review.authority && review.authority.replayBuilder && review.authority.replayBuilder.reviewVisualBucket,
+    `${sourceLabel}: App replay builder must stay aligned with Review visual bucket authority`
+  ).toBe(review.normalized.reviewVisualBucket);
+  expect(review.review.stateHealth.contract && review.review.stateHealth.contract.contractFingerprint, `${sourceLabel}: Review diagnostics must expose canonical contract fingerprint`).toBeTruthy();
+  expect(track.track.diagnostics && track.track.diagnostics.contract && track.track.diagnostics.contract.contractFingerprint, `${sourceLabel}: Track diagnostics must expose canonical contract fingerprint`).toBeTruthy();
+  expect(
+    review.review.stateHealth.contract && review.review.stateHealth.contract.canonicalVerdict,
+    `${sourceLabel}: Review and Track diagnostics must expose the same canonical verdict root`
+  ).toBe(track.track.diagnostics && track.track.diagnostics.contract && track.track.diagnostics.contract.canonicalVerdict);
+  expect(
+    review.review.stateHealth.contract && review.review.stateHealth.contract.canonicalVisualBucket,
+    `${sourceLabel}: Review and Track diagnostics must expose the same canonical visual bucket root`
+  ).toBe(track.track.diagnostics && track.track.diagnostics.contract && track.track.diagnostics.contract.canonicalVisualBucket);
 
   expect(scan.scan.visibleCard.scoreLabel, `${sourceLabel}: Scan displayed score should use the shared score display pipeline`).toContain('6');
   expect(review.review.stateHealth.planAuthority.verdict, `${sourceLabel}: Review plan authority verdict`).toBe('near_entry');
@@ -711,7 +730,7 @@ test('visible Paper Trade stays disabled when Entry presentation lacks actionabl
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Paper gateway ready.';
-    uiState.activeReviewSourceProjectionSnapshot = {
+    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
       ticker:'TROW',
       canonicalVerdict:'entry',
       finalVerdict:'entry',
@@ -722,7 +741,9 @@ test('visible Paper Trade stays disabled when Entry presentation lacks actionabl
       tone:'entry',
       decisionSummary:'Entry Ready',
       actionGuidance:'Execute only if the trigger remains valid.'
-    };
+    }, record, {
+      authority:{version:1, source:'manual'}
+    });
     uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     setActiveReviewTicker('TROW');
     const originalResolveCanonicalTradePlanAuthority = resolveCanonicalTradePlanAuthority;
@@ -779,7 +800,7 @@ test('clicked Review Entry presentation cannot make Paper Trade plan authority a
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Paper gateway ready.';
-    uiState.activeReviewSourceProjectionSnapshot = {
+    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
       ticker:'TROW',
       canonicalVerdict:'entry',
       finalVerdict:'entry',
@@ -790,7 +811,9 @@ test('clicked Review Entry presentation cannot make Paper Trade plan authority a
       tone:'entry',
       decisionSummary:'Entry Ready',
       actionGuidance:'Execute only if the trigger remains valid.'
-    };
+    }, record, {
+      authority:{version:1, source:'manual'}
+    });
     uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     setActiveReviewTicker('TROW');
     const observedAuthorities = [];
@@ -864,7 +887,7 @@ test('paper trade preview and submit ignore authoritative Review Entry when plan
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Paper gateway ready.';
-    uiState.activeReviewSourceProjectionSnapshot = {
+    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
       ticker:'TROW',
       canonicalVerdict:'entry',
       finalVerdict:'entry',
@@ -875,7 +898,9 @@ test('paper trade preview and submit ignore authoritative Review Entry when plan
       tone:'entry',
       decisionSummary:'Entry Ready',
       actionGuidance:'Execute only if the trigger remains valid.'
-    };
+    }, record, {
+      authority:{version:1, source:'manual'}
+    });
     uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     setActiveReviewTicker('TROW');
     const originalResolveCanonicalTradePlanAuthority = resolveCanonicalTradePlanAuthority;
@@ -928,4 +953,80 @@ test('paper trade preview and submit ignore authoritative Review Entry when plan
   expect(result.previewSnapshot, 'preview must not create an executable snapshot').toBeFalsy();
   expect(result.submitPreviewOpen, 'submit must not reopen preview without actionable authority').toBe(false);
   expect(result.submitSnapshot, 'submit must not create an executable snapshot').toBeFalsy();
+});
+
+test('switching active review ticker does not rewrite unstamped plans', async ({page}) => {
+  await bootApp(page);
+
+  const result = await page.evaluate(() => {
+    const first = upsertTickerRecord('PLAN');
+    upsertTickerRecord('SAFE');
+    first.plan.entry = 101.5;
+    first.plan.stop = 98.2;
+    first.plan.firstTarget = 110.4;
+    first.plan.status = 'valid';
+    first.plan.source = 'manual';
+    first.plan.tradeability = 'tradable';
+    first.plan.riskStatus = 'fits_risk';
+    first.plan.authorityVersion = '';
+    first.plan.authoritySource = '';
+    first.plan.authorityReason = '';
+    delete first.plan.writtenAt;
+    delete first.plan.writtenBy;
+    const before = {
+      entry:first.plan.entry,
+      stop:first.plan.stop,
+      firstTarget:first.plan.firstTarget,
+      status:first.plan.status
+    };
+    setActiveReviewTicker('PLAN');
+    setActiveReviewTicker('SAFE');
+    const afterRecord = getTickerRecord('PLAN');
+    return {
+      before,
+      after:{
+        entry:afterRecord && afterRecord.plan && afterRecord.plan.entry,
+        stop:afterRecord && afterRecord.plan && afterRecord.plan.stop,
+        firstTarget:afterRecord && afterRecord.plan && afterRecord.plan.firstTarget,
+        status:afterRecord && afterRecord.plan && afterRecord.plan.status
+      }
+    };
+  });
+
+  expect(result.after).toEqual(result.before);
+});
+
+test('unstamped track projection snapshot cannot force Review into Entry', async ({page}) => {
+  await bootApp(page);
+  await seedCanonicalWatchWithValidPlan(page);
+
+  const result = await page.evaluate(() => {
+    const record = getTickerRecord('TROW');
+    uiState.activeReviewSourceProjectionSnapshot = {
+      ticker:'TROW',
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      renderedVerdict:'entry',
+      visualBucket:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      renderedBucket:'entry',
+      tone:'entry',
+      decisionSummary:'Entry Ready',
+      actionGuidance:'Execute only if the trigger remains valid.'
+    };
+    uiState.activeReviewProjectionSource = 'track_projection_updated';
+    setActiveReviewTicker('TROW');
+    renderReviewWorkspace({source:'unstamped_track_projection_regression'});
+    const reviewStateHealth = currentReviewStateHealthSnapshot(record);
+    return {
+      sourceOfTruth:String(reviewStateHealth && reviewStateHealth.sourceOfTruth || ''),
+      canonicalVerdict:String(reviewStateHealth && reviewStateHealth.canonicalVerdict || ''),
+      visualBucket:String(reviewStateHealth && reviewStateHealth.visualBucket || ''),
+      tradeStatus:String(document.querySelector('#tradeStatusBox') && document.querySelector('#tradeStatusBox').textContent || '').trim()
+    };
+  });
+
+  expect(String(result.sourceOfTruth || '').trim().toLowerCase()).not.toBe('review_projection_snapshot');
+  expect(String(result.canonicalVerdict || '').trim().toLowerCase()).not.toBe('entry');
+  expect(String(result.visualBucket || '').trim().toLowerCase()).not.toBe('entry');
 });

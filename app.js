@@ -5,6 +5,7 @@ const key = 'pullbackPlaybookV3';
 const liteKey = 'pullbackPlaybookV3Lite';
 const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
+const reviewSessionKey = 'pullbackPlaybookReviewSessionV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
 const APP_VERSION = 'v4.5.1';
 if(typeof window !== 'undefined'){
@@ -327,21 +328,21 @@ function lightweightWatchlistRecordCount(){
 }
 
 function watchlistPriorityScoreCached(record){
-  const item = normalizeTickerRecord(record || {});
+  const item = normalizeTickerRecordReadOnly(record || {});
   const cached = numericOrNull(item.watchlist && item.watchlist.watchlist_priority_score);
   if(Number.isFinite(cached)) return Number(cached);
   return 0;
 }
 
 function watchlistLifecycleRankCached(record){
-  const item = normalizeTickerRecord(record || {});
+  const item = normalizeTickerRecordReadOnly(record || {});
   const rank = numericOrNull(item.lifecycle && item.lifecycle.rank);
   return Number.isFinite(rank) ? Number(rank) : 99;
 }
 
 function watchlistTickerRecordsFast(){
   return Object.values(normalizeTickerRecordsMap(state.tickerRecords || {}))
-    .map(record => normalizeTickerRecord(record))
+    .map(record => normalizeTickerRecordReadOnly(record))
     .filter(record => record.watchlist && record.watchlist.inWatchlist)
     .sort((a, b) => {
       return watchlistLifecycleRankCached(a) - watchlistLifecycleRankCached(b)
@@ -1411,6 +1412,8 @@ const {createAppState} = window.AppStateBridge;
 const {
   createBaseTickerRecord,
   normalizeTickerRecord: normalizeTickerRecordImpl,
+  normalizeTickerRecordForPersistence: normalizeTickerRecordForPersistenceImpl,
+  normalizeTickerRecordReadOnly: normalizeTickerRecordReadOnlyImpl,
   getTickerRecord: getTickerRecordImpl,
   upsertTickerRecord: upsertTickerRecordImpl
 } = window.AppRecords;
@@ -1830,11 +1833,22 @@ const workspaceAnchorTabMap = {
 let workspaceAnchorBridgeBound = false;
 
 function setActiveWorkspaceTab(tab, options = {}){
+  const previousTab = activeWorkspaceTab();
   if(appShell && appShell.isEnabled && appShell.isEnabled()){
-    return appShell.setActiveWorkspace(tab, options);
+    const nextWorkspace = appShell.setActiveWorkspace(tab, options);
+    const normalizedNextWorkspace = ['scan', 'review', 'track', 'diary'].includes(String(nextWorkspace || '').trim().toLowerCase())
+      ? String(nextWorkspace || '').trim().toLowerCase()
+      : 'scan';
+    if(previousTab !== normalizedNextWorkspace && typeof persistReviewSessionState === 'function'){
+      persistReviewSessionState();
+    }
+    return nextWorkspace;
   }
   const nextTab = String(tab || '').trim().toLowerCase();
   uiState.activeWorkspaceTab = ['scan', 'review', 'track', 'diary'].includes(nextTab) ? nextTab : 'scan';
+  if(previousTab !== uiState.activeWorkspaceTab && typeof persistReviewSessionState === 'function'){
+    persistReviewSessionState();
+  }
   return uiState.activeWorkspaceTab;
 }
 
@@ -2305,8 +2319,31 @@ function activeReviewTicker(){
   return normalizeTicker(($('selectedTicker') && $('selectedTicker').value) || '');
 }
 
+function buildPersistedReviewSessionState(){
+  const currentTicker = normalizeTicker(uiState.activeReviewTicker || '');
+  return {
+    activeReviewTicker:currentTicker,
+    activeWorkspaceTab:activeWorkspaceTab(),
+    persistedAt:new Date().toISOString()
+  };
+}
+
+function persistReviewSessionState(){
+  safeStorageSet(reviewSessionKey, buildPersistedReviewSessionState());
+}
+
+function clearPersistedReviewSessionState(){
+  safeStorageRemove('pullbackPlaybookReviewSessionV1');
+}
+
+function readPersistedReviewSessionState(){
+  const stored = safeStorageGet(reviewSessionKey, {});
+  return stored && typeof stored === 'object' ? stored : {};
+}
+
 function setActiveReviewTicker(ticker){
   const symbol = normalizeTicker(ticker);
+  const previousSymbol = normalizeTicker(uiState.activeReviewTicker || '');
   uiState.activeReviewTicker = symbol;
   if(normalizeTicker(uiState.lastResolvedReviewTicker || '') && normalizeTicker(uiState.lastResolvedReviewTicker || '') !== symbol){
     uiState.lastResolvedReviewTicker = '';
@@ -2316,6 +2353,7 @@ function setActiveReviewTicker(ticker){
   Object.values(state.tickerRecords || {}).forEach(record => {
     if(record && record.review) record.review.cardOpen = record.ticker === symbol;
   });
+  if(previousSymbol !== symbol) persistReviewSessionState();
 }
 
 function pendingReviewTicker(){
@@ -2969,6 +3007,12 @@ function persistState(){
   const recordsSaved = safeStorageSet(recordsLiteKey, buildRecordsLitePersistedState(state, {persistedAt}));
   const liteSaved = safeStorageSet(liteKey, buildLitePersistedState(state, {persistedAt}));
   const fullSaved = safeStorageSet(key, buildFullPersistedState(state, {persistedAt}));
+  if(typeof persistReviewSessionState === 'function') persistReviewSessionState();
+  else safeStorageSet('pullbackPlaybookReviewSessionV1', {
+    activeReviewTicker:String(typeof uiState !== 'undefined' && uiState ? uiState.activeReviewTicker || '' : '').trim().toUpperCase(),
+    activeWorkspaceTab:typeof activeWorkspaceTab === 'function' ? activeWorkspaceTab() : 'scan',
+    persistedAt
+  });
 
   if(!liteSaved && !settingsSaved && !recordsSaved && !fullSaved){
     console.warn('STATE_PERSIST_FAILED', {key, liteKey, settingsKey, recordsLiteKey});
@@ -3275,6 +3319,9 @@ function buildPersistableTickerRecordsMap(recordsMap = {}, options = {}){
           savedVerdict:item.review.savedVerdict,
           savedSummary:item.review.savedSummary,
           savedScore:item.review.savedScore,
+          savedProjectionSnapshot:item.review.savedProjectionSnapshot && typeof item.review.savedProjectionSnapshot === 'object'
+            ? cloneData(item.review.savedProjectionSnapshot, null)
+            : null,
           lastReviewedAt:item.review.lastReviewedAt,
           draft:item.review.draft && typeof item.review.draft === 'object' ? cloneData(item.review.draft, null) : null,
           manualReview:item.review.manualReview && typeof item.review.manualReview === 'object' ? cloneData(item.review.manualReview, null) : null,
@@ -3319,7 +3366,14 @@ function buildPersistableTickerRecordsMap(recordsMap = {}, options = {}){
           firstTargetTooClose:item.plan.firstTargetTooClose,
           lastPlannedAt:item.plan.lastPlannedAt,
           source:item.plan.source,
-          target:item.plan.target
+          target:item.plan.target,
+          authoritySource:item.plan.authoritySource,
+          authorityVersion:item.plan.authorityVersion,
+          authorityReason:item.plan.authorityReason,
+          writtenBy:item.plan.writtenBy,
+          writtenAt:item.plan.writtenAt,
+          candidateSource:item.plan.candidateSource,
+          submittedPaperTradeAt:item.plan.submittedPaperTradeAt
         },
         setup:{
           rawScore:item.setup.rawScore,
@@ -3821,9 +3875,45 @@ function renderTesterSetupPanel(){
 }
 
 function preferredStartupReviewRecord(){
+  const persistedSession = readPersistedReviewSessionState();
+  const persistedWorkspaceTab = String(persistedSession.activeWorkspaceTab || '').trim().toLowerCase();
+  const persistedTicker = persistedWorkspaceTab === 'review'
+    ? normalizeTicker(persistedSession.activeReviewTicker || '')
+    : '';
+  if(persistedTicker){
+    const persistedRecord = getTickerRecord(persistedTicker);
+    if(persistedRecord) return persistedRecord;
+  }
+  if(persistedWorkspaceTab && persistedWorkspaceTab !== 'review'){
+    return null;
+  }
   const savedReviewRecords = openCardTickerRecords();
   if(savedReviewRecords.length) return savedReviewRecords[0];
   return null;
+}
+
+function isLiveReviewProjectionAuthoritySource(source){
+  const safeSource = String(source || '').trim().toLowerCase();
+  /*
+    Only live in-session snapshots can drive Review authority.
+    Persisted startup/reload projection payloads remain display-only.
+  */
+  return ['clicked_card_snapshot', 'track_projection_updated'].includes(safeSource);
+}
+
+function isPersistedDisplayProjectionSource(source){
+  const safeSource = String(source || '').trim().toLowerCase();
+  return ['persisted_display_context', 'startup_direct_rehydrate'].includes(safeSource);
+}
+
+function restoredProjectionAuthoritySource(snapshot){
+  const mode = String(snapshot && snapshot.restoreAuthorityMode || '').trim().toLowerCase();
+  if(mode === 'persisted_display_context') return 'persisted_display_context';
+  return '';
+}
+
+function normalizeReviewProjectionSource(source, snapshot){
+  return restoredProjectionAuthoritySource(snapshot) || String(source || '').trim().toLowerCase();
 }
 
 function restoreStartupReviewSessionState(context = 'startup_local_restore'){
@@ -3831,8 +3921,15 @@ function restoreStartupReviewSessionState(context = 'startup_local_restore'){
   const symbol = normalizeTicker(preferredRecord && preferredRecord.ticker || '');
   if(!symbol) return null;
   setActiveReviewTicker(symbol);
-  uiState.activeReviewSourceProjectionSnapshot = null;
-  uiState.activeReviewProjectionSource = 'startup_direct_rehydrate';
+  const startupProjectionSnapshot = preferredRecord
+    ? persistedReviewProjectionSnapshot(preferredRecord, 'startup_review_rehydrate')
+    : null;
+  const startupProjectionSource = restoredProjectionAuthoritySource(startupProjectionSnapshot);
+  uiState.activeReviewSourceProjectionSnapshot = startupProjectionSnapshot;
+  uiState.activeReviewProjectionSource = startupProjectionSnapshot
+    && hasPresentationAuthoritySnapshot(startupProjectionSnapshot, symbol)
+      ? (startupProjectionSource || 'persisted_display_context')
+      : 'startup_direct_rehydrate';
   uiState.reviewPendingLoadError = null;
   uiState.pendingReviewRequest = null;
   uiState.pendingReviewTicker = '';
@@ -3968,40 +4065,8 @@ function hasPresentationAuthoritySnapshot(snapshot, ticker = ''){
   if(!safeSnapshot) return false;
   const expectedTicker = normalizeTicker(ticker || '');
   if(expectedTicker && normalizeTicker(safeSnapshot.ticker || '') !== expectedTicker) return false;
-  const rawPresentationVerdict = String(
-    safeSnapshot.canonicalVerdict
-    || safeSnapshot.finalVerdict
-    || safeSnapshot.renderedVerdict
-    || ''
-  ).trim();
-  const rawPresentationBucket = String(
-    safeSnapshot.sourceOfTruthVisualBucket
-    || safeSnapshot.visualBucket
-    || safeSnapshot.renderedBucket
-    || safeSnapshot.presentationBucket
-    || ''
-  ).trim();
-  const rawPresentationTone = String(
-    safeSnapshot.tone
-    || safeSnapshot.visualTone
-    || safeSnapshot.presentationTone
-    || safeSnapshot.trackPresentationTone
-    || ''
-  ).trim();
-  const rawPresentationCopy = String(
-    safeSnapshot.decisionSummary
-    || safeSnapshot.actionGuidance
-    || safeSnapshot.actionLabel
-    || safeSnapshot.actionShortLabel
-    || safeSnapshot.badgeLabel
-    || safeSnapshot.headline
-    || safeSnapshot.statusText
-    || ''
-  ).trim();
-  return !!rawPresentationVerdict
-    || !!rawPresentationBucket
-    || !!rawPresentationTone
-    || !!rawPresentationCopy;
+  const authority = projectionSnapshotAuthority(safeSnapshot);
+  return authority.version > 0 && !!String(authority.source || '').trim();
 }
 
 function normalizeTickerJourneyAuthority(authority, fallback = {}){
@@ -4094,63 +4159,169 @@ function projectionSnapshotWithAuthority(snapshot, record, overrides = {}){
   };
 }
 
+function persistedProjectionCanPreserveEntryDisplay(record){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  if(normalizeGlobalVerdictKey(item.review && item.review.savedVerdict || '') !== 'entry') return false;
+  const storedSnapshot = reviewStoredProjectionSnapshot(item);
+  if(!storedSnapshot) return false;
+  const validity = evaluatePersistedReviewProjectionValidity(item, storedSnapshot, 'persisted_projection_entry_display');
+  return validity && validity.valid === true;
+}
+
 function reviewProjectionCanDriveEntryDisplay(snapshot, projectionSource, record){
-  const safeRecord = record && typeof record === 'object' ? record : {};
-  const source = String(projectionSource || '').trim().toLowerCase();
-  if(!['clicked_card_snapshot', 'track_projection_updated'].includes(source)) return false;
-  if(!hasPresentationAuthoritySnapshot(snapshot, safeRecord.ticker || '')) return false;
-  return normalizeGlobalVerdictKey(
-    snapshot && (
-      snapshot.canonicalVerdict
-      || snapshot.finalVerdict
-      || snapshot.renderedVerdict
-    ) || ''
-  ) === 'entry';
+  const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+  if(!safeSnapshot) return false;
+  const source = normalizeReviewProjectionSource(projectionSource, safeSnapshot);
+  const allowPersistedDisplayEntry = source === 'persisted_display_context'
+    && persistedProjectionCanPreserveEntryDisplay(record);
+  if(!allowPersistedDisplayEntry && !['clicked_card_snapshot', 'track_projection_updated'].includes(source)) return false;
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const snapshotTicker = normalizeTicker(safeSnapshot.ticker || '');
+  const recordTicker = normalizeTicker(item && item.ticker || '');
+  if(snapshotTicker && recordTicker && snapshotTicker !== recordTicker) return false;
+  if(!allowPersistedDisplayEntry && !hasPresentationAuthoritySnapshot(safeSnapshot, recordTicker || snapshotTicker)) return false;
+  const verdict = normalizeGlobalVerdictKey(
+    safeSnapshot.canonicalVerdict
+    || safeSnapshot.finalVerdict
+    || safeSnapshot.renderedVerdict
+    || ''
+  );
+  if(verdict !== 'entry') return false;
+  if(allowPersistedDisplayEntry) return true;
+  const baselineReviewState = withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(item, 'review', {
+    log:false,
+    source:'projection_authority_validation',
+    mutationSource:'projection_authority_validation'
+  })) || {};
+  const baselineVerdict = normalizeGlobalVerdictKey(baselineReviewState.canonicalVerdict || '');
+  if(baselineVerdict !== 'entry') return false;
+  return true;
+}
+
+function liveReviewDisplayProjectionSnapshot(snapshot, projectionSource, record){
+  const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+  if(!safeSnapshot) return null;
+  return reviewProjectionCanDriveEntryDisplay(safeSnapshot, projectionSource, record)
+    ? safeSnapshot
+    : null;
+}
+
+function normalizePresentationVerdictBucket(presentation){
+  const safePresentation = presentation && typeof presentation === 'object' ? presentation : null;
+  if(!safePresentation) return safePresentation;
+  const canonicalVerdict = normalizeOptionalGlobalVerdictKey(
+    safePresentation.canonicalVerdict
+    || safePresentation.finalVerdict
+    || ''
+  );
+  const visualBucket = normalizeVisualBucketForPairing(
+    safePresentation.visualBucket
+    || safePresentation.sourceOfTruthVisualBucket
+    || safePresentation.renderedBucket
+    || ''
+  );
+  if(!canonicalVerdict) return safePresentation;
+  if(canonicalVerdict === 'entry' && visualBucket !== 'entry'){
+    return {
+      ...safePresentation,
+      visualBucket:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      renderedBucket:'entry',
+      tone:'entry'
+    };
+  }
+  if(canonicalVerdict === 'near_entry' && visualBucket === 'monitor'){
+    return {
+      ...safePresentation,
+      visualBucket:'near_entry',
+      sourceOfTruthVisualBucket:'near_entry',
+      renderedBucket:'near_entry',
+      tone:'near_entry'
+    };
+  }
+  return safePresentation;
+}
+
+function sharedProjectionCanPromoteEntry(snapshot, projectionSource, record, options = {}){
+  const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+  if(!safeSnapshot) return false;
+  if(options.allowTrackProjection !== true) return false;
+  const source = normalizeReviewProjectionSource(projectionSource, safeSnapshot);
+  if(normalizeGlobalVerdictKey(
+    safeSnapshot.canonicalVerdict
+    || safeSnapshot.finalVerdict
+    || safeSnapshot.renderedVerdict
+    || ''
+  ) !== 'entry') return false;
+  if(source === 'track_projection_updated') return true;
+  if(source === 'persisted_display_context') return persistedProjectionCanPreserveEntryDisplay(record);
+  if(source !== 'clicked_card_snapshot') return false;
+  const item = record && typeof record === 'object' ? record : {};
+  const scanCanonicalVerdict = normalizeGlobalVerdictKey(
+    item.scan && (
+      item.scan.resolvedVerdict
+      || item.scan.verdict
+    )
+    || ''
+  );
+  return scanCanonicalVerdict === 'entry'
+    && reviewProjectionCanDriveEntryDisplay(safeSnapshot, source, item);
 }
 
 function currentReviewStateHealthSnapshot(record){
-  const item = record || currentReviewDiagnosticRecord();
-  if(!item) return null;
+  const sourceRecord = record || currentReviewDiagnosticRecord();
+  if(!sourceRecord) return null;
+  const item = normalizeTickerRecordReadOnly(sourceRecord);
   const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
     && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
     && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || '')
       ? uiState.activeReviewSourceProjectionSnapshot
       : null;
-  const reviewProjectionSource = String(
-    uiState.activeReviewProjectionSource
-    || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
-  ).trim().toLowerCase();
-  const presentationProjectionSnapshot = reviewProjectionSource === 'scanner_score_snapshot'
+  let reviewProjectionSource = normalizeReviewProjectionSource(
+    String(
+      uiState.activeReviewProjectionSource
+      || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+    ).trim().toLowerCase(),
+    activeProjectionSnapshot
+  );
+  let presentationProjectionSnapshot = reviewProjectionSource === 'scanner_score_snapshot'
     ? null
     : activeProjectionSnapshot;
+  if(!hasPresentationAuthoritySnapshot(presentationProjectionSnapshot, item.ticker || '') && item.review && item.review.cardOpen){
+    const persistedProjectionSnapshot = persistedReviewProjectionSnapshot(item, 'startup_review_projection');
+    if(persistedProjectionSnapshot){
+      presentationProjectionSnapshot = persistedProjectionSnapshot;
+      reviewProjectionSource = restoredProjectionAuthoritySource(persistedProjectionSnapshot) || 'persisted_display_context';
+    }
+  }
   const hasProjectionSnapshot = hasPresentationAuthoritySnapshot(presentationProjectionSnapshot, item.ticker || '');
-  const reviewSnapshotAuthority = (
-    reviewProjectionSource === 'clicked_card_snapshot'
-    || reviewProjectionSource === 'track_projection_updated'
-  ) && hasProjectionSnapshot;
-  const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {
+  const reviewSnapshotAuthority = hasProjectionSnapshot
+    && isLiveReviewProjectionAuthoritySource(reviewProjectionSource)
+    && reviewProjectionCanDriveEntryDisplay(presentationProjectionSnapshot, reviewProjectionSource, item);
+  const sourceProjectionSnapshot = presentationProjectionSnapshot;
+  const simplifiedState = withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(item, 'review', {
     renderPass:0,
     source:'diagnostic_snapshot',
     mutationSource:'diagnostic_snapshot'
-  });
+  })) || {};
   const globalVerdict = resolveGlobalVerdict(item);
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const effectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(item, simplifiedState, globalVerdict, lifecycleSnapshot);
   const projectionCanonicalVerdict = reviewSnapshotAuthority
     ? normalizeGlobalVerdictKey(
-      presentationProjectionSnapshot && (
-        presentationProjectionSnapshot.canonicalVerdict
-        || presentationProjectionSnapshot.finalVerdict
-        || presentationProjectionSnapshot.renderedVerdict
+      sourceProjectionSnapshot && (
+        sourceProjectionSnapshot.canonicalVerdict
+        || sourceProjectionSnapshot.finalVerdict
+        || sourceProjectionSnapshot.renderedVerdict
       ) || ''
     )
     : '';
   const projectionVisualBucket = reviewSnapshotAuthority
     ? normalizeVisualBucketForPairing(
-      presentationProjectionSnapshot && (
-        presentationProjectionSnapshot.sourceOfTruthVisualBucket
-        || presentationProjectionSnapshot.visualBucket
-        || presentationProjectionSnapshot.renderedBucket
+      sourceProjectionSnapshot && (
+        sourceProjectionSnapshot.sourceOfTruthVisualBucket
+        || sourceProjectionSnapshot.visualBucket
+        || sourceProjectionSnapshot.renderedBucket
       ) || ''
     )
     : '';
@@ -4163,24 +4334,48 @@ function currentReviewStateHealthSnapshot(record){
       ) || ''
     ).trim().toLowerCase() || '')
     : '';
-  const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
-  const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
-  const derivedTone = projectionTone || (String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor');
+  const savedReviewVerdict = !reviewSnapshotAuthority && isPersistedDisplayProjectionSource(reviewProjectionSource)
+    ? normalizeOptionalGlobalVerdictKey(item.review && item.review.savedVerdict || '')
+    : '';
+  const simplifiedCanonicalVerdict = projectionCanonicalVerdict
+    || normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
+  let simplifiedVisualBucket = projectionVisualBucket
+    || (savedReviewVerdict ? normalizeVisualBucketForPairing(savedReviewVerdict) : '')
+    || normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
+  if(simplifiedCanonicalVerdict === 'entry' && simplifiedVisualBucket !== 'entry'){
+    simplifiedVisualBucket = 'entry';
+  }else if(simplifiedCanonicalVerdict === 'near_entry' && simplifiedVisualBucket === 'monitor'){
+    simplifiedVisualBucket = 'near_entry';
+  }
+  const derivedTone = projectionTone
+    || (savedReviewVerdict ? String(simplifiedVisualBucket || savedReviewVerdict).trim().toLowerCase() : '')
+    || (String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor');
   const authoritativeEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'entry';
   const authoritativeNearEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'near_entry';
+  const derivedStates = analysisDerivedStatesFromRecord(item);
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
-  const displayedPlan = applySetupConfirmationPlanGate(
+  let displayedPlan = applySetupConfirmationPlanGate(
     item,
     deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, item.marketData && item.marketData.currency),
-    analysisDerivedStatesFromRecord(item)
+    derivedStates
   );
+  if(authoritativeEntryPresentation && displayedPlan.status !== 'valid'){
+    const fallbackDisplayedPlan = reviewFallbackDisplayedPlan(item, derivedStates);
+    if(fallbackDisplayedPlan && fallbackDisplayedPlan.status === 'valid'){
+      displayedPlan = fallbackDisplayedPlan;
+    }
+  }
+  const authoritySimplifiedState = {
+    ...effectiveSimplifiedState,
+    canonicalVerdict:simplifiedCanonicalVerdict
+  };
   const planCandidates = collectTradePlanAuthorityCandidates(item);
   const planAuthority = resolveCanonicalTradePlanAuthority({
     record:item,
-    simplifiedState:effectiveSimplifiedState,
+    simplifiedState:authoritySimplifiedState,
     globalVerdict,
     displayedPlan,
-    derivedStates:analysisDerivedStatesFromRecord(item),
+    derivedStates,
     context:'review_diagnostic'
   });
   const planTrace = {
@@ -4231,6 +4426,112 @@ function currentReviewStateHealthSnapshot(record){
       }
     }
   };
+  const renderModels = buildCanonicalRenderModelsFromRecord(item, {
+    surface:'review',
+    source:'diagnostic_snapshot',
+    reason:'diagnostic_snapshot',
+    derivedStates,
+    effectivePlan,
+    displayedPlan,
+    globalVerdict,
+    lifecycleSnapshot,
+    setupScore:setupScoreForRecord(item)
+  }, item.review && item.review.draft ? item.review.draft : null);
+  const canonicalContract = renderModels && renderModels.contract && typeof renderModels.contract === 'object'
+    ? renderModels.contract
+    : null;
+  const reviewRenderModel = renderModels && renderModels.reviewRenderModel && typeof renderModels.reviewRenderModel === 'object'
+    ? renderModels.reviewRenderModel
+    : null;
+  const authoritativeVerdictLabel = globalVerdictLabel(simplifiedCanonicalVerdict || 'watch');
+  const authoritativeNextAction = authoritativeEntryPresentation
+    ? 'Execute only if the trigger remains valid.'
+    : String(
+      effectiveSimplifiedState.actionLabel
+      || reviewRenderModel && reviewRenderModel.nextAction
+      || ''
+    ).trim();
+  const authoritativeCanonicalContract = reviewSnapshotAuthority && canonicalContract
+    ? {
+      ...safeDiagnosticClone(canonicalContract, {}),
+      canonicalVerdict:simplifiedCanonicalVerdict || canonicalContract.canonicalVerdict,
+      canonicalVisualBucket:simplifiedVisualBucket || canonicalContract.canonicalVisualBucket
+    }
+    : canonicalContract;
+  const authoritativeReviewRenderModel = reviewSnapshotAuthority && reviewRenderModel
+    ? {
+      ...safeDiagnosticClone(reviewRenderModel, {}),
+      canonicalVerdict:simplifiedCanonicalVerdict || reviewRenderModel.canonicalVerdict,
+      visualBucket:simplifiedVisualBucket || reviewRenderModel.visualBucket,
+      tone:derivedTone || reviewRenderModel.tone,
+      badgeLabel:authoritativeVerdictLabel,
+      headline:authoritativeVerdictLabel,
+      nextAction:authoritativeNextAction || reviewRenderModel.nextAction,
+      primaryReason:authoritativeEntryPresentation ? '' : String(reviewRenderModel.primaryReason || ''),
+      actionable:authoritativeEntryPresentation ? true : reviewRenderModel.actionable === true
+    }
+    : reviewRenderModel;
+  const authoritativeTrackRenderModel = reviewSnapshotAuthority && renderModels && renderModels.trackRenderModel
+    ? {
+      ...safeDiagnosticClone(renderModels.trackRenderModel, {}),
+      canonicalVerdict:simplifiedCanonicalVerdict || renderModels.trackRenderModel.canonicalVerdict,
+      visualBucket:simplifiedVisualBucket || renderModels.trackRenderModel.visualBucket,
+      visibleBucket:simplifiedVisualBucket || renderModels.trackRenderModel.visibleBucket || renderModels.trackRenderModel.visualBucket,
+      tone:derivedTone || renderModels.trackRenderModel.tone,
+      badgeLabel:authoritativeVerdictLabel,
+      headline:authoritativeVerdictLabel,
+      statusText:authoritativeVerdictLabel,
+      nextAction:authoritativeNextAction || renderModels.trackRenderModel.nextAction,
+      actionLabel:authoritativeNextAction || renderModels.trackRenderModel.actionLabel,
+      primaryReason:authoritativeEntryPresentation ? '' : String(renderModels.trackRenderModel.primaryReason || ''),
+      mainBlocker:authoritativeEntryPresentation ? '' : String(renderModels.trackRenderModel.mainBlocker || '')
+    }
+    : (renderModels && renderModels.trackRenderModel ? renderModels.trackRenderModel : null);
+  const authoritativeTrackLongPressModel = reviewSnapshotAuthority && renderModels && renderModels.trackLongPressModel
+    ? {
+      ...safeDiagnosticClone(renderModels.trackLongPressModel, {}),
+      canonicalVerdict:simplifiedCanonicalVerdict || renderModels.trackLongPressModel.canonicalVerdict,
+      visualBucket:simplifiedVisualBucket || renderModels.trackLongPressModel.visualBucket,
+      header:authoritativeVerdictLabel,
+      actionable:authoritativeEntryPresentation ? true : renderModels.trackLongPressModel.actionable === true,
+      nextAction:authoritativeNextAction || renderModels.trackLongPressModel.nextAction,
+      primaryReason:authoritativeEntryPresentation ? '' : String(renderModels.trackLongPressModel.primaryReason || '')
+    }
+    : (renderModels && renderModels.trackLongPressModel ? renderModels.trackLongPressModel : null);
+  const persistedReviewProjection = persistedReviewProjectionSnapshot(item, 'review_diagnostic');
+  const displayCacheDivergence = canonicalDisplayDivergenceSummary(
+    authoritativeCanonicalContract,
+    persistedReviewProjection,
+    authoritativeReviewRenderModel
+  );
+  const persistenceInputDivergence = canonicalPersistenceInputDivergence(item, authoritativeCanonicalContract);
+  const canonicalHealthVerdict = normalizeGlobalVerdictKey(
+    authoritativeCanonicalContract && authoritativeCanonicalContract.canonicalVerdict
+    || authoritativeReviewRenderModel && authoritativeReviewRenderModel.canonicalVerdict
+    || simplifiedCanonicalVerdict
+    || 'watch'
+  );
+  const canonicalHealthVisualBucket = normalizeVisualBucketForPairing(
+    authoritativeCanonicalContract && authoritativeCanonicalContract.canonicalVisualBucket
+    || authoritativeReviewRenderModel && authoritativeReviewRenderModel.visualBucket
+    || simplifiedVisualBucket
+    || canonicalHealthVerdict,
+    canonicalHealthVerdict
+  );
+  const canonicalHealthTone = String(
+    authoritativeReviewRenderModel && authoritativeReviewRenderModel.tone
+    || canonicalHealthVisualBucket
+    || derivedTone
+    || 'monitor'
+  ).trim().toLowerCase() || 'monitor';
+  const canonicalHealthPlanStatus = String(
+    authoritativeCanonicalContract && authoritativeCanonicalContract.planAuthority && authoritativeCanonicalContract.planAuthority.status
+    || authoritativeReviewRenderModel && authoritativeReviewRenderModel.planStatus
+    || (authoritativeEntryPresentation && displayedPlan.status === 'valid'
+      ? 'valid'
+      : String(effectiveSimplifiedState.planStatus || ''))
+    || ''
+  );
   const plannedRr = item.plan && String(item.plan.status || '').trim().toLowerCase() === 'valid'
     && Number.isFinite(numericOrNull(item.plan.plannedRR))
     ? Number(numericOrNull(item.plan.plannedRR))
@@ -4238,9 +4539,13 @@ function currentReviewStateHealthSnapshot(record){
   const simplifiedResolvedRr = Number.isFinite(Number(effectiveSimplifiedState.resolvedRR))
     ? Number(effectiveSimplifiedState.resolvedRR)
     : null;
+  const fallbackDisplayedPlanRr = displayedPlan && displayedPlan.status === 'valid'
+    && displayedPlan.rewardRisk
+    && Number.isFinite(numericOrNull(displayedPlan.rewardRisk.rrRatio))
+      ? Number(numericOrNull(displayedPlan.rewardRisk.rrRatio))
+      : null;
   let divergenceDetected = false;
   try{
-    const derivedStates = analysisDerivedStatesFromRecord(item);
     const reviewLegacyState = {
       canonicalVerdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || '',
       visualBucket:globalVerdict.bucket || '',
@@ -4277,18 +4582,28 @@ function currentReviewStateHealthSnapshot(record){
   return {
     sourceOfTruth:reviewSnapshotAuthority ? 'review_projection_snapshot' : 'simplified_state_pipeline',
     ticker:String(item.ticker || ''),
-    canonicalVerdict:simplifiedCanonicalVerdict,
-    visualBucket:simplifiedVisualBucket,
-    tone:derivedTone,
+    contract:safeDiagnosticClone(authoritativeCanonicalContract || {}, {}),
+    renderModels:safeDiagnosticClone({
+      review:authoritativeReviewRenderModel,
+      track:authoritativeTrackRenderModel,
+      trackLongPress:authoritativeTrackLongPressModel
+    }, {}),
+    divergence:{
+      cacheDisplay:displayCacheDivergence,
+      persistenceInputs:persistenceInputDivergence
+    },
+    canonicalVerdict:canonicalHealthVerdict,
+    visualBucket:canonicalHealthVisualBucket,
+    tone:canonicalHealthTone,
     structureEligibility:String(effectiveSimplifiedState.structureEligibility || ''),
     structureState:String(effectiveSimplifiedState.structureState || ''),
     setupLocationState:String(effectiveSimplifiedState.setupLocationState || ''),
     priceabilityState:String(effectiveSimplifiedState.priceabilityState || ''),
     bounceState:String(effectiveSimplifiedState.bounceState || ''),
-    planStatus:String(effectiveSimplifiedState.planStatus || ''),
-    resolvedRR:plannedRr != null ? plannedRr : simplifiedResolvedRr,
+    planStatus:canonicalHealthPlanStatus,
+    resolvedRR:plannedRr != null ? plannedRr : (fallbackDisplayedPlanRr != null ? fallbackDisplayedPlanRr : simplifiedResolvedRr),
     resolverRR:simplifiedResolvedRr,
-    plannedRR:plannedRr,
+    plannedRR:plannedRr != null ? plannedRr : fallbackDisplayedPlanRr,
     entryGatePass:planAuthority.actionable === true ? true : (authoritativeEntryPresentation ? true : (effectiveSimplifiedState.entryGatePass === true)),
     nearEntryGatePass:authoritativeEntryPresentation || authoritativeNearEntryPresentation ? true : (effectiveSimplifiedState.nearEntryGatePass === true),
     primaryBlockerReason:authoritativeEntryPresentation
@@ -4298,6 +4613,7 @@ function currentReviewStateHealthSnapshot(record){
     terminalAvoidApplied:effectiveSimplifiedState.terminalAvoidApplied === true,
     divergenceDetected,
     lastReviewedAt:String(item.review && item.review.lastReviewedAt || ''),
+    displayContinuityVerdict:savedReviewVerdict,
     planAuthority,
     planTrace,
     planCandidates
@@ -4305,13 +4621,9 @@ function currentReviewStateHealthSnapshot(record){
 }
 
 function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedState, globalVerdict, lifecycleSnapshot){
-  const item = normalizeTickerRecord(record || {});
+  const item = normalizeTickerRecordReadOnly(record || {});
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const verdict = normalizeGlobalVerdictKey(simplified.canonicalVerdict || 'watch');
-  const lifecycle = lifecycleSnapshot && typeof lifecycleSnapshot === 'object'
-    ? lifecycleSnapshot
-    : watchlistLifecycleSnapshot(item);
-  const lifecycleVerdict = normalizeGlobalVerdictKey(lifecycle.state || '');
   const global = globalVerdict && typeof globalVerdict === 'object'
     ? globalVerdict
     : resolveGlobalVerdict(item);
@@ -4368,43 +4680,65 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
       }
     };
   }
-  if(verdict !== 'watch') return simplified;
-  if(!(item.watchlist && item.watchlist.inWatchlist)) return simplified;
-  if(String(simplified.planStatus || '').trim().toLowerCase() !== 'valid') return simplified;
-  if(String(simplified.priceabilityState || '').trim().toLowerCase() !== 'priceable') return simplified;
-  const overrideVerdict = lifecycleVerdict;
-  if(!['entry','near_entry'].includes(overrideVerdict)) return simplified;
-  if(overrideVerdict === 'entry' && resolverVerdict !== 'entry') return simplified;
-  if(overrideVerdict === 'near_entry' && !['entry','near_entry'].includes(resolverVerdict)) return simplified;
-  const entryAuthorityAligned = overrideVerdict === 'entry';
-  const nearEntryAuthorityAligned = overrideVerdict === 'entry' || overrideVerdict === 'near_entry';
-  return {
-    ...simplified,
-    canonicalVerdict:overrideVerdict,
-    visualBucket:overrideVerdict === 'entry' ? 'entry' : 'near_entry',
-    tone:getTone(overrideVerdict),
-    entryGatePass:entryAuthorityAligned ? true : (simplified.entryGatePass === true),
-    nearEntryGatePass:nearEntryAuthorityAligned ? true : (simplified.nearEntryGatePass === true),
-    mainBlocker:entryAuthorityAligned ? '' : String(simplified.mainBlocker || '').trim(),
-    actionLabel:entryAuthorityAligned
-      ? 'Execute only if the trigger remains valid.'
-      : String(simplified.actionLabel || '').trim(),
-    debug:{
-      ...(simplified.debug || {}),
-      reviewWatchlistSoftReadinessDisplayOverrideApplied:true,
-      reviewWatchlistSoftReadinessDisplayOverrideSource:'watchlist_lifecycle'
-    }
-  };
+  return simplified;
 }
 
 function buildTrackDiagnosticSnapshot(record){
   const item = record && typeof record === 'object' ? record : null;
   if(!item) return null;
   try{
+    const normalizeProjectionSource = typeof normalizeReviewProjectionSource === 'function'
+      ? normalizeReviewProjectionSource
+      : ((source) => String(source || '').trim().toLowerCase());
+    const hasPresentationSnapshot = typeof hasPresentationAuthoritySnapshot === 'function'
+      ? hasPresentationAuthoritySnapshot
+      : ((snapshot, tickerValue) => {
+        const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+        if(!safeSnapshot) return false;
+        return normalizeTicker(safeSnapshot.ticker || '') === normalizeTicker(tickerValue || '');
+      });
+    const projectionCanDriveEntry = typeof reviewProjectionCanDriveEntryDisplay === 'function'
+      ? reviewProjectionCanDriveEntryDisplay
+      : (() => false);
+    const buildCanonicalModels = typeof buildCanonicalRenderModelsFromRecord === 'function'
+      ? buildCanonicalRenderModelsFromRecord
+      : (() => null);
+    const resolveEffectivePlan = typeof effectivePlanForRecord === 'function'
+      ? effectivePlanForRecord
+      : (() => ({}));
+    const resolveSetupScore = typeof setupScoreForRecord === 'function'
+      ? setupScoreForRecord
+      : (() => 0);
+    const displayDivergenceSummary = typeof canonicalDisplayDivergenceSummary === 'function'
+      ? canonicalDisplayDivergenceSummary
+      : (() => ({}));
+    const persistenceDivergenceSummary = typeof canonicalPersistenceInputDivergence === 'function'
+      ? canonicalPersistenceInputDivergence
+      : (() => ({}));
+    const safeUiState = typeof uiState !== 'undefined' && uiState && typeof uiState === 'object'
+      ? uiState
+      : {};
+    const activeProjectionSnapshot = safeUiState.activeReviewSourceProjectionSnapshot
+      && typeof safeUiState.activeReviewSourceProjectionSnapshot === 'object'
+      && normalizeTicker(safeUiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || '')
+        ? safeUiState.activeReviewSourceProjectionSnapshot
+        : null;
+    const activeProjectionSource = normalizeProjectionSource(
+      String(
+        safeUiState.activeReviewProjectionSource
+        || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+      ).trim().toLowerCase(),
+      activeProjectionSnapshot
+    );
+    const allowTrackProjection = (
+      hasPresentationSnapshot(activeProjectionSnapshot, item.ticker || '')
+      && ['clicked_card_snapshot', 'track_projection_updated'].includes(activeProjectionSource)
+    ) || projectionCanDriveEntry(activeProjectionSnapshot, activeProjectionSource, item);
     const persistedPresentation = item.watchlist && item.watchlist.presentation && typeof item.watchlist.presentation === 'object'
       ? item.watchlist.presentation
       : null;
     const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
+    const synthesizedWatchlistDebug = diagnosticWatchlistDebugSnapshot(item, {lifecycleSnapshot});
     const simplifiedState = resolveSimplifiedStateForWatchlistPresentation(item, {
       surface:'track',
       source:'diagnostic_snapshot',
@@ -4425,6 +4759,23 @@ function buildTrackDiagnosticSnapshot(record){
     const globalVerdict = (simplifiedDebug.resolvedState
       ? simplifiedDebug.resolvedState
       : resolveGlobalVerdict(item));
+    const renderModels = buildCanonicalModels(item, {
+      surface:'track',
+      source:'diagnostic_snapshot',
+      reason:'diagnostic_snapshot',
+      derivedStates,
+      effectivePlan:resolveEffectivePlan(item, {allowScannerFallback:true}),
+      displayedPlan,
+      globalVerdict,
+      lifecycleSnapshot,
+      setupScore:resolveSetupScore(item)
+    });
+    const canonicalTrackRenderModel = renderModels && renderModels.trackRenderModel && typeof renderModels.trackRenderModel === 'object'
+      ? renderModels.trackRenderModel
+      : null;
+    const canonicalContract = renderModels && renderModels.contract && typeof renderModels.contract === 'object'
+      ? renderModels.contract
+      : null;
     const priority = watchlistPriorityForRecord(item, {lifecycleSnapshot});
     const persistedSharedPresentation = persistedPresentation && persistedPresentation.sharedPresentation && typeof persistedPresentation.sharedPresentation === 'object'
       ? persistedPresentation.sharedPresentation
@@ -4435,11 +4786,43 @@ function buildTrackDiagnosticSnapshot(record){
       simplifiedState,
       lifecycleSnapshot,
       globalVerdict,
+      projectionSnapshot:activeProjectionSnapshot,
+      projectionSource:activeProjectionSource,
+      allowTrackProjection,
       sourceOfTruth:diagnosticsSourceOfTruth,
       source:'diagnostic_snapshot',
       reason:'diagnostic_snapshot'
     });
-    const trackVisibleModel = persistedTrackVisibleModelFromPresentation(sharedPresentation);
+    const diagnosticProjectionEntryAuthority = activeProjectionSource === 'clicked_card_snapshot'
+      && projectionCanDriveEntry(activeProjectionSnapshot, activeProjectionSource, item)
+      && normalizeGlobalVerdictKey(
+        item.scan && (
+          item.scan.resolvedVerdict
+          || item.scan.verdict
+        )
+        || ''
+      ) === 'entry';
+    const effectiveSharedPresentation = diagnosticProjectionEntryAuthority
+      ? {
+        ...sharedPresentation,
+        canonicalVerdict:'entry',
+        finalVerdict:'entry',
+        visualBucket:'entry',
+        sourceOfTruthVisualBucket:'entry',
+        renderedBucket:'entry',
+        tone:'entry',
+        badgeLabel:'Entry',
+        headline:'Entry Ready',
+        statusText:'Entry Ready',
+        actionLabel:'Execute only if the trigger remains valid.',
+        nextAction:'Execute only if the trigger remains valid.',
+        primaryReason:'Buyers are in control and the setup is ready to act on.',
+        mainBlocker:'',
+        planVisible:true,
+        planStatus:'valid'
+      }
+      : sharedPresentation;
+    const trackVisibleModel = persistedTrackVisibleModelFromPresentation(effectiveSharedPresentation);
     const debugPlanUI = resolvePlanVisibility({
       state:globalVerdict.finalVerdict || globalVerdict.final_verdict,
       bounce_state:globalVerdict.bounce_state || (item.setup && item.setup.bounceState),
@@ -4470,16 +4853,20 @@ function buildTrackDiagnosticSnapshot(record){
     const trackDebug = authoritativeVisualState.trackDebug && typeof authoritativeVisualState.trackDebug === 'object'
       ? authoritativeVisualState.trackDebug
       : {};
+    const renderedVisibleModel = trackDebug.visibleModel && typeof trackDebug.visibleModel === 'object'
+      ? trackDebug.visibleModel
+      : null;
     const trackStateHealth = {
       sourceOfTruth:diagnosticsSourceOfTruth,
       ticker:String(item.ticker || ''),
-      canonicalVerdict:String(trackVisibleModel.canonicalVerdict || sharedPresentation.canonicalVerdict || ''),
-      visualBucket:String(trackVisibleModel.visibleBucket || sharedPresentation.visualBucket || ''),
-      tone:String(trackVisibleModel.tone || sharedPresentation.tone || ''),
-      badgeLabel:String(trackVisibleModel.badgeLabel || sharedPresentation.badgeLabel || ''),
-      headline:String(trackVisibleModel.headline || sharedPresentation.headline || ''),
-      statusText:String(trackVisibleModel.statusText || sharedPresentation.statusText || ''),
-      actionLabel:String(trackVisibleModel.actionLabel || sharedPresentation.actionLabel || ''),
+      contractFingerprint:String(canonicalContract && canonicalContract.contractFingerprint || ''),
+      canonicalVerdict:String(canonicalTrackRenderModel && canonicalTrackRenderModel.canonicalVerdict || trackVisibleModel.canonicalVerdict || effectiveSharedPresentation.canonicalVerdict || renderedVisibleModel && renderedVisibleModel.canonicalVerdict || ''),
+      visualBucket:String(canonicalTrackRenderModel && (canonicalTrackRenderModel.visibleBucket || canonicalTrackRenderModel.visualBucket) || trackVisibleModel.visibleBucket || effectiveSharedPresentation.visualBucket || renderedVisibleModel && renderedVisibleModel.visibleBucket || ''),
+      tone:String(canonicalTrackRenderModel && canonicalTrackRenderModel.tone || trackVisibleModel.tone || effectiveSharedPresentation.tone || renderedVisibleModel && renderedVisibleModel.tone || ''),
+      badgeLabel:String(canonicalTrackRenderModel && canonicalTrackRenderModel.badgeLabel || trackVisibleModel.badgeLabel || effectiveSharedPresentation.badgeLabel || renderedVisibleModel && renderedVisibleModel.badgeLabel || ''),
+      headline:String(canonicalTrackRenderModel && canonicalTrackRenderModel.headline || trackVisibleModel.headline || effectiveSharedPresentation.headline || renderedVisibleModel && renderedVisibleModel.headline || ''),
+      statusText:String(canonicalTrackRenderModel && canonicalTrackRenderModel.statusText || trackVisibleModel.statusText || effectiveSharedPresentation.statusText || renderedVisibleModel && renderedVisibleModel.headline || ''),
+      actionLabel:String(canonicalTrackRenderModel && canonicalTrackRenderModel.actionLabel || trackVisibleModel.actionLabel || effectiveSharedPresentation.actionLabel || ''),
       structureEligibility:String(simplifiedState.structureEligibility || ''),
       structureState:String(simplifiedState.structureState || ''),
       setupLocationState:String(simplifiedState.setupLocationState || ''),
@@ -4489,7 +4876,7 @@ function buildTrackDiagnosticSnapshot(record){
       resolvedRR:Number.isFinite(Number(simplifiedState.resolvedRR)) ? Number(simplifiedState.resolvedRR) : null,
       entryGatePass:simplifiedState.entryGatePass === true,
       nearEntryGatePass:simplifiedState.nearEntryGatePass === true,
-      primaryBlockerReason:String(trackVisibleModel.primaryReason || sharedPresentation.primaryReason || sharedPresentation.mainBlocker || ''),
+      primaryBlockerReason:String(canonicalTrackRenderModel && canonicalTrackRenderModel.primaryReason || trackVisibleModel.primaryReason || effectiveSharedPresentation.primaryReason || effectiveSharedPresentation.mainBlocker || renderedVisibleModel && renderedVisibleModel.primaryReason || ''),
       avoidTriggerSource:String(simplifiedState.avoidTriggerSource || ''),
       terminalAvoidApplied:simplifiedState.terminalAvoidApplied === true,
       divergenceDetected:false,
@@ -4497,10 +4884,26 @@ function buildTrackDiagnosticSnapshot(record){
       persistedPresentationAvailable:persistedSharedPresentation != null,
       persistedPresentationCacheOnly:persistedSharedPresentation != null
     };
+    const displayCacheDivergence = displayDivergenceSummary(
+      canonicalContract,
+      persistedSharedPresentation,
+      canonicalTrackRenderModel || trackVisibleModel
+    );
+    const persistenceInputDivergence = persistenceDivergenceSummary(item, canonicalContract);
     return {
       ticker:String(item.ticker || ''),
+      contract:safeDiagnosticClone(canonicalContract || {}, {}),
+      renderModels:safeDiagnosticClone({
+        review:renderModels && renderModels.reviewRenderModel ? renderModels.reviewRenderModel : null,
+        track:canonicalTrackRenderModel,
+        trackLongPress:renderModels && renderModels.trackLongPressModel ? renderModels.trackLongPressModel : null
+      }, {}),
+      divergence:{
+        cacheDisplay:displayCacheDivergence,
+        persistenceInputs:persistenceInputDivergence
+      },
       simplifiedState:trackStateHealth,
-      sharedPresentation:safeDiagnosticClone(sharedPresentation || {}, {}),
+      sharedPresentation:safeDiagnosticClone(effectiveSharedPresentation || {}, {}),
       lifecycleSnapshot:safeDiagnosticClone(lifecycleSnapshot || {}, {}),
       consistencyAudit:safeDiagnosticClone(consistencyAudit || [], []),
       visibleModel:safeDiagnosticClone(trackVisibleModel || {}, {}),
@@ -4508,7 +4911,7 @@ function buildTrackDiagnosticSnapshot(record){
       planTrace:safeDiagnosticClone(trackDebug.planTrace || {}, {}),
       gateTrace:safeDiagnosticClone(trackDebug.gateTrace || {}, {}),
       lifecycleTrace:safeDiagnosticClone(trackDebug.lifecycleTrace || {}, {}),
-      watchlistDebug:safeDiagnosticClone(item.watchlist && item.watchlist.debug || {}, {}),
+      watchlistDebug:safeDiagnosticClone(synthesizedWatchlistDebug || {}, {}),
       plan:safeDiagnosticClone(item.plan || {}, {}),
       scan:safeDiagnosticClone(item.scan || {}, {})
     };
@@ -4518,6 +4921,190 @@ function buildTrackDiagnosticSnapshot(record){
       snapshotError:String(error && error.message || 'track_snapshot_failed')
     };
   }
+}
+
+function buildReplaySnapshotForTicker(tickerOrRecord, options = {}){
+  const liveRecord = tickerOrRecord && typeof tickerOrRecord === 'object'
+    ? tickerOrRecord
+    : getTickerRecord(normalizeTicker(tickerOrRecord || ''));
+  if(!liveRecord || typeof liveRecord !== 'object') return null;
+  const record = normalizeTickerRecordReadOnly(liveRecord);
+  const reviewProjectionSnapshot = uiState && uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(record.ticker || '')
+      ? safeDiagnosticClone(uiState.activeReviewSourceProjectionSnapshot, {})
+      : null;
+  const reviewProjectionSource = normalizeReviewProjectionSource(
+    String(uiState && uiState.activeReviewProjectionSource || '').trim().toLowerCase(),
+    reviewProjectionSnapshot
+  );
+  const reviewState = currentReviewStateHealthSnapshot(liveRecord);
+  const liveReviewProjectionAuthority = (
+    reviewState
+    && String(reviewState.sourceOfTruth || '').trim().toLowerCase() === 'review_projection_snapshot'
+  ) || (
+    reviewProjectionCanDriveEntryDisplay(
+      reviewProjectionSnapshot,
+      reviewProjectionSource,
+      liveRecord
+    ) && ['clicked_card_snapshot', 'track_projection_updated'].includes(reviewProjectionSource)
+  );
+  const trackState = buildTrackDiagnosticSnapshot(liveRecord);
+  const scanState = withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(record, 'scan', {
+    log:false,
+    source:'replay_snapshot_builder',
+    mutationSource:'replay_snapshot_builder'
+  })) || null;
+  const authoritativeScan = authoritativeScanSurfaceSnapshot(liveRecord);
+  const rawCanonicalContract = reviewState && reviewState.contract && typeof reviewState.contract === 'object'
+    ? reviewState.contract
+    : (trackState && trackState.contract && typeof trackState.contract === 'object'
+      ? trackState.contract
+      : null);
+  const rawRenderModels = reviewState && reviewState.renderModels && typeof reviewState.renderModels === 'object'
+    ? reviewState.renderModels
+    : (trackState && trackState.renderModels && typeof trackState.renderModels === 'object'
+      ? trackState.renderModels
+      : null);
+  const projectionCanonicalVerdict = normalizeGlobalVerdictKey(
+    reviewState && reviewState.canonicalVerdict
+    || reviewProjectionSnapshot && (
+      reviewProjectionSnapshot.canonicalVerdict
+      || reviewProjectionSnapshot.finalVerdict
+      || reviewProjectionSnapshot.renderedVerdict
+    )
+    || ''
+  );
+  const projectionVisualBucket = normalizeVisualBucketForPairing(
+    reviewState && reviewState.visualBucket
+    || reviewProjectionSnapshot && (
+      reviewProjectionSnapshot.sourceOfTruthVisualBucket
+      || reviewProjectionSnapshot.visualBucket
+      || reviewProjectionSnapshot.renderedBucket
+    )
+    || '',
+    projectionCanonicalVerdict
+  );
+  const canonicalContract = liveReviewProjectionAuthority && rawCanonicalContract
+    ? {
+      ...safeDiagnosticClone(rawCanonicalContract, {}),
+      canonicalVerdict:projectionCanonicalVerdict || rawCanonicalContract.canonicalVerdict,
+      canonicalVisualBucket:projectionVisualBucket || rawCanonicalContract.canonicalVisualBucket
+    }
+    : rawCanonicalContract;
+  const renderModels = liveReviewProjectionAuthority && rawRenderModels
+    ? {
+      ...safeDiagnosticClone(rawRenderModels, {}),
+      review:{
+        ...(safeDiagnosticClone(rawRenderModels.review || {}, {})),
+        canonicalVerdict:projectionCanonicalVerdict || rawRenderModels.review && rawRenderModels.review.canonicalVerdict,
+        visualBucket:projectionVisualBucket || rawRenderModels.review && rawRenderModels.review.visualBucket
+      },
+      track:{
+        ...(safeDiagnosticClone(rawRenderModels.track || {}, {})),
+        canonicalVerdict:projectionCanonicalVerdict || rawRenderModels.track && rawRenderModels.track.canonicalVerdict,
+        visualBucket:projectionVisualBucket || rawRenderModels.track && rawRenderModels.track.visualBucket,
+        visibleBucket:projectionVisualBucket || rawRenderModels.track && (rawRenderModels.track.visibleBucket || rawRenderModels.track.visualBucket)
+      }
+    }
+    : rawRenderModels;
+  const scannerCanonicalVerdict = normalizeGlobalVerdictKey(
+    authoritativeScan && authoritativeScan.canonicalVerdict
+    || scanState && scanState.canonicalVerdict
+    || record.scan && (record.scan.resolvedVerdict || record.scan.verdict)
+    || 'watch'
+  );
+  const scannerVisualBucket = normalizeVisualBucketForPairing(
+    authoritativeScan && authoritativeScan.visualBucket
+    || scanState && scanState.visualBucket
+    || scannerCanonicalVerdict,
+    scannerCanonicalVerdict
+  );
+  const reviewCanonicalVerdict = normalizeGlobalVerdictKey(
+    reviewState && reviewState.canonicalVerdict
+    || canonicalContract && canonicalContract.canonicalVerdict
+    || scannerCanonicalVerdict
+    || 'watch'
+  );
+  const reviewVisualBucket = normalizeVisualBucketForPairing(
+    reviewState && reviewState.visualBucket
+    || renderModels && renderModels.review && renderModels.review.visualBucket
+    || canonicalContract && canonicalContract.canonicalVisualBucket
+    || reviewCanonicalVerdict,
+    reviewCanonicalVerdict
+  );
+  const setupScore = Number.isFinite(Number(
+    reviewState && reviewState.contract && reviewState.contract.derivedStates && reviewState.contract.derivedStates.setupScore
+  ))
+    ? Number(reviewState.contract.derivedStates.setupScore)
+    : (Number.isFinite(Number(
+      canonicalContract && canonicalContract.derivedStates && canonicalContract.derivedStates.setupScore
+    ))
+      ? Number(canonicalContract.derivedStates.setupScore)
+      : (Number.isFinite(Number(scanState && scanState.setupScore))
+        ? Number(scanState.setupScore)
+        : setupScoreForRecord(liveRecord)));
+  const recomputedReviewVerdict = normalizeGlobalVerdictKey(
+    renderModels && renderModels.review && renderModels.review.canonicalVerdict
+    || ''
+  );
+  const recomputedReviewBucket = normalizeVisualBucketForPairing(
+    renderModels && renderModels.review && renderModels.review.visualBucket
+    || '',
+    recomputedReviewVerdict
+  );
+  return {
+    ticker:String(record.ticker || ''),
+    canonicalContract:safeDiagnosticClone(canonicalContract || {}, {}),
+    renderModels:safeDiagnosticClone(renderModels || {}, {}),
+    meta:safeDiagnosticClone(record.meta || {}, {}),
+    marketData:safeDiagnosticClone(record.marketData || {}, {}),
+    setup:safeDiagnosticClone(record.setup || {}, {}),
+    plan:safeDiagnosticClone(record.plan || {}, {}),
+    scan:safeDiagnosticClone(record.scan || {}, {}),
+    review:{
+      analysisState:{
+        normalized:safeDiagnosticClone(
+          record.review
+          && record.review.analysisState
+          && record.review.analysisState.normalized
+          || null,
+          null
+        )
+      },
+      manualReview:safeDiagnosticClone(record.review && record.review.manualReview || null, null),
+      projectionSource:reviewProjectionSource,
+      projectionSnapshot:liveReviewProjectionAuthority
+        ? safeDiagnosticClone(reviewProjectionSnapshot || null, null)
+        : null
+    },
+    rawShortlistSignal:{
+      verdict:String(record.scan && (record.scan.resolvedVerdict || record.scan.verdict) || '').trim(),
+      reasons:Array.isArray(record.scan && record.scan.reasons) ? record.scan.reasons.slice() : [],
+      blockers:Array.isArray(record.scan && record.scan.blockers) ? record.scan.blockers.slice() : []
+    },
+    rawShortlistVerdict:String(record.scan && (record.scan.resolvedVerdict || record.scan.verdict) || '').trim(),
+    scannerCanonicalVerdict,
+    scannerVisualBucket,
+    scannerSnapshotIncomplete:!scannerCanonicalVerdict,
+    reviewCanonicalVerdict,
+    reviewVisualBucket,
+    reviewProjectionSource,
+    replayAuthoritySource:canonicalContract ? 'canonical_contract' : 'recomputed_fallback',
+    snapshotContractFingerprint:String(canonicalContract && canonicalContract.contractFingerprint || ''),
+    setupScore,
+    authorityDrift:{
+      canonicalVerdict:recomputedReviewVerdict,
+      visualBucket:recomputedReviewBucket,
+      differsFromSnapshot:!!(
+        recomputedReviewVerdict
+        && (
+          recomputedReviewVerdict !== reviewCanonicalVerdict
+          || recomputedReviewBucket !== reviewVisualBucket
+        )
+      )
+    }
+  };
 }
 
 function buildTesterDiagnosticSnapshot(options = {}){
@@ -4706,6 +5293,7 @@ function resetTesterProfile(){
   safeStorageRemove(liteKey);
   safeStorageRemove(settingsKey);
   safeStorageRemove(recordsLiteKey);
+  safeStorageRemove('pullbackPlaybookReviewSessionV1');
   safeStorageRemove(savedScannerUniverseKey);
   safeStorageRemove(savedScannerUniverseMetaKey);
   safeStorageRemove(trackSectionStateKey);
@@ -6058,7 +6646,42 @@ function isScannerWorkflowPersistBurstActive(){
 }
 
 function normalizeTickerRecord(record){
-  return normalizeTickerRecordImpl(record, {
+  return normalizeTickerRecordForPersistence(record);
+}
+
+function normalizeTickerRecordForPersistence(record){
+  return normalizeTickerRecordForPersistenceImpl(record, {
+    normalizeTicker,
+    createBaseTickerRecord: symbol => baseTickerRecord(symbol),
+    normalizeScanType,
+    numericOrNull,
+    normalizeImportedStatus,
+    normalizeExitMode,
+    normalizeTargetReviewState,
+    normalizeStoredPlanSnapshot,
+    normalizeTradeRecord,
+    uniqueStrings,
+    normalizeStoredTradeOutcome,
+    hasAnyPlanFields,
+    deriveExecutionPlanState,
+    analysisDerivedStatesFromRecord,
+    computeBaseSetupScoreForRecord,
+    deriveCurrentPlanState,
+    evaluateSetupQualityAdjustments,
+    warningStateFromInputs,
+    deriveDisplaySetupScore,
+    convictionTierForRecord,
+    practicalSizeFlagForPlan,
+    evaluateEntryTrigger,
+    validateCurrentPlan,
+    hasLockedLifecycle,
+    deriveActionStateForRecord,
+    state
+  });
+}
+
+function normalizeTickerRecordReadOnly(record){
+  return normalizeTickerRecordReadOnlyImpl(record, {
     normalizeTicker,
     createBaseTickerRecord: symbol => baseTickerRecord(symbol),
     normalizeScanType,
@@ -6092,10 +6715,138 @@ function normalizeTickerRecordsMap(records){
   const out = {};
   if(!records || typeof records !== 'object') return out;
   Object.entries(records).forEach(([ticker, record]) => {
-    const normalized = normalizeTickerRecord({...record, ticker});
+    const normalized = normalizeTickerRecordReadOnly({...record, ticker});
     if(normalized.ticker) out[normalized.ticker] = normalized;
   });
   return out;
+}
+
+function normalizeDetachedTickerRecord(record){
+  return normalizeTickerRecordReadOnly(record && typeof record === 'object' ? record : {});
+}
+
+function buildCanonicalPlanVerdictContract(record, context = {}){
+  const item = normalizeDetachedTickerRecord(record);
+  if(window.PlanVerdictContract && typeof window.PlanVerdictContract.buildPlanVerdictContract === 'function'){
+    return window.PlanVerdictContract.buildPlanVerdictContract(item, context);
+  }
+  const fallbackVerdict = normalizeGlobalVerdictKey(
+    context && context.resolvedContract && (
+      context.resolvedContract.canonical_final_verdict
+      || context.resolvedContract.final_verdict_rendered
+      || context.resolvedContract.final_verdict
+      || context.resolvedContract.finalVerdict
+    )
+    || context && context.globalVerdict && (
+      context.globalVerdict.final_verdict
+      || context.globalVerdict.finalVerdict
+    )
+    || item.review && item.review.savedVerdict
+    || item.scan && (item.scan.resolvedVerdict || item.scan.verdict)
+    || 'watch'
+  );
+  return {
+    schemaVersion:'plan-verdict-contract-fallback-v1',
+    ticker:String(item.ticker || '').trim().toUpperCase(),
+    canonicalVerdict:fallbackVerdict,
+    canonicalVisualBucket:normalizeVisualBucketForPairing(fallbackVerdict, fallbackVerdict),
+    derivedStates:{
+      setupScore:setupScoreForRecord(item),
+      planReady:recordPlanHasConcreteValues(item),
+      planStatus:String(context && context.displayedPlan && context.displayedPlan.status || '').trim().toLowerCase() || 'missing',
+      inWatchlist:!!(item.watchlist && item.watchlist.inWatchlist)
+    },
+    planAuthority:{
+      entry:numericOrNull(context && context.effectivePlan && context.effectivePlan.entry || item.plan && item.plan.entry),
+      stop:numericOrNull(context && context.effectivePlan && context.effectivePlan.stop || item.plan && item.plan.stop),
+      firstTarget:numericOrNull(context && context.effectivePlan && context.effectivePlan.firstTarget || item.plan && item.plan.firstTarget),
+      source:String(context && context.effectivePlan && context.effectivePlan.source || item.plan && item.plan.source || '').trim().toLowerCase() || 'none',
+      stamped:hasCanonicalTradePlanStamp(item.plan)
+    },
+    lifecycleAuthority:{
+      stage:String(context && context.lifecycleSnapshot && context.lifecycleSnapshot.stage || item.lifecycle && item.lifecycle.stage || '').trim().toLowerCase(),
+      status:String(context && context.lifecycleSnapshot && context.lifecycleSnapshot.status || item.lifecycle && item.lifecycle.status || '').trim().toLowerCase(),
+      state:String(context && context.lifecycleSnapshot && context.lifecycleSnapshot.state || fallbackVerdict).trim().toLowerCase()
+    },
+    paperTradeAuthority:{
+      submittedTrades:[]
+    },
+    diagnostics:{
+      source:String(context.source || '').trim().toLowerCase(),
+      surface:String(context.surface || '').trim().toLowerCase(),
+      reason:String(context.reason || '').trim()
+    },
+    contractFingerprint:`fallback_${String(item.ticker || '').trim().toUpperCase()}`
+  };
+}
+
+function buildCanonicalRenderModelsFromRecord(record, context = {}, uiDraftState = null){
+  const contract = buildCanonicalPlanVerdictContract(record, context);
+  if(window.PlanVerdictContract){
+    return {
+      contract,
+      reviewRenderModel:typeof window.PlanVerdictContract.buildReviewRenderModel === 'function'
+        ? window.PlanVerdictContract.buildReviewRenderModel(contract, uiDraftState)
+        : null,
+      trackRenderModel:typeof window.PlanVerdictContract.buildTrackRenderModel === 'function'
+        ? window.PlanVerdictContract.buildTrackRenderModel(contract)
+        : null,
+      trackLongPressModel:typeof window.PlanVerdictContract.buildTrackLongPressModel === 'function'
+        ? window.PlanVerdictContract.buildTrackLongPressModel(contract)
+        : null
+    };
+  }
+  const fallbackVerdict = normalizeGlobalVerdictKey(contract && contract.canonicalVerdict || 'watch');
+  const fallbackBucket = normalizeVisualBucketForPairing(contract && contract.canonicalVisualBucket || fallbackVerdict);
+  const fallbackLabel = globalVerdictLabel(fallbackVerdict || 'watch');
+  const fallbackNextAction = fallbackVerdict === 'entry'
+    ? 'Execute only if the trigger remains valid.'
+    : 'Wait for stronger confirmation before considering entry.';
+  const fallbackPrimaryReason = fallbackVerdict === 'entry'
+    ? 'Buyers are in control and the setup is ready to act on.'
+    : (fallbackVerdict === 'near_entry'
+      ? 'The setup is close, but confirmation still needs to improve.'
+      : 'Confirmation is still developing, so the setup stays on watch.');
+  const reviewRenderModel = {
+    ticker:String(contract && contract.ticker || ''),
+    canonicalVerdict:fallbackVerdict,
+    visualBucket:fallbackBucket,
+    tone:fallbackBucket,
+    badgeLabel:fallbackLabel,
+    headline:fallbackVerdict === 'entry' ? 'Entry Ready' : fallbackLabel,
+    nextAction:fallbackNextAction,
+    primaryReason:fallbackPrimaryReason,
+    planVisible:fallbackVerdict === 'entry',
+    planStatus:String(contract && contract.derivedStates && contract.derivedStates.planStatus || 'missing').trim().toLowerCase(),
+    setupScore:numericOrNull(contract && contract.derivedStates && contract.derivedStates.setupScore),
+    actionable:fallbackVerdict === 'entry' && !!(contract && contract.planAuthority && contract.planAuthority.stamped),
+    draftState:cloneData(uiDraftState, null),
+    contractFingerprint:String(contract && contract.contractFingerprint || '')
+  };
+  const trackRenderModel = {
+    ...reviewRenderModel,
+    visibleBucket:reviewRenderModel.visualBucket,
+    statusText:reviewRenderModel.headline,
+    actionLabel:reviewRenderModel.nextAction,
+    mainBlocker:reviewRenderModel.primaryReason,
+    planSummary:reviewRenderModel.planVisible ? 'Trade plan available.' : 'No actionable trade plan yet.',
+    inWatchlist:contract && contract.derivedStates && contract.derivedStates.inWatchlist === true
+  };
+  return {
+    contract,
+    reviewRenderModel,
+    trackRenderModel,
+    trackLongPressModel:{
+      ticker:reviewRenderModel.ticker,
+      canonicalVerdict:reviewRenderModel.canonicalVerdict,
+      header:reviewRenderModel.headline,
+      actionable:reviewRenderModel.actionable === true,
+      nextAction:reviewRenderModel.nextAction,
+      primaryReason:reviewRenderModel.primaryReason,
+      visualBucket:reviewRenderModel.visualBucket,
+      contractFingerprint:reviewRenderModel.contractFingerprint
+    }
+  };
 }
 
 function cloneData(value, fallback = null){
@@ -6118,6 +6869,76 @@ function safeDiagnosticClone(value, fallback = null){
   }catch(error){
     return fallback;
   }
+}
+
+function canonicalDisplayDivergenceSummary(contract, persistedPresentation, renderModel){
+  const safeContract = contract && typeof contract === 'object' ? contract : {};
+  const safePresentation = persistedPresentation && typeof persistedPresentation === 'object' ? persistedPresentation : null;
+  const safeRenderModel = renderModel && typeof renderModel === 'object' ? renderModel : {};
+  const persistedVerdict = normalizeGlobalVerdictKey(
+    safePresentation && (
+      safePresentation.canonicalVerdict
+      || safePresentation.finalVerdict
+      || safePresentation.renderedVerdict
+    )
+    || ''
+  );
+  const persistedBucket = normalizeVisualBucketForPairing(
+    safePresentation && (
+      safePresentation.sourceOfTruthVisualBucket
+      || safePresentation.visualBucket
+      || safePresentation.renderedBucket
+    )
+    || '',
+    persistedVerdict
+  );
+  const canonicalVerdict = normalizeGlobalVerdictKey(safeContract.canonicalVerdict || safeRenderModel.canonicalVerdict || 'watch');
+  const canonicalBucket = normalizeVisualBucketForPairing(
+    safeContract.canonicalVisualBucket
+    || safeRenderModel.visibleBucket
+    || safeRenderModel.visualBucket
+    || canonicalVerdict,
+    canonicalVerdict
+  );
+  return {
+    persistedPresentationAvailable:!!safePresentation,
+    contractFingerprint:String(safeContract.contractFingerprint || ''),
+    canonicalVerdict,
+    canonicalVisualBucket:canonicalBucket,
+    persistedVerdict,
+    persistedVisualBucket:persistedBucket,
+    verdictConflict:!!(safePresentation && persistedVerdict && canonicalVerdict && persistedVerdict !== canonicalVerdict),
+    bucketConflict:!!(safePresentation && persistedBucket && canonicalBucket && persistedBucket !== canonicalBucket)
+  };
+}
+
+function canonicalPersistenceInputDivergence(record, contract){
+  const item = record && typeof record === 'object' ? record : {};
+  const safeContract = contract && typeof contract === 'object' ? contract : {};
+  const inputs = safeContract.authoritativeInputs && typeof safeContract.authoritativeInputs === 'object'
+    ? safeContract.authoritativeInputs
+    : {};
+  const reviewInputs = inputs.reviewAuthority && typeof inputs.reviewAuthority === 'object'
+    ? inputs.reviewAuthority
+    : {};
+  const planInputs = inputs.planAuthority && typeof inputs.planAuthority === 'object'
+    ? inputs.planAuthority
+    : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const savedVerdict = normalizeOptionalGlobalVerdictKey(review.savedVerdict || '');
+  const canonicalVerdict = normalizeGlobalVerdictKey(safeContract.canonicalVerdict || 'watch');
+  return {
+    contractFingerprint:String(safeContract.contractFingerprint || ''),
+    savedReviewVerdict:String(reviewInputs.savedVerdict || '').trim(),
+    canonicalVerdict,
+    savedReviewConflict:!!(savedVerdict && canonicalVerdict && savedVerdict !== canonicalVerdict),
+    planStamped:!!(planInputs.authoritySource && planInputs.authorityVersion),
+    rawPlanHasConcreteValues:recordPlanHasConcreteValues(plan),
+    unstampedConcretePlan:recordPlanHasConcreteValues(plan) && !(planInputs.authoritySource && planInputs.authorityVersion),
+    persistedProjectionSnapshotPresent:!!persistedReviewProjectionSnapshot(item, 'diagnostic_divergence'),
+    submittedPaperTradeAt:String(planInputs.submittedPaperTradeAt || '').trim()
+  };
 }
 
 function chartImageDimensionsFromRef(ref){
@@ -7710,6 +8531,22 @@ function appendLifecycleHistory(record, entry){
   ].slice(-24);
 }
 
+function writeLifecycleState(record, payload = {}, context = {}){
+  if(!record) return;
+  const mode = String(context.mode || 'set').trim().toLowerCase();
+  if(mode === 'refresh'){
+    refreshLifecycleStage(
+      record,
+      payload.stage,
+      payload.tradingDays,
+      payload.reason,
+      payload.source
+    );
+    return;
+  }
+  setLifecycleStage(record, payload);
+}
+
 function setLifecycleStage(record, {stage, status, changedAt, expiresAt, expiryReason, reason, source, forceHistory = false, lockReason}){
   if(!record) return;
   const nextStage = String(stage || record.lifecycle.stage || '');
@@ -7825,16 +8662,26 @@ function hasAuthoritativeStopBreach(record, options = {}){
 function applyLifecycleStageFromPlan(record, source = 'plan'){
   if(!record) return;
   if(hasAuthoritativeLifecyclePlan(record)){
-    refreshLifecycleStage(record, 'planned', PLAN_EXPIRY_TRADING_DAYS, 'Valid explicit trade plan saved.', source);
+    writeLifecycleState(record, {
+      stage:'planned',
+      tradingDays:PLAN_EXPIRY_TRADING_DAYS,
+      reason:'Valid explicit trade plan saved.',
+      source
+    }, {mode:'refresh'});
     return;
   }
   if(record.review.manualReview){
-    refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Review saved without a valid plan yet.', 'review');
+    writeLifecycleState(record, {
+      stage:'reviewed',
+      tradingDays:REVIEW_EXPIRY_TRADING_DAYS,
+      reason:'Review saved without a valid plan yet.',
+      source:'review'
+    }, {mode:'refresh'});
   }
 }
 
 function lifecycleLabel(record){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const globalVerdict = resolveGlobalVerdict(item);
   const lifecycleState = (globalVerdict.allow_watchlist || globalVerdict.allow_plan) ? 'active' : 'dropped';
   const expiry = item.watchlist && item.watchlist.expiryAt ? ` | Expires ${item.watchlist.expiryAt}` : '';
@@ -7864,7 +8711,7 @@ function reevaluateTickerProgress(record){
     }
   }
   if(record.plan.invalidatedState){
-    setLifecycleStage(record, {
+    writeLifecycleState(record, {
       stage:'avoided',
       status:'inactive',
       changedAt:new Date().toISOString(),
@@ -7874,7 +8721,7 @@ function reevaluateTickerProgress(record){
       source:'trigger'
     });
   }else if(record.plan.missedState){
-    setLifecycleStage(record, {
+    writeLifecycleState(record, {
       stage:'expired',
       status:'stale',
       changedAt:new Date().toISOString(),
@@ -7884,7 +8731,7 @@ function reevaluateTickerProgress(record){
       source:'trigger'
     });
   }else if(record.plan.triggerState === 'triggered' && record.plan.planValidationState === 'valid' && record.plan.status === 'valid' && !(record.lifecycle.stage === 'planned' && record.lifecycle.status === 'active' && record.lifecycle.expiresAt)){
-    setLifecycleStage(record, {
+    writeLifecycleState(record, {
       stage:'planned',
       status:'active',
       changedAt:new Date().toISOString(),
@@ -7976,6 +8823,66 @@ function stampCanonicalTradePlan(record, context = {}){
   record.plan.writtenBy = String(context.writtenBy || 'applyPlanCandidateToRecord');
   record.plan.writtenAt = writtenAt;
   record.plan.candidateSource = candidateSource;
+}
+
+function writeSavedReviewAuthority(record, payload = {}, context = {}){
+  if(!record) return;
+  record.review = record.review && typeof record.review === 'object' ? record.review : {};
+  const has = key => Object.prototype.hasOwnProperty.call(payload, key);
+  if(has('manualReview')){
+    record.review.manualReview = payload.manualReview && typeof payload.manualReview === 'object'
+      ? cloneData(payload.manualReview, null)
+      : null;
+  }
+  if(has('savedSummary')){
+    record.review.savedSummary = String(payload.savedSummary || '');
+  }
+  if(has('savedScore')){
+    const score = numericOrNull(payload.savedScore);
+    record.review.savedScore = Number.isFinite(score) ? Number(score) : null;
+  }
+  if(has('savedVerdict')){
+    const rawVerdict = String(payload.savedVerdict || '').trim();
+    const normalizedVerdict = rawVerdict ? normalizeImportedStatus(rawVerdict, {preserveEmpty:true}) : '';
+    record.review.savedVerdict = normalizedVerdict;
+    if(context.clearProjectionWhenNonEntry !== false && normalizedVerdict && normalizedVerdict.trim().toLowerCase() !== 'entry' && !has('savedProjectionSnapshot')){
+      record.review.savedProjectionSnapshot = null;
+    }
+  }
+  if(has('savedProjectionSnapshot')){
+    record.review.savedProjectionSnapshot = payload.savedProjectionSnapshot && typeof payload.savedProjectionSnapshot === 'object'
+      ? cloneData(payload.savedProjectionSnapshot, null)
+      : null;
+  }
+  if(has('lastReviewedAt')){
+    record.review.lastReviewedAt = String(payload.lastReviewedAt || '');
+  }
+}
+
+function writeSubmittedPaperTradeState(record, payload = {}, context = {}){
+  if(!record) return;
+  const submittedAt = String(payload.submittedAt || context.submittedAt || new Date().toISOString());
+  record.plan = record.plan && typeof record.plan === 'object' ? record.plan : {};
+  if(payload.displayedPlan && String(payload.displayedPlan.status || '').trim().toLowerCase() === 'valid'){
+    applyPlanCandidateToRecord(record, {
+      entry:payload.displayedPlan.entry,
+      stop:payload.displayedPlan.stop,
+      firstTarget:payload.displayedPlan.target != null
+        ? payload.displayedPlan.target
+        : payload.displayedPlan.firstTarget
+    }, {
+      source:String(context.source || 'paper_trade_submit'),
+      reason:String(context.reason || 'preserve_submitted_paper_trade_plan'),
+      writtenBy:String(context.writtenBy || 'writeSubmittedPaperTradeState'),
+      updatedAt:submittedAt
+    });
+  }
+  record.plan.triggerState = String(payload.triggerState || 'triggered');
+  record.plan.planValidationState = String(payload.planValidationState || 'valid');
+  record.plan.status = String(payload.status || 'valid');
+  record.plan.tradeability = String(payload.tradeability || 'tradable');
+  record.plan.riskStatus = String(payload.riskStatus || 'fits_risk');
+  record.plan.submittedPaperTradeAt = submittedAt;
 }
 
 function applyPlanCandidateToRecord(record, planCandidate = {}, context = {}){
@@ -8144,7 +9051,7 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   }
   if(options.fromScanner && resolvedScannerVerdict){
     if(resolvedScannerVerdict === 'Avoid'){
-      setLifecycleStage(record, {
+      writeLifecycleState(record, {
         stage:'avoided',
         status:'inactive',
         changedAt:card.scannerUpdatedAt || new Date().toISOString(),
@@ -8154,7 +9061,12 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
         source:'scan'
       });
     }else{
-      refreshLifecycleStage(record, 'shortlisted', WATCHLIST_EXPIRY_TRADING_DAYS, 'Scanner shortlisted this setup.', 'scan');
+      writeLifecycleState(record, {
+        stage:'shortlisted',
+        tradingDays:WATCHLIST_EXPIRY_TRADING_DAYS,
+        reason:'Scanner shortlisted this setup.',
+        source:'scan'
+      }, {mode:'refresh'});
     }
   }
   record.review.notes = String(card.notes || record.review.notes || '');
@@ -8178,15 +9090,21 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   record.review.lastError = String(card.lastError || record.review.lastError || '');
   record.review.manualReview = card.manualReview && typeof card.manualReview === 'object' ? cloneData(card.manualReview, null) : record.review.manualReview;
   if(card.manualReview && typeof card.manualReview === 'object'){
-    const savedVerdict = String(record.review.savedVerdict || '').trim();
-    record.review.savedVerdict = savedVerdict ? normalizeImportedStatus(savedVerdict) : '';
-    record.review.savedSummary = String(card.manualReview.summary || record.review.savedSummary || '');
-    record.review.savedScore = numericOrNull(card.manualReview.score ?? record.review.savedScore);
+    writeSavedReviewAuthority(record, {
+      savedVerdict:String(record.review.savedVerdict || '').trim(),
+      savedSummary:String(card.manualReview.summary || record.review.savedSummary || ''),
+      savedScore:numericOrNull(card.manualReview.score ?? record.review.savedScore)
+    }, {clearProjectionWhenNonEntry:false});
   }
   record.review.source = String(card.source || record.review.source || 'manual');
   record.review.cardOpen = options.cardOpen === true ? true : (options.cardOpen === false ? false : !!(record.review.cardOpen || options.fromCards));
   if(options.fromCards && record.review.cardOpen){
-    refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
+    writeLifecycleState(record, {
+      stage:'reviewed',
+      tradingDays:REVIEW_EXPIRY_TRADING_DAYS,
+      reason:'Ticker opened in Setup Review.',
+      source:'review'
+    }, {mode:'refresh'});
   }
   record.meta.marketStatus = String(card.marketStatus || record.meta.marketStatus || state.marketStatus || '');
   record.meta.updatedAt = String(card.updatedAt || record.meta.updatedAt || new Date().toISOString());
@@ -8238,7 +9156,7 @@ function mergeWatchlistIntoRecord(record, entry){
   record.watchlist.expiryAfterTradingDays = normalized.expiryAfterTradingDays;
   record.watchlist.expiryAt = tradingDaysFrom(normalized.dateAdded, normalized.expiryAfterTradingDays);
   record.watchlist.updatedAt = `${normalized.dateAdded}T12:00:00.000Z`;
-  setLifecycleStage(record, {
+  writeLifecycleState(record, {
     stage:'watchlist',
     status:'active',
     changedAt:`${normalized.dateAdded}T12:00:00.000Z`,
@@ -8263,7 +9181,7 @@ function mergeDiaryRecordIntoRecord(record, tradeRecord){
   record.diary.hasDiary = !!record.diary.records.length;
   record.diary.lastOutcomeAt = String(normalized.date || record.diary.lastOutcomeAt || '');
   const lifecycle = deriveDiaryLifecycleState(normalized);
-  setLifecycleStage(record, {
+  writeLifecycleState(record, {
     stage:lifecycle.stage,
     status:lifecycle.status,
     changedAt:lifecycle.changedAt,
@@ -8368,7 +9286,7 @@ function tickerRecordToLegacyCard(record){
 }
 
 function tickerRecordToWatchlistEntry(record){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   if(!item.watchlist.inWatchlist) return null;
   const expiryAfterTradingDays = item.watchlist.expiryAfterTradingDays || 5;
   return normalizeWatchlistEntry({
@@ -8406,20 +9324,28 @@ function createWatchlistProjectionPassCache(){
 }
 
 function buildFinalStatePassCacheKey(record, options = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = normalizeTickerRecordReadOnly(record || {});
   const ticker = normalizeTicker(item && item.ticker || '');
-  const recordUpdatedAt = String(
-    item && (
-      item.updatedAt
-      || (item.meta && item.meta.updatedAt)
-      || (item.scan && item.scan.updatedAt)
-      || ''
-    )
-  );
-  const planUpdatedAt = String(item && item.plan && item.plan.updatedAt || '');
   const contextToken = String(options && options.context || '');
   const finalVerdictToken = String(options && options.finalVerdict || '');
-  return `${ticker}|${recordUpdatedAt}|${planUpdatedAt}|${contextToken}|${finalVerdictToken}`;
+  const canonicalInputsFingerprint = [
+    String(item.scan && (item.scan.resolvedVerdict || item.scan.verdict) || ''),
+    String(item.setup && item.setup.structureState || ''),
+    String(item.setup && item.setup.structureEligibility || ''),
+    String(item.setup && item.setup.setupLocationState || ''),
+    String(item.setup && item.setup.pullbackZone || ''),
+    String(item.setup && item.setup.priceabilityState || ''),
+    String(item.setup && item.setup.bounceState || ''),
+    String(item.setup && item.setup.stabilisationState || ''),
+    String(item.plan && item.plan.status || ''),
+    String(item.plan && item.plan.source || ''),
+    String(item.plan && item.plan.authoritySource || ''),
+    String(item.plan && item.plan.triggerState || ''),
+    String((item.plan && item.plan.entry) ?? ''),
+    String((item.plan && item.plan.stop) ?? ''),
+    String((item.plan && (item.plan.firstTarget ?? item.plan.target)) ?? '')
+  ].join('|');
+  return `${ticker}|${canonicalInputsFingerprint}|${contextToken}|${finalVerdictToken}`;
 }
 
 function getFinalStateForPass(record, options = {}, passCache = null){
@@ -8468,29 +9394,51 @@ function warmWatchlistSimplifiedStatePassCache(records = [], passCache = null, o
 }
 
 function buildWatchlistSimplifiedStateCacheKey(record, options = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record || {})
+    : (record && typeof record === 'object' ? record : {});
   const ticker = normalizeTicker(item.ticker || '');
-  const watchlistUpdatedAt = String(item.watchlist && (item.watchlist.updatedAt || item.watchlist.changedAt || item.watchlist.lastUpdatedAt) || '');
-  const lifecycleChangedAt = String(item.lifecycle && (item.lifecycle.changedAt || item.lifecycle.updatedAt) || '');
-  const scanUpdatedAt = String(item.scan && item.scan.updatedAt || '');
-  const reviewUpdatedAt = String(item.review && (item.review.updatedAt || item.review.lastReviewedAt) || '');
-  const planUpdatedAt = String(item.plan && item.plan.updatedAt || '');
   const surface = String(options.surface || 'track');
   const renderPass = String(options.renderPass || options.renderSource || options.source || '');
+  const canonicalInputsFingerprint = typeof resolvedStateBundleInputFingerprint === 'function'
+    ? resolvedStateBundleInputFingerprint(item, {
+      surface,
+      source:options.source || 'watchlist_render',
+      reason:options.reason || 'watchlist_render'
+    })
+    : [
+      normalizeTicker(item.ticker || ''),
+      String(item.watchlist && item.watchlist.inWatchlist === true),
+      String(item.scan && (item.scan.resolvedVerdict || item.scan.verdict) || ''),
+      String(item.setup && item.setup.structureState || ''),
+      String(item.setup && item.setup.structureEligibility || ''),
+      String(item.setup && item.setup.setupLocationState || ''),
+      String(item.setup && item.setup.pullbackZone || ''),
+      String(item.setup && item.setup.priceabilityState || ''),
+      String(item.setup && item.setup.bounceState || ''),
+      String(item.setup && item.setup.stabilisationState || ''),
+      String(item.plan && item.plan.status || ''),
+      String(item.plan && item.plan.source || ''),
+      String(item.plan && item.plan.authoritySource || ''),
+      String(item.plan && item.plan.triggerState || ''),
+      String((item.plan && item.plan.entry) ?? ''),
+      String((item.plan && item.plan.stop) ?? ''),
+      String((item.plan && (item.plan.firstTarget ?? item.plan.target)) ?? ''),
+      String(item.review && item.review.savedVerdict || ''),
+      String(item.review && item.review.lastReviewedAt || '')
+    ].join('|');
   return [
     ticker,
-    watchlistUpdatedAt,
-    lifecycleChangedAt,
-    scanUpdatedAt,
-    reviewUpdatedAt,
-    planUpdatedAt,
+    canonicalInputsFingerprint,
     surface,
     renderPass
   ].join('|');
 }
 
 function resolveSimplifiedStateForWatchlistPresentation(record, options = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record || {})
+    : (record && typeof record === 'object' ? record : {});
   const explicitSimplified = options.simplifiedState && typeof options.simplifiedState === 'object'
     ? options.simplifiedState
     : null;
@@ -8544,7 +9492,127 @@ function resolveSimplifiedStateForWatchlistPresentation(record, options = {}){
 }
 
 function buildSharedReviewTrackPresentation(record, options = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record || {})
+    : (record && typeof record === 'object' ? record : {});
+  const normalizeProjectionSource = typeof normalizeReviewProjectionSource === 'function'
+    ? normalizeReviewProjectionSource
+    : ((source) => String(source || '').trim().toLowerCase());
+  const numericValueOrNull = typeof numericOrNull === 'function'
+    ? numericOrNull
+    : ((value) => {
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    });
+  const normalizeVerdictKey = typeof normalizeGlobalVerdictKey === 'function'
+    ? normalizeGlobalVerdictKey
+    : ((value) => {
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(['watch', 'near_entry', 'entry', 'avoid'].includes(safe)) return safe;
+      if(safe.indexOf('near') >= 0 && safe.indexOf('entry') >= 0) return 'near_entry';
+      if(safe.indexOf('entry') >= 0) return 'entry';
+      if(safe.indexOf('avoid') >= 0) return 'avoid';
+      return 'watch';
+    });
+  const canPromoteSharedProjection = typeof sharedProjectionCanPromoteEntry === 'function'
+    ? sharedProjectionCanPromoteEntry
+    : ((snapshot, projectionSource, _record, promoteOptions = {}) => {
+      const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+      if(!safeSnapshot || promoteOptions.allowTrackProjection !== true) return false;
+      const source = String(projectionSource || '').trim().toLowerCase();
+      return ['clicked_card_snapshot', 'track_projection_updated'].includes(source)
+        && normalizeVerdictKey(
+          safeSnapshot.canonicalVerdict
+          || safeSnapshot.finalVerdict
+          || safeSnapshot.renderedVerdict
+          || ''
+        ) === 'entry';
+    });
+  const normalizeBucket = typeof normalizeVisualBucketForPairing === 'function'
+    ? normalizeVisualBucketForPairing
+    : ((bucket, canonicalVerdict = '') => {
+      const safe = String(bucket || '').trim().toLowerCase();
+      if(['entry', 'near_entry', 'monitor', 'diminishing', 'avoid'].includes(safe)) return safe;
+      const canonical = normalizeVerdictKey(canonicalVerdict);
+      if(canonical === 'entry') return 'entry';
+      if(canonical === 'near_entry') return 'near_entry';
+      if(canonical === 'avoid') return 'avoid';
+      return 'monitor';
+    });
+  const verdictLabel = typeof globalVerdictLabel === 'function'
+    ? globalVerdictLabel
+    : ((verdict) => {
+      const safe = normalizeVerdictKey(verdict);
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    });
+  const resolveVisibleVerdict = typeof resolveCanonicalVisibleVerdictKey === 'function'
+    ? resolveCanonicalVisibleVerdictKey
+    : ((_item, context = {}) => normalizeVerdictKey(
+      context.simplifiedState && context.simplifiedState.canonicalVerdict
+      || context.globalVerdict && (context.globalVerdict.finalVerdict || context.globalVerdict.final_verdict)
+      || 'watch'
+    ));
+  const resolveTrackVisibleModelSafe = typeof resolveTrackCardVisibleModel === 'function'
+    ? resolveTrackCardVisibleModel
+    : ((_item, state = {}) => {
+      const verdict = normalizeVerdictKey(state.canonicalVerdict || 'watch');
+      const bucket = normalizeBucket(
+        state.visibleBucket
+        || state.visualBucket
+        || (verdict === 'entry' ? 'entry' : (verdict === 'near_entry' ? 'monitor' : 'monitor')),
+        verdict
+      );
+      return {
+        visibleBucket:bucket,
+        tone:String(state.tone || bucket || 'monitor').trim().toLowerCase() || 'monitor',
+        headline:verdict === 'entry' ? 'Entry Ready' : (verdict === 'near_entry' ? 'Near Entry' : 'Watch'),
+        badgeLabel:verdict === 'entry' ? 'Entry' : (verdict === 'near_entry' ? 'Near Entry' : 'Watch'),
+        nextAction:verdict === 'entry'
+          ? 'Execute only if the trigger remains valid.'
+          : 'Wait for stronger confirmation before considering entry.',
+        primaryReason:'',
+        mainBlocker:String(state.mainBlocker || ''),
+        planVisible:state.planVisible === true,
+        planStatus:String(state.planStatus || 'missing').trim().toLowerCase() || 'missing',
+        planSummary:state.planVisible === true ? 'Trade plan available.' : 'No actionable trade plan yet.'
+      };
+    });
+  const derivePlanStateSafe = typeof deriveCurrentPlanState === 'function'
+    ? deriveCurrentPlanState
+    : ((entry, stop, firstTarget, currency = '') => {
+      const numericEntry = numericValueOrNull(entry);
+      const numericStop = numericValueOrNull(stop);
+      const numericTarget = numericValueOrNull(firstTarget);
+      return {
+        entry:numericEntry,
+        stop:numericStop,
+        target:numericTarget,
+        firstTarget:numericTarget,
+        quoteCurrency:String(currency || '').trim().toUpperCase(),
+        status:Number.isFinite(numericEntry) && Number.isFinite(numericStop) && Number.isFinite(numericTarget) ? 'valid' : 'missing',
+        tradeability:'',
+        rewardRisk:null,
+        riskFit:null,
+        capitalFit:null
+      };
+    });
+  const applyPlanGate = typeof applySetupConfirmationPlanGate === 'function'
+    ? applySetupConfirmationPlanGate
+    : ((_item, displayedPlan) => displayedPlan);
+  const resolveSetupScore = typeof setupScoreForRecord === 'function'
+    ? setupScoreForRecord
+    : ((sourceRecord) => {
+      const source = sourceRecord && typeof sourceRecord === 'object' ? sourceRecord : {};
+      const reviewScore = numericValueOrNull(source.review && source.review.savedScore);
+      const setupScore = numericValueOrNull(source.setup && source.setup.score);
+      const scanScore = numericValueOrNull(source.scan && source.scan.score);
+      return Number.isFinite(reviewScore) ? reviewScore : (Number.isFinite(setupScore) ? setupScore : (Number.isFinite(scanScore) ? scanScore : 0));
+    });
   const simplifiedState = options.simplifiedState && typeof options.simplifiedState === 'object'
     ? options.simplifiedState
     : resolveSimplifiedStateForSurface(item, options.surface || 'track', {
@@ -8558,38 +9626,351 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object'
     ? options.globalVerdict
     : resolveGlobalVerdict(item);
+  const renderModels = typeof buildCanonicalRenderModelsFromRecord === 'function'
+    ? buildCanonicalRenderModelsFromRecord(item, {
+      surface:String(options.surface || 'track'),
+      source:String(options.source || 'shared_presentation'),
+      reason:String(options.reason || 'shared_presentation'),
+      derivedStates:simplifiedState && simplifiedState.debug && simplifiedState.debug.derivedStates
+        ? simplifiedState.debug.derivedStates
+        : analysisDerivedStatesFromRecord(item),
+      effectivePlan:effectivePlanForRecord(item, {allowScannerFallback:true}),
+      displayedPlan:applyPlanGate(item, derivePlanStateSafe(
+        item.plan && item.plan.entry,
+        item.plan && item.plan.stop,
+        item.plan && item.plan.firstTarget,
+        item.marketData && item.marketData.currency
+      )),
+      resolvedContract:globalVerdict,
+      globalVerdict,
+      lifecycleSnapshot,
+      setupScore:resolveSetupScore(item)
+    })
+    : null;
+  const planVerdictContract = renderModels && renderModels.contract ? renderModels.contract : null;
+  const planVerdictContractApi = typeof window !== 'undefined' && window && window.PlanVerdictContract
+    ? window.PlanVerdictContract
+    : null;
+  const trackRenderModel = planVerdictContractApi && typeof planVerdictContractApi.buildTrackRenderModel === 'function'
+    ? planVerdictContractApi.buildTrackRenderModel(planVerdictContract)
+    : (renderModels && renderModels.trackRenderModel ? renderModels.trackRenderModel : null);
+  const trackLongPressModel = renderModels && renderModels.trackLongPressModel ? renderModels.trackLongPressModel : null;
   const sourceOfTruth = String(options.sourceOfTruth || 'live_recomputed_fallback');
   const safeUiState = typeof uiState !== 'undefined' && uiState && typeof uiState === 'object'
     ? uiState
     : {};
+  const explicitProjectionSnapshot = options.projectionSnapshot && typeof options.projectionSnapshot === 'object'
+    ? options.projectionSnapshot
+    : null;
   const activeProjectionSnapshot = safeUiState.activeReviewSourceProjectionSnapshot
     && typeof safeUiState.activeReviewSourceProjectionSnapshot === 'object'
     && normalizeTicker(safeUiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || '')
       ? safeUiState.activeReviewSourceProjectionSnapshot
       : null;
-  const activeProjectionSource = String(
-    safeUiState.activeReviewProjectionSource
-    || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
-  ).trim().toLowerCase();
-  const projectionAuthority = String(options.surface || '').trim().toLowerCase() !== 'track'
-    && hasPresentationAuthoritySnapshot(activeProjectionSnapshot, item.ticker || '')
-    && (activeProjectionSource === 'clicked_card_snapshot' || activeProjectionSource === 'track_projection_updated');
+  const effectiveProjectionSnapshot = explicitProjectionSnapshot || activeProjectionSnapshot;
+  const explicitProjectionSource = String(options.projectionSource || '').trim().toLowerCase();
+  const activeProjectionSource = normalizeProjectionSource(
+    String(
+      safeUiState.activeReviewProjectionSource
+      || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+    ).trim().toLowerCase(),
+    activeProjectionSnapshot
+  );
+  const effectiveProjectionSource = explicitProjectionSource || activeProjectionSource;
+  const projectionAuthority = canPromoteSharedProjection(
+    effectiveProjectionSnapshot,
+    effectiveProjectionSource,
+    item,
+    {allowTrackProjection:options.allowTrackProjection === true}
+  );
   const projectionCanonicalVerdict = projectionAuthority
-    ? normalizeGlobalVerdictKey(
-      activeProjectionSnapshot.canonicalVerdict
-      || activeProjectionSnapshot.finalVerdict
-      || activeProjectionSnapshot.renderedVerdict
+    ? normalizeVerdictKey(
+      effectiveProjectionSnapshot.canonicalVerdict
+      || effectiveProjectionSnapshot.finalVerdict
+      || effectiveProjectionSnapshot.renderedVerdict
       || ''
     )
     : '';
   const projectionActionGuidance = projectionAuthority
     ? String(
-      activeProjectionSnapshot.actionGuidance
-      || activeProjectionSnapshot.actionLabel
-      || activeProjectionSnapshot.actionShortLabel
-      || ''
+      effectiveProjectionSnapshot.actionGuidance
+      || effectiveProjectionSnapshot.actionLabel
+      || effectiveProjectionSnapshot.actionShortLabel
+      || 'Execute only if the trigger remains valid.'
     ).trim()
     : '';
+  /*
+    Render convergence rule:
+    Track shared presentation is a formatter over the canonical simplified/visible model.
+    It must not independently promote/demote verdicts from lifecycle, persisted presentation,
+    or display-only caches after canonical resolution has already completed.
+  */
+  const canonicalVerdict = resolveVisibleVerdict(item, {
+    simplifiedState,
+    globalVerdict,
+    displayedPlan:applyPlanGate(item, derivePlanStateSafe(
+      item.plan && item.plan.entry,
+      item.plan && item.plan.stop,
+      item.plan && item.plan.firstTarget,
+      item.marketData && item.marketData.currency
+    ))
+  });
+  const watchlistDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
+    ? item.watchlist.debug
+    : {};
+  const simplifiedVerdictForShared = normalizeVerdictKey(
+    simplifiedState.canonicalVerdict
+    || simplifiedState.finalVerdict
+    || simplifiedState.final_verdict
+    || 'watch'
+  );
+  const structuralAliveAtRefresh = String(
+    lifecycleSnapshot.structural_alive_at_refresh
+    || watchlistDebug.structural_alive_at_refresh
+    || ''
+  ).trim().toLowerCase() === 'true';
+  const avoidAllowedByStructureGate = String(
+    lifecycleSnapshot.avoid_allowed_by_structure_gate
+    || watchlistDebug.avoid_allowed_by_structure_gate
+    || ''
+  ).trim().toLowerCase() === 'true';
+  const explicitInvalidationReason = String(
+    lifecycleSnapshot.explicit_invalidation_reason
+    || watchlistDebug.explicit_invalidation_reason
+    || globalVerdict.explicit_invalidation_reason
+    || ''
+  ).trim().toLowerCase();
+  const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
+  const baseVerdict = normalizeVerdictKey(
+    globalVerdict.base_verdict
+    || watchlistDebug.baseVerdict
+    || ''
+  );
+  const resolverVerdict = normalizeVerdictKey(
+    globalVerdict.final_verdict
+    || globalVerdict.finalVerdict
+    || watchlistDebug.finalVerdict
+    || ''
+  );
+  const softTrackedWatchSuppression = !!(
+    item.watchlist
+    && item.watchlist.inWatchlist
+    && simplifiedVerdictForShared === 'avoid'
+    && structuralAliveAtRefresh
+    && !avoidAllowedByStructureGate
+    && !hasExplicitInvalidation
+    && ['watch', 'monitor'].includes(baseVerdict || resolverVerdict)
+  );
+  const lifecycleVerdict = normalizeVerdictKey(
+    lifecycleSnapshot.state
+    || lifecycleSnapshot.status
+    || ''
+  );
+  const structureState = String(
+    simplifiedState.structureState
+    || globalVerdict.structure_state
+    || ''
+  ).trim().toLowerCase();
+  const structureEligibility = String(
+    simplifiedState.structureEligibility
+    || globalVerdict.structure_eligibility
+    || ''
+  ).trim().toLowerCase();
+  const explicitInvalidationAuthorityCode = typeof resolveStructuredExplicitInvalidationAuthorityCode === 'function'
+    ? resolveStructuredExplicitInvalidationAuthorityCode({
+      explicit_invalidation_reason_code:lifecycleSnapshot.explicit_invalidation_reason_code,
+      explicitInvalidationReasonCode:lifecycleSnapshot.explicitInvalidationReasonCode,
+      reasonCode:lifecycleSnapshot.reasonCode,
+      reason_code:lifecycleSnapshot.reason_code
+    }) || resolveStructuredExplicitInvalidationAuthorityCode({
+      explicit_invalidation_reason_code:watchlistDebug.explicit_invalidation_reason_code,
+      explicitInvalidationReasonCode:watchlistDebug.explicitInvalidationReasonCode,
+      reasonCode:watchlistDebug.reasonCode,
+      reason_code:watchlistDebug.reason_code
+    }) || resolveStructuredExplicitInvalidationAuthorityCode(item.plan || {})
+    : '';
+  const planBlockedReasonCode = String(
+    item.plan && (
+      item.plan.blockedReasonCode
+      || item.plan.blocked_reason_code
+      || item.plan.invalidatedState
+      || item.plan.missedState
+    )
+    || ''
+  ).trim().toLowerCase();
+  const softReadinessOnlyDemotion = !!(
+    globalVerdict
+    && globalVerdict.contractDiagnostics
+    && globalVerdict.contractDiagnostics.softReadinessOnlyDemotion === true
+  );
+  const preserveTrackedLifecycleCanonicalVerdict = !!(
+    item.watchlist
+    && item.watchlist.inWatchlist
+    && softReadinessOnlyDemotion
+    && ['entry','near_entry'].includes(lifecycleVerdict)
+    && simplifiedVerdictForShared === 'watch'
+    && !(
+      ['invalidated','missed','target_too_close','broken_structure'].includes(explicitInvalidationAuthorityCode)
+      || ['invalidated','missed','target_too_close','broken_structure','terminal','expired'].includes(planBlockedReasonCode)
+      || globalVerdict.terminal_avoid_applied === true
+      || globalVerdict.rejected_by_viability_gate === true
+      || structureEligibility === 'broken'
+      || ['broken','failed'].includes(structureState)
+    )
+  );
+  const effectiveCanonicalVerdict = softTrackedWatchSuppression
+    ? 'watch'
+    : (preserveTrackedLifecycleCanonicalVerdict
+      ? lifecycleVerdict
+      : normalizeVerdictKey(
+    projectionCanonicalVerdict
+    || (trackRenderModel && trackRenderModel.canonicalVerdict
+      ? trackRenderModel.canonicalVerdict
+      : canonicalVerdict)
+  ));
+  const visibleModel = resolveTrackVisibleModelSafe(item, {
+    ...simplifiedState,
+    canonicalVerdict:effectiveCanonicalVerdict,
+    visualBucket:effectiveCanonicalVerdict === 'entry'
+      ? 'entry'
+      : (effectiveCanonicalVerdict === 'near_entry'
+        ? 'near_entry'
+        : (softTrackedWatchSuppression ? 'diminishing' : simplifiedState.visualBucket)),
+    tone:effectiveCanonicalVerdict === 'entry'
+      ? 'entry'
+      : (effectiveCanonicalVerdict === 'near_entry'
+        ? 'near_entry'
+        : (softTrackedWatchSuppression ? 'diminishing' : simplifiedState.tone))
+  });
+  const visualBucket = normalizeBucket(
+    (effectiveCanonicalVerdict === 'entry'
+      ? 'entry'
+      : (effectiveCanonicalVerdict === 'near_entry'
+        ? 'near_entry'
+        : (softTrackedWatchSuppression ? 'diminishing' : '')))
+    || (trackRenderModel && (trackRenderModel.visibleBucket || trackRenderModel.visualBucket))
+    || visibleModel.visibleBucket
+    || simplifiedState.visualBucket
+    || simplifiedState.presentationBucket
+    || 'monitor'
+  );
+  const tone = String(
+    (trackRenderModel && trackRenderModel.tone)
+    || visibleModel.tone
+    || simplifiedState.tone
+    || visualBucket
+    || 'monitor'
+  ).trim().toLowerCase() || 'monitor';
+  const headline = String(projectionAuthority
+    ? 'Entry Ready'
+    : preserveTrackedLifecycleCanonicalVerdict
+      ? verdictLabel(effectiveCanonicalVerdict || 'watch')
+    : (
+      (trackRenderModel && (trackRenderModel.headline || trackRenderModel.statusText))
+      || (effectiveCanonicalVerdict === 'entry'
+        ? 'Entry Ready'
+        : (effectiveCanonicalVerdict === 'near_entry'
+          ? 'Near Entry'
+          : String(visibleModel.headline || visibleModel.badgeLabel || verdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))
+    )
+  ).trim();
+  const nextAction = String(
+    projectionActionGuidance
+    || (preserveTrackedLifecycleCanonicalVerdict
+      ? verdictLabel(effectiveCanonicalVerdict || 'watch')
+      : '')
+    || (trackRenderModel && (trackRenderModel.nextAction || trackRenderModel.actionLabel))
+    || (effectiveCanonicalVerdict === 'entry'
+      ? 'Execute only if the trigger remains valid.'
+      : (effectiveCanonicalVerdict === 'near_entry'
+        ? 'Wait for stronger confirmation before considering entry.'
+        : String(visibleModel.nextAction || '').trim()))
+  ).trim();
+  const mainBlocker = String(simplifiedState.mainBlocker || visibleModel.mainBlocker || globalVerdict.reason || '').trim();
+  const planVisible = trackRenderModel && typeof trackRenderModel.planVisible === 'boolean'
+    ? trackRenderModel.planVisible === true
+    : (effectiveCanonicalVerdict === 'entry'
+      ? true
+      : (visibleModel.planVisible === true || simplifiedState.planVisible === true));
+  const planStatus = String(
+    (trackRenderModel && trackRenderModel.planStatus)
+    || visibleModel.planStatus
+    || simplifiedState.planStatus
+    || ''
+  ).trim().toLowerCase() || 'missing';
+  return {
+    canonicalVerdict:effectiveCanonicalVerdict,
+    finalVerdict:effectiveCanonicalVerdict,
+    visualBucket,
+    tone,
+    badgeLabel:String(projectionAuthority
+      ? 'Entry'
+      : preserveTrackedLifecycleCanonicalVerdict
+        ? verdictLabel(effectiveCanonicalVerdict || 'watch')
+      : (
+        (trackRenderModel && trackRenderModel.badgeLabel)
+        || (effectiveCanonicalVerdict === 'entry'
+          ? 'Entry'
+          : (effectiveCanonicalVerdict === 'near_entry'
+            ? 'Near Entry'
+            : String(visibleModel.badgeLabel || simplifiedState.badgeLabel || verdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))
+      )
+    ).trim(),
+    actionLabel:String(
+    projectionActionGuidance
+    || (preserveTrackedLifecycleCanonicalVerdict
+      ? verdictLabel(effectiveCanonicalVerdict || 'watch')
+      : '')
+    || (trackRenderModel && (trackRenderModel.actionLabel || trackRenderModel.nextAction))
+    || (effectiveCanonicalVerdict === 'entry'
+      ? 'Execute only if the trigger remains valid.'
+        : (effectiveCanonicalVerdict === 'near_entry'
+        ? 'Wait for stronger confirmation before considering entry.'
+          : String(visibleModel.nextAction || simplifiedState.actionLabel || verdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))
+    ).trim(),
+    headline,
+    statusText:headline,
+    primaryReason:String(projectionAuthority
+      ? 'Buyers are in control and the setup is ready to act on.'
+      : (
+        (trackRenderModel && trackRenderModel.primaryReason)
+        || (preserveTrackedLifecycleCanonicalVerdict
+          ? (effectiveCanonicalVerdict === 'entry'
+            ? 'Buyers are in control and the setup is ready to act on.'
+            : 'The setup is close, but confirmation still needs to improve.')
+          : '')
+        || (effectiveCanonicalVerdict === 'entry'
+          ? 'Buyers are in control and the setup is ready to act on.'
+          : (effectiveCanonicalVerdict === 'near_entry'
+            ? String(visibleModel.primaryReason || 'The setup is close, but confirmation still needs to improve.').trim()
+            : String(visibleModel.primaryReason || mainBlocker || '').trim()))
+      )
+    ).trim(),
+    mainBlocker,
+    nextAction,
+    planVisible,
+    planStatus,
+    planSummary:String(
+      (trackRenderModel && trackRenderModel.planSummary)
+      || (effectiveCanonicalVerdict === 'entry'
+        ? 'Trade plan available.'
+        : (visibleModel.planSummary || mainBlocker || 'No actionable trade plan yet.'))
+    ).trim(),
+    setupScore:Number((trackRenderModel && trackRenderModel.setupScore) || resolveSetupScore(item) || 0),
+    lifecycleState:normalizeGlobalVerdictKey((options.lifecycleSnapshot && options.lifecycleSnapshot.state) || '') || effectiveCanonicalVerdict,
+    lifecycleLabel:String((options.lifecycleSnapshot && options.lifecycleSnapshot.label) || verdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim(),
+    lifecycleStatus:String((options.lifecycleSnapshot && options.lifecycleSnapshot.status) || '').trim(),
+    sourceOfTruth:String(options.sourceOfTruth || 'live_recomputed_fallback'),
+    sourceTrace:{
+      source:String(options.source || 'shared_presentation'),
+      reason:String(options.reason || 'shared_presentation'),
+      surface:String(options.surface || 'track'),
+      canonicalModel:'buildTrackRenderModel',
+      contractFingerprint:String(planVerdictContract && planVerdictContract.contractFingerprint || '')
+    },
+    longPressModel:trackLongPressModel || null
+  };
+  {
   const watchlistDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
     ? item.watchlist.debug
     : {};
@@ -8722,17 +10103,18 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && simplifiedVerdict === 'near_entry'
     && trackedLifecycleHardStructuredBlock !== true
   );
+  const authoritativeProjectionEntry = false;
   const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
   const canonicalVerdict = suppressAvoidForTrackedWatch
     ? 'watch'
-    : (preserveReviewSoftDemotionOnWatchlistSeed
-      ? 'near_entry'
-      : (untrackedSoftReadinessReviewDemotion
-      ? 'near_entry'
-      : (preserveTrackedEntryAuthority
+    : (preserveTrackedEntryAuthority
       ? 'entry'
-      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict))));
-  const effectiveCanonicalVerdict = projectionCanonicalVerdict || canonicalVerdict;
+      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict));
+  const effectiveCanonicalVerdict = preserveReviewSoftDemotionOnWatchlistSeed
+    ? 'near_entry'
+    : (untrackedSoftReadinessReviewDemotion
+      ? 'near_entry'
+      : canonicalVerdict);
   const simplifiedBucket = normalizeVisualBucketForPairing(
     simplifiedState.visualBucket
     || simplifiedState.presentationBucket
@@ -8790,7 +10172,6 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const mainBlocker = suppressAvoidForTrackedWatch
     ? 'Trend is extended away from support - keep on monitor until price resets or repairs.'
     : String(simplifiedState.mainBlocker || '').trim();
-  const authoritativeProjectionEntry = projectionAuthority && projectionCanonicalVerdict === 'entry';
   const canonicalSoftReadinessLabel = effectiveCanonicalVerdict === 'near_entry'
     ? 'Near Entry'
     : globalVerdictLabel(effectiveCanonicalVerdict || 'watch');
@@ -8800,9 +10181,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const canonicalSoftReadinessHeadline = effectiveCanonicalVerdict === 'near_entry'
     ? 'Near Entry'
     : canonicalSoftReadinessLabel;
-  const finalBadgeLabel = authoritativeProjectionEntry
-    ? 'Entry'
-    : (untrackedSoftReadinessReviewDemotion
+  const finalBadgeLabel = untrackedSoftReadinessReviewDemotion
       ? canonicalSoftReadinessLabel
     : (preserveTrackedLifecycleLabels
       ? String(globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
@@ -8810,10 +10189,8 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       ? 'Entry'
     : (suppressingTrackedAvoid
     ? 'Watch'
-      : String(simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))));
-  const finalActionLabel = authoritativeProjectionEntry
-    ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
-    : (untrackedSoftReadinessReviewDemotion
+      : String(simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim())));
+  const finalActionLabel = untrackedSoftReadinessReviewDemotion
       ? canonicalSoftReadinessAction
     : (preserveTrackedLifecycleLabels
       ? String(globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
@@ -8821,39 +10198,31 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       ? 'Execute only if the trigger remains valid.'
     : (suppressingTrackedAvoid
     ? (visualBucket === 'diminishing' ? 'Diminishing' : globalVerdictLabel(effectiveCanonicalVerdict || 'watch'))
-      : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))));
-  const headline = authoritativeProjectionEntry
-    ? 'Entry Ready'
-    : (untrackedSoftReadinessReviewDemotion
+      : String(simplifiedState.actionLabel || simplifiedState.badgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim())));
+  const headline = untrackedSoftReadinessReviewDemotion
     ? canonicalSoftReadinessHeadline
     : (preserveTrackedLifecycleLabels
     ? String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()
     : (effectiveCanonicalVerdict === 'entry'
     ? String('Entry Ready' || 'Entry').trim()
-    : String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim())));
-  const primaryReason = authoritativeProjectionEntry
+    : String(finalActionLabel || finalBadgeLabel || globalVerdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()));
+  const primaryReason = canonicalVerdict === 'entry'
     ? 'Buyers are in control and the setup is ready to act on.'
-    : (canonicalVerdict === 'entry'
-    ? 'Buyers are in control and the setup is ready to act on.'
-    : (mainBlocker || String(globalVerdict.reason || '').trim()));
-  const nextAction = authoritativeProjectionEntry
-    ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
-    : (untrackedSoftReadinessReviewDemotion
+    : (mainBlocker || String(globalVerdict.reason || '').trim());
+  const nextAction = untrackedSoftReadinessReviewDemotion
     ? canonicalSoftReadinessAction
     : (effectiveCanonicalVerdict === 'entry'
     ? 'Execute only if the trigger remains valid.'
     : (effectiveCanonicalVerdict === 'watch'
       ? 'Wait for stronger confirmation before considering entry.'
-      : '')));
-  const planVisible = authoritativeProjectionEntry || effectiveCanonicalVerdict === 'entry' ? true : simplifiedState.planVisible === true;
+      : ''));
+  const planVisible = effectiveCanonicalVerdict === 'entry' ? true : simplifiedState.planVisible === true;
   const planStatus = String(simplifiedState.planStatus || '').trim().toLowerCase() || 'missing';
-  const planSummary = authoritativeProjectionEntry
-    ? 'Trade plan available.'
-    : (effectiveCanonicalVerdict === 'entry'
+  const planSummary = effectiveCanonicalVerdict === 'entry'
     ? 'Trade plan available.'
     : (planVisible
     ? 'Trade plan available.'
-    : (String(mainBlocker || primaryReason || 'No actionable trade plan yet.').trim() || 'No actionable trade plan yet.')));
+    : (String(mainBlocker || primaryReason || 'No actionable trade plan yet.').trim() || 'No actionable trade plan yet.'));
   const resolveDisplaySetupScore = target => {
     if(typeof setupScoreForRecord === 'function'){
       const computed = Number(setupScoreForRecord(target));
@@ -8904,6 +10273,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       suppressingTrackedAvoid
     }
   };
+  }
 }
 
 function persistedTrackVisibleModelFromPresentation(presentation = {}){
@@ -8965,8 +10335,32 @@ function persistedWatchlistVisualStateFromPresentation(presentation = {}){
 }
 
 function buildPersistedTrackPresentation(record, bundle, options = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = normalizeTickerRecordReadOnly(record || {});
   const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
+  const explicitProjectionSnapshot = options.presentationProjectionSnapshot && typeof options.presentationProjectionSnapshot === 'object'
+    ? options.presentationProjectionSnapshot
+    : null;
+  const explicitProjectionSource = String(options.presentationProjectionSource || '').trim().toLowerCase();
+  const implicitProjectionSnapshot = (!explicitProjectionSnapshot && !safeBundle.presentationProjectionSnapshot && typeof uiState !== 'undefined' && uiState && typeof uiState === 'object'
+    && uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || ''))
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const implicitProjectionSource = !explicitProjectionSource && !safeBundle.presentationProjectionSource
+    ? String(
+      (typeof uiState !== 'undefined' && uiState && typeof uiState === 'object' && uiState.activeReviewProjectionSource)
+      || (implicitProjectionSnapshot ? 'clicked_card_snapshot' : '')
+    ).trim().toLowerCase()
+    : '';
+  const effectiveProjectionSnapshot = explicitProjectionSnapshot || safeBundle.presentationProjectionSnapshot || implicitProjectionSnapshot || null;
+  const effectiveProjectionSource = String(explicitProjectionSource || safeBundle.presentationProjectionSource || implicitProjectionSource || '').trim().toLowerCase();
+  const allowTrackProjection = options.allowTrackProjection === true
+    || safeBundle.allowTrackProjection === true
+    || (
+      hasPresentationAuthoritySnapshot(effectiveProjectionSnapshot, item.ticker || '')
+      && ['clicked_card_snapshot', 'track_projection_updated'].includes(effectiveProjectionSource)
+    );
   const lifecycleSnapshot = safeBundle.lifecycleSnapshot && typeof safeBundle.lifecycleSnapshot === 'object'
     ? safeBundle.lifecycleSnapshot
     : null;
@@ -8998,6 +10392,9 @@ function buildPersistedTrackPresentation(record, bundle, options = {}){
     simplifiedState,
     globalVerdict,
     lifecycleSnapshot,
+    projectionSnapshot:effectiveProjectionSnapshot,
+    projectionSource:effectiveProjectionSource,
+    allowTrackProjection,
     sourceOfTruth:'watchlist_persisted_presentation',
     source:options.source || safeBundle.source || 'shared_refresh',
     reason:options.reason || safeBundle.reason || 'shared_refresh'
@@ -9005,20 +10402,18 @@ function buildPersistedTrackPresentation(record, bundle, options = {}){
   const watchlistVisualState = persistedWatchlistVisualStateFromPresentation(sharedPresentation);
   const trackVisibleModel = persistedTrackVisibleModelFromPresentation(sharedPresentation);
   return {
+    schemaVersion:'watchlist-presentation-cache-v2',
     updatedAt:new Date().toISOString(),
     source:String(options.source || safeBundle.source || 'shared_refresh'),
     sourceSurface:String(options.sourceSurface || safeBundle.sourceSurface || 'track'),
     reason:String(options.reason || safeBundle.reason || 'shared_refresh'),
     sourceOfTruth:'watchlist_persisted_presentation',
+    planStatus:String(sharedPresentation && sharedPresentation.planStatus || displayedPlan && displayedPlan.status || '').trim().toLowerCase() || 'missing',
+    tradePlanStatus:String(sharedPresentation && sharedPresentation.planStatus || displayedPlan && displayedPlan.status || '').trim().toLowerCase() || 'missing',
     sharedPresentation,
     simplifiedState,
     watchlistVisualState,
-    trackVisibleModel,
-    resolvedContract,
-    globalVerdict,
-    lifecycleSnapshot,
-    displayedPlan,
-    derivedStates
+    trackVisibleModel
   };
 }
 
@@ -9751,6 +11146,46 @@ function loadState(){
   perfMeasure('pp_local_state_restore', 'pp_local_state_restore_start', 'pp_local_state_restore_end');
   if(restoredStartupReviewRecord){
     scheduleDeferredStartupTask(() => {
+      const liveStartupReviewRecord = getTickerRecord(restoredStartupReviewRecord.ticker) || restoredStartupReviewRecord;
+      buildResolvedStateBundleFromRecord(liveStartupReviewRecord, {
+        source:'startup_review_rehydrate',
+        sourceSurface:'review',
+        reason:'startup_review_rehydrate'
+      });
+      const startupReviewProjectionSnapshot = persistedReviewProjectionSnapshot(
+        liveStartupReviewRecord,
+        'startup_review_rehydrate'
+      );
+      const startupProjectionSource = restoredProjectionAuthoritySource(startupReviewProjectionSnapshot);
+      if(startupReviewProjectionSnapshot && hasPresentationAuthoritySnapshot(startupReviewProjectionSnapshot, restoredStartupReviewRecord.ticker)){
+        uiState.activeReviewSourceProjectionSnapshot = startupReviewProjectionSnapshot;
+        uiState.activeReviewProjectionSource = startupProjectionSource || 'persisted_display_context';
+      }
+      if(liveStartupReviewRecord.watchlist && liveStartupReviewRecord.watchlist.inWatchlist && typeof refreshTrackedTickerState === 'function'){
+        const startupTrackRefresh = refreshTrackedTickerState(liveStartupReviewRecord.ticker, {
+          source:'startup_review_rehydrate',
+          reason:'startup_review_rehydrate',
+          presentationProjectionSnapshot:startupReviewProjectionSnapshot || null,
+          presentationProjectionSource:startupProjectionSource || 'persisted_display_context',
+          allowTrackProjection:!!(startupReviewProjectionSnapshot && hasPresentationAuthoritySnapshot(startupReviewProjectionSnapshot, restoredStartupReviewRecord.ticker)),
+          force:true,
+          persist:false
+        });
+        if(
+          startupTrackRefresh
+          && startupTrackRefresh.ok
+          && typeof persistTrackPresentationOnRecord === 'function'
+        ){
+          persistTrackPresentationOnRecord(liveStartupReviewRecord, startupTrackRefresh, {
+            source:'startup_review_rehydrate',
+            sourceSurface:'track',
+            reason:'startup_review_rehydrate',
+            presentationProjectionSnapshot:startupReviewProjectionSnapshot || null,
+            presentationProjectionSource:startupProjectionSource || 'persisted_display_context',
+            allowTrackProjection:!!(startupReviewProjectionSnapshot && hasPresentationAuthoritySnapshot(startupReviewProjectionSnapshot, restoredStartupReviewRecord.ticker))
+          });
+        }
+      }
       renderReviewWorkspace({
         source:'startup_review_rehydrate',
         requestedTicker:restoredStartupReviewRecord.ticker
@@ -11858,13 +13293,13 @@ function normalizeWatchlistEntry(entry){
 }
 
 function watchlistEntryExistsForRecord(record){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   if(item.watchlist && item.watchlist.inWatchlist) return true;
   return (state.watchlist || []).some(entry => normalizeTicker(entry && entry.ticker) === item.ticker);
 }
 
 function watchlistEligibilityForRecord(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object'
     ? options.globalVerdict
     : resolveGlobalVerdict(item);
@@ -11905,7 +13340,9 @@ function watchlistEligibilityForRecord(record, options = {}){
 }
 
 function resolvePostGateWatchlistEligibility(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = options.readOnly === true
+    ? normalizeTickerRecordReadOnly(record)
+    : normalizeTickerRecord(record);
   const gated = options.gated && typeof options.gated === 'object'
     ? options.gated
     : applyGlobalVerdictGates(item, {
@@ -11926,6 +13363,9 @@ function resolvePostGateWatchlistEligibility(record, options = {}){
 }
 
 function addToWatchlist(tickerData){
+  const watchlistOptions = arguments.length > 1 && arguments[1] && typeof arguments[1] === 'object'
+    ? arguments[1]
+    : {};
   const entry = normalizeWatchlistEntry(tickerData);
   if(!entry) return {entry:null, record:null, added:false, updated:false, error:'invalid_ticker'};
   const record = upsertTickerRecord(entry.ticker);
@@ -11963,6 +13403,9 @@ function addToWatchlist(tickerData){
     source:'watchlist_add',
     sourceSurface:'track',
     reason:'watchlist_add_refresh',
+    presentationProjectionSnapshot:watchlistOptions.presentationProjectionSnapshot || null,
+    presentationProjectionSource:watchlistOptions.presentationProjectionSource || '',
+    allowTrackProjection:watchlistOptions.allowTrackProjection === true,
     force:true,
     persist:false
   });
@@ -12234,7 +13677,7 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
 }
 
 function watchlistLifecycleSnapshot(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const lifecycleSource = String(options.source || '').trim().toLowerCase();
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
   if(hasLockedLifecycle(item)){
@@ -12299,8 +13742,7 @@ function watchlistLifecycleSnapshot(record, options = {}){
       pending:true
     };
   }
-  const gating = applyGlobalVerdictGates(item, {source:'auto_recompute'});
-  const globalVerdict = gating.globalVerdict;
+  const globalVerdict = resolveGlobalVerdict(item);
   const structureGate = watchlistRefreshStructureGate(item);
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const displayedPlan = deriveCurrentPlanState(
@@ -12443,7 +13885,7 @@ function watchlistLifecycleSnapshot(record, options = {}){
     baseVerdict:globalVerdict.base_verdict || canonicalVerdict,
     downgradeApplied:!!globalVerdict.downgrade_applied,
     downgradeReason:globalVerdict.downgrade_reason || globalVerdict.reason || '',
-    refresh_demote_attempted:gating && gating.suppressed ? 'true' : (globalVerdict.allow_watchlist ? 'false' : 'true'),
+    refresh_demote_attempted:globalVerdict.allow_watchlist ? 'false' : 'true',
     refresh_demote_reason:structureGate.refresh_demote_reason || '',
     structural_alive_at_refresh:structureGate.structural_alive_at_refresh ? 'true' : 'false',
     avoid_allowed_by_structure_gate:structureGate.avoid_allowed_by_structure_gate ? 'true' : 'false',
@@ -13405,7 +14847,7 @@ function clearSavedScannerUniverseList(){
 }
 
 function watchlistRecordRenderSignature(record, pendingMap = {}, manualRefreshMap = {}){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
   const watch = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
   const life = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
@@ -13598,7 +15040,7 @@ function trackCardPrefilterHash(record){
 }
 
 function snapshotTickerRecordForDiff(record){
-  const item = normalizeTickerRecord(record || {});
+  const item = normalizeTickerRecordReadOnly(record || {});
   try{
     return JSON.parse(JSON.stringify(item));
   }catch(_error){
@@ -13680,7 +15122,7 @@ function shouldDisplayWatchlistRecordForCurrentFilter(record, options = {}){
 }
 
 function watchlistPlacementSnapshot(record, options = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = normalizeTickerRecordReadOnly(record || {});
   const lifecycle = syncWatchlistLifecycle(item) || watchlistLifecycleSnapshot(item);
   return {
     visible:shouldDisplayWatchlistRecordForCurrentFilter(item, {passCache:null}),
@@ -13698,6 +15140,23 @@ function findWatchlistCardNodeByTicker(ticker){
     if(normalizeTicker(node.getAttribute('data-watchlist-ticker') || '') === symbol) return node;
   }
   return null;
+}
+
+function updateWatchlistCardForTicker(ticker, options = {}){
+  const symbol = normalizeTicker(ticker);
+  if(!symbol) return false;
+  const existingCard = findWatchlistCardNodeByTicker(symbol);
+  if(!existingCard) return false;
+  const record = getTickerRecord(symbol);
+  if(!record || !record.watchlist || record.watchlist.inWatchlist !== true) return false;
+  const nextCard = renderWatchlistCardElement(record, {
+    ...options,
+    source:options.source || 'updateWatchlistCardForTicker',
+    renderSource:options.renderSource || 'updateWatchlistCardForTicker'
+  });
+  if(!nextCard) return false;
+  existingCard.replaceWith(nextCard);
+  return true;
 }
 
 function setWatchlistCardRefreshButtonState(ticker, busy = false){
@@ -13782,11 +15241,34 @@ function renderWatchlistCardElement(record, options = {}){
     ? persistedPresentation.sharedPresentation
     : null;
   const presentationSourceOfTruth = 'live_recomputed_fallback';
+  const hasPresentationSnapshot = typeof hasPresentationAuthoritySnapshot === 'function'
+    ? hasPresentationAuthoritySnapshot
+    : ((snapshot, tickerValue) => {
+      const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+      if(!safeSnapshot) return false;
+      const snapshotTicker = normalizeTicker(safeSnapshot.ticker || '');
+      const expectedTicker = normalizeTicker(tickerValue || '');
+      return !!snapshotTicker && snapshotTicker === expectedTicker;
+    });
+  const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === symbol
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const activeProjectionSource = String(
+    uiState.activeReviewProjectionSource
+    || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+  ).trim().toLowerCase();
+  const allowTrackProjection = hasPresentationSnapshot(activeProjectionSnapshot, symbol)
+    && ['clicked_card_snapshot', 'track_projection_updated'].includes(activeProjectionSource);
   const sharedPresentation = buildSharedReviewTrackPresentation(record, {
     surface:'track',
     simplifiedState,
     lifecycleSnapshot,
     globalVerdict:globalVerdict || resolveGlobalVerdict(record),
+    projectionSnapshot:activeProjectionSnapshot,
+    projectionSource:activeProjectionSource,
+    allowTrackProjection,
     sourceOfTruth:presentationSourceOfTruth,
     source:'renderWatchlistCardElement',
     reason:'renderWatchlistCardElement'
@@ -13913,8 +15395,6 @@ function renderWatchlistCardElement(record, options = {}){
   }
   const authoritativeEntryPanel = normalizeGlobalVerdictKey(trackVisibleModel && trackVisibleModel.canonicalVerdict || '') === 'entry'
     || normalizeVisualBucketForPairing(trackVisibleModel && trackVisibleModel.visibleBucket || '') === 'entry'
-    || normalizeGlobalVerdictKey(sharedPresentation && (sharedPresentation.canonicalVerdict || sharedPresentation.finalVerdict) || '') === 'entry'
-    || normalizeVisualBucketForPairing(sharedPresentation && sharedPresentation.visualBucket || '') === 'entry'
     || normalizeGlobalVerdictKey(canonicalVerdict || '') === 'entry'
     || normalizeVisualBucketForPairing(visualBucket || '') === 'entry';
   let entryConditionsSummary = buildTrackTickerSpecificEntryConditionsSummary({
@@ -14012,10 +15492,10 @@ function renderWatchlistCardElement(record, options = {}){
   const recordDisplaySetupScore = Number.isFinite(renderStartDisplaySetupScore)
     ? renderStartDisplaySetupScore
     : toNumericScore(typeof setupScoreForRecord === 'function' ? setupScoreForRecord(record) : (record && record.setup && record.setup.score));
-  const canonicalWatchlistScoreDisplay = Number.isFinite(transportedSetupScore)
-    ? `Setup ${Math.max(0, Math.min(10, Math.round(transportedSetupScore)))}/10`
-    : (Number.isFinite(recordDisplaySetupScore)
+  const canonicalWatchlistScoreDisplay = Number.isFinite(recordDisplaySetupScore)
     ? `Setup ${Math.max(0, Math.min(10, Math.round(recordDisplaySetupScore)))}/10`
+    : (Number.isFinite(transportedSetupScore)
+    ? `Setup ${Math.max(0, Math.min(10, Math.round(transportedSetupScore)))}/10`
     : (Number.isFinite(sharedDisplaySetupScore)
     ? `Setup ${Math.max(0, Math.min(10, Math.round(sharedDisplaySetupScore)))}/10`
     : (view && view.setupScoreDisplay
@@ -14050,10 +15530,10 @@ function renderWatchlistCardElement(record, options = {}){
   const renderedBucket = visualBucket;
   const clickedCardProjectionSnapshot = {
     ticker:entry.ticker,
-    setupScore:Number.isFinite(transportedSetupScore)
-      ? Math.max(0, Math.min(10, Math.round(transportedSetupScore)))
-      : (Number.isFinite(recordDisplaySetupScore)
+    setupScore:Number.isFinite(recordDisplaySetupScore)
       ? Math.max(0, Math.min(10, Math.round(recordDisplaySetupScore)))
+      : (Number.isFinite(transportedSetupScore)
+      ? Math.max(0, Math.min(10, Math.round(transportedSetupScore)))
       : (Number.isFinite(sharedDisplaySetupScore)
       ? Math.max(0, Math.min(10, Math.round(sharedDisplaySetupScore)))
       : (Number.isFinite(Number(view && view.setupScore))
@@ -14124,9 +15604,9 @@ function renderWatchlistCardElement(record, options = {}){
       headlineCopy:'resolveTrackCardVisibleModel.headline',
       primaryReason:'resolveTrackCardVisibleModel.primaryReason',
       actionGuidance:'resolveTrackCardVisibleModel.nextAction',
-      shellColour:'resolveTrackCardVisibleModel.visibleBucket/tone',
-      leftAccentColour:'resolveTrackCardVisibleModel.visibleBucket/tone',
-      sectionBucket:'resolveTrackCardVisibleModel.visibleBucket'
+      shellColour:'renderedBucket/tone',
+      leftAccentColour:'renderedBucket/tone',
+      sectionBucket:'renderedBucket'
     },
     fromStoredFields:false,
     fromResolvedStateBundleCache:false,
@@ -14196,107 +15676,23 @@ function renderWatchlistCardElement(record, options = {}){
   return div;
 }
 
-function updateWatchlistCardForTicker(ticker){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return false;
-  const existingCard = findWatchlistCardNodeByTicker(symbol);
-  if(!existingCard) return false;
-  const record = getTickerRecord(symbol);
-  if(!record || !record.watchlist || !record.watchlist.inWatchlist) return false;
-  if(!shouldDisplayWatchlistRecordForCurrentFilter(record)) return false;
-  const replacement = renderWatchlistCardElement(record);
-  if(!replacement) return false;
-  existingCard.replaceWith(replacement);
-  return true;
-}
-
-function watchlistRenderGroups(showExpired){
-  const groups = [
-    {key:'active', title:'Tracked Setups', hint:'Current tracked setups across Entry, Near Entry, and Watch.', collapsible:false},
-    {key:'diminishing', title:'Diminishing', hint:'Weakening setups kept for review, not active focus.', collapsible:true},
-    {key:'avoid_dead', title:'Avoid', hint:'Failed or invalid setups.', collapsible:true}
-  ];
-  return groups;
-}
-
-function normalizeVisualBucketForPairing(bucket){
-  const safe = String(bucket || '').trim().toLowerCase();
-  if(!safe) return 'monitor';
-  if(['entry','near_entry','monitor','diminishing','avoid','dead'].includes(safe)) return safe;
-  if(['watch','monitor_watch'].includes(safe)) return 'monitor';
-  if(['avoid_dead','low_priority_avoid'].includes(safe)) return 'avoid';
-  if(safe.includes('diminish')) return 'diminishing';
-  if(safe.includes('avoid') || safe.includes('dead')) return 'avoid';
-  return 'monitor';
-}
-
-function trackSectionKeyToVisualBucket(sectionKey){
-  const key = String(sectionKey || '').trim().toLowerCase();
-  if(key === 'diminishing') return 'diminishing';
-  if(key === 'avoid_dead') return 'avoid';
-  return 'monitor';
-}
-
-function bumpVerdictDriftMismatch(){
-  const summary = getOrCreateVerdictDriftSummary();
-  summary.mismatches = Number(summary.mismatches || 0) + 1;
-}
-
-function getOrCreateVerdictDriftSummary(){
-  if(!logVerdictDriftTrace._summary){
-    logVerdictDriftTrace._summary = {
-      count:0,
-      surfaces:{},
-      mismatches:0,
-      startedAt:Date.now(),
-      timer:null
-    };
-  }
-  return logVerdictDriftTrace._summary;
-}
-
-function isAllowedCanonicalVisualPair(canonicalVerdict, visualBucket){
-  const canonical = normalizeGlobalVerdictKey(canonicalVerdict || '');
-  const bucket = normalizeVisualBucketForPairing(visualBucket);
-  if(canonical === 'entry') return bucket === 'entry';
-  if(canonical === 'near_entry') return ['near_entry', 'monitor'].includes(bucket);
-  if(canonical === 'watch') return ['monitor', 'diminishing'].includes(bucket);
-  if(canonical === 'avoid') return ['avoid', 'diminishing', 'dead'].includes(bucket);
-  return true;
-}
-
-function normalizeTrackSectionState(raw){
-  const stateValue = raw && typeof raw === 'object' ? raw : {};
-  return {
-    diminishing:typeof stateValue.diminishing === 'boolean' ? stateValue.diminishing : null,
-    avoid_dead:typeof stateValue.avoid_dead === 'boolean' ? stateValue.avoid_dead : null
-  };
+function normalizeTrackSectionState(value = {}){
+  const safe = value && typeof value === 'object' ? value : {};
+  return Object.fromEntries(
+    Object.entries(safe)
+      .map(([key, expanded]) => [String(key || '').trim().toLowerCase(), expanded === true])
+      .filter(([key]) => !!key)
+  );
 }
 
 function readTrackSectionState(){
-  const cached = uiState.trackSectionState && typeof uiState.trackSectionState === 'object'
-    ? uiState.trackSectionState
-    : null;
-  if(cached) return normalizeTrackSectionState(cached);
-  const persisted = normalizeTrackSectionState(safeStorageGet(trackSectionStateKey, {}));
-  uiState.trackSectionState = persisted;
-  return persisted;
+  return normalizeTrackSectionState(safeStorageGet(trackSectionStateKey, {}));
 }
 
-function persistTrackSectionState(nextState){
-  const normalized = normalizeTrackSectionState(nextState);
-  uiState.trackSectionState = normalized;
+function persistTrackSectionState(value = {}){
+  const normalized = normalizeTrackSectionState(value);
   safeStorageSet(trackSectionStateKey, normalized);
-}
-
-function trackBucketCountsForRecords(records = [], passCache = null){
-  const counts = {active:0, diminishing:0, avoid_dead:0};
-  (Array.isArray(records) ? records : []).forEach(record => {
-    const bucket = watchlistPresentationBucketForRecord(record, {passCache});
-    const groupKey = watchlistRenderGroupForBucket(bucket);
-    counts[groupKey] = Number(counts[groupKey] || 0) + 1;
-  });
-  return counts;
+  return normalized;
 }
 
 function logTrackRenderBuckets(source, sections = []){
@@ -14310,10 +15706,6 @@ function logTrackRenderBuckets(source, sections = []){
       renderedCardCount:Number(section.renderedCardCount || 0)
     }))
   });
-}
-
-function isTrackSectionCollapsible(sectionKey){
-  return sectionKey === 'diminishing' || sectionKey === 'avoid_dead';
 }
 
 function watchlistSectionPriorityValue(record, passCache = null){
@@ -14333,15 +15725,21 @@ function watchlistSectionPriorityValue(record, passCache = null){
   return 0;
 }
 
+function isTrackSectionCollapsible(sectionKey){
+  const key = String(sectionKey || '').trim().toLowerCase();
+  return ['diminishing', 'avoid_dead'].includes(key);
+}
+
 function shouldForceTrackSectionCollapsed(sectionKey, sectionRecords = [], passCache = null){
-  if(!isTrackSectionCollapsible(sectionKey)) return false;
+  const key = String(sectionKey || '').trim().toLowerCase();
+  if(!isTrackSectionCollapsible(key)) return false;
   if(!Array.isArray(sectionRecords) || !sectionRecords.length) return false;
   return sectionRecords.every(record => {
     const bucket = watchlistPresentationBucketForRecord(record, {passCache});
     const priorityValue = watchlistSectionPriorityValue(record, passCache);
-    const stateMatches = sectionKey === 'diminishing'
+    const stateMatches = key === 'diminishing'
       ? bucket === 'diminishing'
-      : bucket === 'avoid';
+      : ['avoid', 'avoid_dead', 'dead', 'inactive', 'low_priority_avoid', 'lower_priority'].includes(String(bucket || '').trim().toLowerCase());
     return stateMatches && priorityValue <= 0;
   });
 }
@@ -14665,6 +16063,28 @@ function watchlistRenderGroupForBucket(bucket){
   if(normalizedBucket === 'diminishing') return 'diminishing';
   if(['avoid','avoid_dead','low_priority_avoid','lower_priority','dead','inactive'].includes(normalizedBucket)) return 'avoid_dead';
   return 'active';
+}
+
+function watchlistRenderGroups(showExpired = false){
+  return [
+    {
+      key:'active',
+      title:'Tracked Setups',
+      hint:'Current setups to monitor, refine, or act on.'
+    },
+    {
+      key:'diminishing',
+      title:'Diminishing',
+      hint:'Earlier ideas that need proof before they deserve active focus again.'
+    },
+    {
+      key:'avoid_dead',
+      title:showExpired ? 'Avoid / Dead / Expired' : 'Avoid / Dead',
+      hint:showExpired
+        ? 'Broken, rejected, or expired setups kept only for reference.'
+        : 'Broken or rejected setups kept out of active focus.'
+    }
+  ];
 }
 
 function logTrackSectionRender(sectionKey, collapsed, itemCount, renderedCardCount, source = 'watchlist_render'){
@@ -18057,7 +19477,9 @@ function buildSummary(checks, status, context = {}){
 }
 
 function reviewChecklistContextForRecord(record, options = {}){
-  const item = record && typeof record === 'object' ? record : null;
+  const item = record && typeof record === 'object'
+    ? normalizeTickerRecordReadOnly(record)
+    : null;
   if(!item) return {};
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
@@ -18934,11 +20356,23 @@ function evaluateSetupQualityAdjustments(record, options = {}){
     rawRecord.plan && rawRecord.plan.firstTarget,
     rawRecord.marketData && rawRecord.marketData.currency
   );
+  const runtimeVerdictForRecord = typeof currentRuntimeVerdictForRecord === 'function'
+    ? currentRuntimeVerdictForRecord
+    : (() => '');
+  const reviewVerdictForRecord = typeof savedReviewVerdictForRecord === 'function'
+    ? savedReviewVerdictForRecord
+    : (() => '');
+  const nonRecursiveBaseVerdict = normalizeAnalysisVerdict(
+    runtimeVerdictForRecord(rawRecord)
+    || reviewVerdictForRecord(rawRecord)
+    || String(rawRecord.watchlist && rawRecord.watchlist.status || '').trim()
+    || ''
+  );
   const baseVerdict = normalizeAnalysisVerdict(
     options.baseVerdict
     || options.displayStage
     || options.rawVerdict
-    || baseVerdictForRecord(rawRecord, {includeRuntimeFallback:false})
+    || nonRecursiveBaseVerdict
   );
   const entry = numericOrNull(displayedPlan.entry);
   const stop = numericOrNull(displayedPlan.stop);
@@ -19668,18 +21102,75 @@ function currentRuntimeVerdictForRecord(record){
   return scanVerdict ? normalizeImportedStatus(scanVerdict, {preserveEmpty:true}) : '';
 }
 
+function diagnosticWatchlistDebugSnapshot(record, options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const persistedDebug = item.watchlist && item.watchlist.debug && typeof item.watchlist.debug === 'object'
+    ? item.watchlist.debug
+    : null;
+  const lifecycleSnapshot = options.lifecycleSnapshot && typeof options.lifecycleSnapshot === 'object'
+    ? options.lifecycleSnapshot
+    : null;
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object'
+    ? options.globalVerdict
+    : null;
+  const fallbackDebug = {
+    downgradeReason:String(
+      lifecycleSnapshot && lifecycleSnapshot.downgradeReason
+      || globalVerdict && (globalVerdict.downgrade_reason || globalVerdict.reason)
+      || ''
+    ).trim(),
+    baseVerdict:String(
+      lifecycleSnapshot && lifecycleSnapshot.baseVerdict
+      || globalVerdict && globalVerdict.base_verdict
+      || ''
+    ).trim(),
+    finalVerdict:String(
+      lifecycleSnapshot && lifecycleSnapshot.state
+      || globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict)
+      || ''
+    ).trim(),
+    refresh_demote_reason:String(lifecycleSnapshot && lifecycleSnapshot.refresh_demote_reason || '').trim(),
+    structural_alive_at_refresh:String(lifecycleSnapshot && lifecycleSnapshot.structural_alive_at_refresh || '').trim(),
+    avoid_allowed_by_structure_gate:String(lifecycleSnapshot && lifecycleSnapshot.avoid_allowed_by_structure_gate || '').trim(),
+    explicit_invalidation_reason:String(
+      lifecycleSnapshot && lifecycleSnapshot.explicit_invalidation_reason
+      || globalVerdict && globalVerdict.explicit_invalidation_reason
+      || ''
+    ).trim()
+  };
+  return persistedDebug
+    ? {
+      ...fallbackDebug,
+      ...persistedDebug,
+      downgradeReason:String(persistedDebug.downgradeReason || fallbackDebug.downgradeReason || '').trim(),
+      baseVerdict:String(persistedDebug.baseVerdict || fallbackDebug.baseVerdict || '').trim(),
+      finalVerdict:String(persistedDebug.finalVerdict || fallbackDebug.finalVerdict || '').trim(),
+      refresh_demote_reason:String(persistedDebug.refresh_demote_reason || fallbackDebug.refresh_demote_reason || '').trim(),
+      structural_alive_at_refresh:String(persistedDebug.structural_alive_at_refresh || fallbackDebug.structural_alive_at_refresh || '').trim(),
+      avoid_allowed_by_structure_gate:String(persistedDebug.avoid_allowed_by_structure_gate || fallbackDebug.avoid_allowed_by_structure_gate || '').trim(),
+      explicit_invalidation_reason:String(persistedDebug.explicit_invalidation_reason || fallbackDebug.explicit_invalidation_reason || '').trim()
+    }
+    : fallbackDebug;
+}
+
 function authoritativeScanSurfaceSnapshot(record){
   const runtimeVerdictLabel = currentRuntimeVerdictForRecord(record);
+  const contract = buildCanonicalPlanVerdictContract(record, {
+    surface:'scan',
+    source:'scan_surface_authority',
+    reason:'scan_surface_authority'
+  });
   const canonicalVerdict = normalizeGlobalVerdictKey(runtimeVerdictLabel || '');
   if(!canonicalVerdict) return null;
   const score = currentRuntimeScoreForRecord(record);
   const summary = currentRuntimeSummaryForRecord(record);
-  let visualBucket = canonicalVerdict;
-  if(canonicalVerdict === 'watch'){
-    visualBucket = Number.isFinite(score) && score <= 4 ? 'diminishing' : 'monitor';
-  }else if(canonicalVerdict === 'dead'){
-    visualBucket = 'avoid';
-  }
+  const visualBucket = normalizeVisualBucketForPairing(
+    (canonicalVerdict === 'watch'
+      ? (contract && contract.canonicalVisualBucket)
+      : '')
+    || (canonicalVerdict === 'dead' ? 'avoid' : canonicalVerdict),
+    canonicalVerdict
+  );
   return {
     canonicalVerdict,
     visualBucket,
@@ -19838,6 +21329,22 @@ function normalizeVisualBucketKey(bucket, canonicalVerdict = ''){
   return resolveVisualBucketFromInputs(bucket, canonicalVerdict).key;
 }
 
+function normalizeVisualBucketForPairing(bucket, canonicalVerdict = ''){
+  return normalizeVisualBucketKey(bucket, canonicalVerdict);
+}
+
+function isAllowedCanonicalVisualPair(canonicalVerdict = '', visualBucket = ''){
+  const canonical = normalizeGlobalVerdictKey(canonicalVerdict || '');
+  const bucket = normalizeVisualBucketForPairing(visualBucket || '', canonical);
+  if(!canonical || !bucket) return true;
+  if(canonical === 'entry') return ['entry', 'near_entry'].includes(bucket);
+  if(canonical === 'near_entry') return ['near_entry', 'entry', 'monitor'].includes(bucket);
+  if(canonical === 'watch') return ['monitor', 'diminishing'].includes(bucket);
+  if(canonical === 'avoid') return ['avoid', 'diminishing'].includes(bucket);
+  if(canonical === 'dead') return ['avoid'].includes(bucket);
+  return true;
+}
+
 function visualBucketLabel(bucket, canonicalVerdict = ''){
   const key = normalizeVisualBucketKey(bucket, canonicalVerdict);
   if(key === 'entry') return 'Entry';
@@ -19880,6 +21387,7 @@ function visualBucketReason(canonicalVerdict = '', visualBucket = '', context = 
 function resolveSimplifiedStateForSurface(record, surface = 'review', options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const ticker = normalizeTicker(item.ticker || item.symbol || '');
+  const surfaceKey = String(surface || '').trim().toLowerCase();
   if(window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'){
     const resolved = window.SimplifiedTradeState.resolveRecordState(item, {
       surface,
@@ -19909,10 +21417,39 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
           evaluateRiskFit
         }
       });
-    const authoritativeScanSurface = String(surface || '').trim().toLowerCase() === 'scan'
+    const planVerdictContract = buildCanonicalPlanVerdictContract(item, {
+      surface:surfaceKey,
+      source:String(options.source || '').trim(),
+      reason:String(options.reason || '').trim(),
+      derivedStates:resolved && resolved.debug && resolved.debug.derivedStates,
+      effectivePlan:resolved && resolved.debug && resolved.debug.effectivePlan,
+      displayedPlan:{
+        status:resolved && resolved.planStatus,
+        tradeability:resolved && resolved.tradeability,
+        entry:resolved && resolved.debug && resolved.debug.effectivePlan && resolved.debug.effectivePlan.entry,
+        stop:resolved && resolved.debug && resolved.debug.effectivePlan && resolved.debug.effectivePlan.stop,
+        firstTarget:resolved && resolved.debug && resolved.debug.effectivePlan && resolved.debug.effectivePlan.firstTarget
+      },
+      resolvedContract:resolved && resolved.debug && resolved.debug.resolvedState,
+      visualState:resolved && resolved.debug && resolved.debug.visualState,
+      setupScore:resolved && resolved.setupScore
+    });
+    const authoritativeScanSurface = surfaceKey === 'scan'
       ? authoritativePersistedScanSnapshotForScanSurface(item)
       : null;
     if(authoritativeScanSurface){
+      const authoritativeScanPlanCandidate = reviewFallbackPlanCandidate(item)
+        || (
+          Number.isFinite(numericOrNull(item.plan && item.plan.entry))
+          && Number.isFinite(numericOrNull(item.plan && item.plan.stop))
+          && Number.isFinite(numericOrNull(item.plan && (item.plan.firstTarget != null ? item.plan.firstTarget : item.plan.target)))
+            ? {
+              entry:numericOrNull(item.plan && item.plan.entry),
+              stop:numericOrNull(item.plan && item.plan.stop),
+              firstTarget:numericOrNull(item.plan && (item.plan.firstTarget != null ? item.plan.firstTarget : item.plan.target))
+            }
+            : null
+        );
       const resolvedVisualBucket = normalizeVisualBucketForPairing(resolved.visualBucket || resolved.presentationBucket || '');
       const shouldForceAuthoritativeVisualBucket = ['entry','near_entry','avoid'].includes(authoritativeScanSurface.canonicalVerdict)
         || !resolvedVisualBucket
@@ -19930,6 +21467,10 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
         : (authoritativeScanSurface.canonicalVerdict === 'watch'
           ? 'Wait for stronger confirmation before considering an entry.'
           : (resolved.actionLabel || ''));
+      if(authoritativeScanSurface.canonicalVerdict === 'entry' && authoritativeScanPlanCandidate){
+        resolved.planStatus = 'valid';
+        resolved.planVisible = true;
+      }
       if(authoritativeScanSurface.summary){
         resolved.mainBlocker = authoritativeScanSurface.summary;
       }
@@ -19941,6 +21482,32 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
           visualBucket:authoritativeScanSurface.visualBucket,
           score:Number.isFinite(Number(resolved.setupScore)) ? Number(resolved.setupScore) : null,
           summary:authoritativeScanSurface.summary
+        }
+      };
+    }
+    if(planVerdictContract){
+      resolved.contractFingerprint = String(planVerdictContract.contractFingerprint || '');
+      if(surfaceKey === 'scan'){
+        const contractBucket = normalizeVisualBucketForPairing(
+          planVerdictContract.canonicalVisualBucket || '',
+          resolved.canonicalVerdict || 'watch'
+        );
+        if(
+          normalizeGlobalVerdictKey(resolved.canonicalVerdict || '') === 'watch'
+          && contractBucket
+        ){
+          resolved.visualBucket = contractBucket;
+          resolved.tone = String(contractBucket || resolved.tone || 'monitor').trim().toLowerCase() || 'monitor';
+        }
+      }
+      resolved.debug = {
+        ...(resolved.debug || {}),
+        planVerdictContract:{
+          canonicalVerdict:planVerdictContract.canonicalVerdict,
+          canonicalVisualBucket:planVerdictContract.canonicalVisualBucket,
+          planAuthority:planVerdictContract.planAuthority,
+          lifecycleAuthority:planVerdictContract.lifecycleAuthority,
+          contractFingerprint:planVerdictContract.contractFingerprint
         }
       };
     }
@@ -20087,7 +21654,7 @@ function logVerdictDriftTrace(record, context, contract = null){
 }
 
 function resolveCanonicalTickerVerdict(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const context = String(options.context || 'track');
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
@@ -20144,6 +21711,10 @@ function currentRuntimeSummaryForRecord(record){
 
 function currentRuntimeScoreForRecord(record){
   const item = record && typeof record === 'object' ? record : {};
+  const canonicalSetupScore = setupScoreForRecord(item);
+  if(Number.isFinite(numericOrNull(canonicalSetupScore))){
+    return Number(canonicalSetupScore);
+  }
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
   const runtimeScore = numericOrNull(scan.score);
   const hasUsableMarketData = !!(
@@ -20159,14 +21730,30 @@ function currentRuntimeScoreForRecord(record){
 }
 
 function preferredReviewRrDisplay(record, displayedPlan, fallbackText = 'No actionable plan yet.'){
+  const manualReview = record && record.review && record.review.manualReview && typeof record.review.manualReview === 'object'
+    ? record.review.manualReview
+    : null;
+  const reviewDraft = record && record.review && record.review.draft && typeof record.review.draft === 'object'
+    ? record.review.draft
+    : null;
+  const submittedPaperTradePlan = hasSubmittedPaperTradeCanonicalPlan(record) === true;
+  const displayedPlanStatus = String(displayedPlan && displayedPlan.status || '').trim().toLowerCase();
+  const planValidationState = String(record && record.plan && record.plan.planValidationState || '').trim().toLowerCase();
+  if(submittedPaperTradePlan && displayedPlanStatus !== 'valid'){
+    return fallbackText;
+  }
   const rrRatio = numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio);
   if(Number.isFinite(rrRatio)) return `${Number(rrRatio).toFixed(2)}R`;
   const entry = numericOrNull(
     (displayedPlan && (displayedPlan.entry != null ? displayedPlan.entry : (displayedPlan.plan && displayedPlan.plan.entry)))
+    ?? (manualReview && manualReview.entry)
+    ?? (reviewDraft && reviewDraft.entry)
     ?? (record && record.plan && record.plan.entry)
   );
   const stop = numericOrNull(
     (displayedPlan && (displayedPlan.stop != null ? displayedPlan.stop : (displayedPlan.plan && displayedPlan.plan.stop)))
+    ?? (manualReview && manualReview.stop)
+    ?? (reviewDraft && reviewDraft.stop)
     ?? (record && record.plan && record.plan.stop)
   );
   const target = numericOrNull(
@@ -20177,11 +21764,14 @@ function preferredReviewRrDisplay(record, displayedPlan, fallbackText = 'No acti
           ? displayedPlan.firstTarget
           : (displayedPlan.plan && displayedPlan.plan.firstTarget))
     ))
+    ?? (manualReview && (manualReview.firstTarget != null ? manualReview.firstTarget : manualReview.target))
+    ?? (reviewDraft && (reviewDraft.firstTarget != null ? reviewDraft.firstTarget : reviewDraft.target))
     ?? (record && record.plan && (record.plan.firstTarget != null ? record.plan.firstTarget : record.plan.target))
   );
   const computedRr = evaluateRewardRisk(entry, stop, target);
   const computedRrValue = numericOrNull(computedRr && computedRr.rrRatio);
   if(Number.isFinite(computedRrValue)) return `${Number(computedRrValue).toFixed(2)}R`;
+  if(planValidationState === 'pending_validation') return fallbackText;
   const projectedRr = numericOrNull(
     record
     && record.scan
@@ -20190,6 +21780,35 @@ function preferredReviewRrDisplay(record, displayedPlan, fallbackText = 'No acti
   );
   if(Number.isFinite(projectedRr)) return `${Number(projectedRr).toFixed(2)}R`;
   return fallbackText;
+}
+
+function reviewFallbackPlanCandidate(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const safeReview = item.review && typeof item.review === 'object' ? item.review : {};
+  const candidates = [
+    safeReview.manualReview && typeof safeReview.manualReview === 'object' ? safeReview.manualReview : null,
+    safeReview.draft && typeof safeReview.draft === 'object' ? safeReview.draft : null
+  ].filter(Boolean);
+  for(const candidate of candidates){
+    const entry = numericOrNull(candidate.entry);
+    const stop = numericOrNull(candidate.stop);
+    const firstTarget = numericOrNull(candidate.firstTarget != null ? candidate.firstTarget : candidate.target);
+    if(Number.isFinite(entry) && Number.isFinite(stop) && Number.isFinite(firstTarget)){
+      return {entry, stop, firstTarget};
+    }
+  }
+  return null;
+}
+
+function reviewFallbackDisplayedPlan(record, derivedStates = null){
+  const item = record && typeof record === 'object' ? record : {};
+  const candidate = reviewFallbackPlanCandidate(item);
+  if(!candidate) return null;
+  return applySetupConfirmationPlanGate(
+    item,
+    deriveCurrentPlanState(candidate.entry, candidate.stop, candidate.firstTarget, item.marketData && item.marketData.currency),
+    derivedStates || analysisDerivedStatesFromRecord(item)
+  );
 }
 
 function preferredVerdictForRecord(record){
@@ -21212,6 +22831,7 @@ function evaluateEntryTrigger(record, options = {}){
     riskTooWide:false
   });
   const bounceConfirmedAndPriceable = bounceState === 'confirmed' && !bounceGuard.unpriceableBlockReason;
+  const submittedCanonicalPlan = hasSubmittedPaperTradeCanonicalPlan(rawRecord) === true;
   const triggerReady = trendValid && pullbackValid && structureIntact && !hardFail && hasReviewedPlan
     && bounceConfirmedAndPriceable
     && clearStabilisation
@@ -21221,6 +22841,28 @@ function evaluateEntryTrigger(record, options = {}){
     && bounceConfirmedAndPriceable;
   const extendedFromEntry = hasReviewedPlan && Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice > (entry * 1.03);
   const clearlyMissed = hasReviewedPlan && Number.isFinite(currentPrice) && Number.isFinite(entry) && currentPrice > (entry * 1.06);
+  if(submittedCanonicalPlan && hasReviewedPlan && !hardFail && !clearlyMissed){
+    return {
+      triggerState:'triggered',
+      entryTriggerReady:true,
+      nearReady:true,
+      hardFail:false,
+      trendValid,
+      pullbackValid,
+      structureIntact,
+      confirmedBounce,
+      clearStabilisation,
+      hasReviewedPlan:true,
+      hostileMarket,
+      extendedFromEntry:false,
+      clearlyMissed:false,
+      breakAboveTrigger:true,
+      strongReversal:true,
+      reclaimFollowThrough:true,
+      bouncePriceabilityGuardApplied:bounceGuard.bouncePriceabilityGuardApplied,
+      bouncePriceabilityGuardReason:bounceGuard.bouncePriceabilityGuardReason
+    };
+  }
   return {
     triggerState:hardFail ? 'invalidated' : (clearlyMissed ? 'missed' : (triggerReady ? 'triggered' : (nearReady ? 'near_ready' : 'waiting_for_trigger'))),
     entryTriggerReady:triggerReady,
@@ -21448,7 +23090,7 @@ function legacyReviewHeaderVerdictForRecord(record){
 }
 
 function reviewDowngradeSummaryForRecord(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const scannerStatus = normalizeReviewPresentationVerdict(options.scannerStatus || '');
   const reviewStatus = normalizeReviewPresentationVerdict(options.reviewStatus || '');
   if(!scannerStatus || !reviewStatus) return null;
@@ -21580,12 +23222,16 @@ function planStateForRecord(record){
 }
 
 function actionStateForRecord(record){
-  const item = normalizeTickerRecord(record);
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record)
+    : (record && typeof record === 'object' ? record : {});
   return String(item.action && item.action.stage || deriveActionStateForRecord(item).stage);
 }
 
 function avoidSubtypeForRecord(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record)
+    : (record && typeof record === 'object' ? record : {});
   const finalVerdict = normalizeAnalysisVerdict(options.finalVerdict || reviewHeaderVerdictForRecord(item));
   if(finalVerdict !== 'Avoid') return '';
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
@@ -21631,7 +23277,7 @@ function avoidSubtypeForRecord(record, options = {}){
 }
 
 function decisionReasoningForRecord(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const scannerStatus = normalizeAnalysisVerdict(options.scannerStatus || '');
   const reviewPresentationState = normalizeReviewPresentationVerdict(options.reviewVerdict || '');
   const resolved = resolveFinalStateContract(item, {
@@ -21664,7 +23310,7 @@ function decisionReasoningForRecord(record, options = {}){
 }
 
 function actionPresentationForRecord(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const resolved = resolveFinalStateContract(item, {
     context:'review',
     finalVerdict:options.finalVerdict || reviewHeaderVerdictForRecord(item)
@@ -22759,8 +24405,8 @@ function isAccepted50MaSupportTestDisplayState({
   globalVerdict,
   derivedStates
 } = {}){
-  const item = typeof normalizeTickerRecord === 'function'
-    ? normalizeTickerRecord(record || {})
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record || {})
     : (record && typeof record === 'object' ? record : {});
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
@@ -25812,6 +27458,11 @@ function buildTrackLongPressContract(options = {}){
   const currentTrackPresentation = options && options.currentTrackPresentation && typeof options.currentTrackPresentation === 'object'
     ? options.currentTrackPresentation
     : null;
+  const trackLongPressModel = options && options.longPressModel && typeof options.longPressModel === 'object'
+    ? options.longPressModel
+    : (currentTrackPresentation && currentTrackPresentation.longPressModel && typeof currentTrackPresentation.longPressModel === 'object'
+      ? currentTrackPresentation.longPressModel
+      : null);
   const globalVerdict = options && typeof options.globalVerdict === 'object' ? options.globalVerdict : {};
   const derivedStates = options && typeof options.derivedStates === 'object' ? options.derivedStates : {};
   const displayedPlan = options && typeof options.displayedPlan === 'object' ? options.displayedPlan : {};
@@ -25822,12 +27473,19 @@ function buildTrackLongPressContract(options = {}){
   const currentPresentationBucket = currentTrackPresentation
     ? normalizeVisualBucketForPairing(currentTrackPresentation.visibleBucket || currentTrackPresentation.visualBucket || '')
     : '';
-  const fallbackVerdict = normalizeVerdict(options.finalVerdict || globalVerdict.final_verdict || '');
-  const verdict = currentPresentationVerdict === 'entry'
+  const fallbackVerdict = normalizeVerdict(
+    (trackLongPressModel && trackLongPressModel.canonicalVerdict)
+    || options.finalVerdict
+    || globalVerdict.final_verdict
+    || ''
+  );
+  const verdict = (trackLongPressModel && trackLongPressModel.actionable === true)
+    ? 'entry'
+    : (currentPresentationVerdict === 'entry'
     ? 'entry'
     : (currentPresentationVerdict === 'near_entry' || currentPresentationBucket === 'near_entry'
       ? 'near_entry'
-      : fallbackVerdict);
+      : fallbackVerdict));
   const presentation = String(options.presentationState || '').trim().toLowerCase();
   const structureState = String(derivedStates.structureState || globalVerdict.structure_state || '').trim().toLowerCase();
   const structureEligibility = String(derivedStates.structureEligibility || globalVerdict.structure_eligibility || '').trim().toLowerCase();
@@ -26002,6 +27660,9 @@ function buildTrackLongPressContract(options = {}){
   });
 
   const authoritativeCurrentEntryPresentation = !!currentTrackPresentation && (
+    (trackLongPressModel && trackLongPressModel.actionable === true)
+    || (trackLongPressModel && normalizeGlobalVerdictKey(trackLongPressModel.canonicalVerdict || '') === 'entry')
+    || 
     currentTrackPresentation.authoritativeEntryPanel === true
     || normalizeGlobalVerdictKey(currentTrackPresentation.canonicalVerdict || currentTrackPresentation.finalVerdict || '') === 'entry'
     || normalizeVisualBucketForPairing(currentTrackPresentation.visualBucket || '') === 'entry'
@@ -26012,13 +27673,13 @@ function buildTrackLongPressContract(options = {}){
       show:true,
       ready:true,
       source:'current_track_entry_authority',
-      header:'Entry Ready',
+      header:String(trackLongPressModel && trackLongPressModel.header || 'Entry Ready'),
       why:`This setup is Entry because buyers are in control, the trigger remains valid, and${authoritativeRrLabel ? ` the plan is valid at ${authoritativeRrLabel}` : ' the plan is actionable'}.`,
       stillMissing:'',
       upgrade:'',
       downgrade:'',
       whyNotEntry:'',
-      nextRequiredAction:'Execute only if the trigger remains valid.',
+      nextRequiredAction:String(trackLongPressModel && trackLongPressModel.nextAction || 'Execute only if the trigger remains valid.'),
       signals:uniqueSignals([
         locationWhy,
         bounceWhy,
@@ -26124,6 +27785,7 @@ function buildTrackLongPressContract(options = {}){
       : '';
     return toContract({
       source:'ticker_specific',
+      header:'Near Entry',
       why:`This setup is Near Entry because ${joinReasonParts([
         structureWhy || 'structure is still constructive',
         locationWhy || 'price is in a constructive pullback area',
@@ -26933,7 +28595,9 @@ function resolveReviewPullbackBounceDisplayContext({
   derivedStates,
   reviewEvidence
 } = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record || {})
+    : (record && typeof record === 'object' ? record : {});
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
   const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
@@ -27208,7 +28872,9 @@ function buildResolvedReviewDisplayModel({
   displayedPlan,
   planRealism
 } = {}){
-  const item = normalizeTickerRecord(record || {});
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record || {})
+    : (record && typeof record === 'object' ? record : {});
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const semantic = reviewSemanticStatus && typeof reviewSemanticStatus === 'object' ? reviewSemanticStatus : {};
   const global = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
@@ -27362,6 +29028,367 @@ function buildResolvedReviewDisplayModel({
     explanatoryReason,
     resolvedNarrative:resolvedNarrative || nextActionLabel
   };
+}
+
+function reviewBadgeClassForBucket(bucket = 'monitor'){
+  return ({
+    entry:'badge--entry ready',
+    near_entry:'badge--near-entry near',
+    monitor:'badge--monitor watch',
+    diminishing:'badge--diminishing',
+    avoid:'badge--avoid avoid'
+  })[normalizeVisualBucketForPairing(bucket || 'monitor')] || 'badge--monitor watch';
+}
+
+function resolveCanonicalVisibleVerdictKey(record, options = {}){
+  void record;
+  const simplifiedState = options.simplifiedState && typeof options.simplifiedState === 'object' ? options.simplifiedState : {};
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : {};
+  return normalizeGlobalVerdictKey(
+    simplifiedState.canonicalVerdict
+    || globalVerdict.final_verdict
+    || globalVerdict.finalVerdict
+    || 'watch'
+  );
+}
+
+function buildCanonicalReviewPresentationModel(record, options = {}){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const uiDraftState = options.uiDraftState || (item.review && item.review.draft) || null;
+  const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
+  const globalVerdict = options.globalVerdict || resolveGlobalVerdict(item);
+  const lifecycleSnapshot = options.lifecycleSnapshot || watchlistLifecycleSnapshot(item);
+  const simplifiedState = options.simplifiedState || resolveSimplifiedStateForSurface(item, 'review', {log:false});
+  const effectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(
+    item,
+    simplifiedState,
+    globalVerdict,
+    lifecycleSnapshot
+  );
+  const draftDisplayedPlan = uiDraftState
+    ? applySetupConfirmationPlanGate(
+      item,
+      deriveCurrentPlanState(
+        uiDraftState.entry,
+        uiDraftState.stop,
+        uiDraftState.firstTarget != null ? uiDraftState.firstTarget : uiDraftState.target,
+        item.marketData && item.marketData.currency
+      ),
+      derivedStates
+    )
+    : null;
+  const displayedPlan = options.displayedPlan || applySetupConfirmationPlanGate(
+    item,
+    draftDisplayedPlan && draftDisplayedPlan.status !== 'valid'
+      ? deriveCurrentPlanState(
+        uiDraftState && uiDraftState.entry,
+        uiDraftState && uiDraftState.stop,
+        uiDraftState && (uiDraftState.firstTarget != null ? uiDraftState.firstTarget : uiDraftState.target),
+        item.marketData && item.marketData.currency
+      )
+      : deriveCurrentPlanState(
+        item.plan && item.plan.entry,
+        item.plan && item.plan.stop,
+        item.plan && item.plan.firstTarget,
+        item.marketData && item.marketData.currency
+      ),
+    derivedStates
+  );
+  const renderModels = buildCanonicalRenderModelsFromRecord(item, {
+    surface:'review',
+    source:String(options.source || 'buildCanonicalReviewPresentationModel'),
+    reason:String(options.reason || 'buildCanonicalReviewPresentationModel'),
+    derivedStates,
+    effectivePlan:options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true}),
+    displayedPlan,
+    resolvedContract:globalVerdict,
+    globalVerdict,
+    lifecycleSnapshot,
+    setupScore:setupScoreForRecord(item)
+  }, uiDraftState);
+  const reviewRenderModel = renderModels && renderModels.reviewRenderModel ? renderModels.reviewRenderModel : null;
+  const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const activeProjectionSource = normalizeReviewProjectionSource(
+    String(uiState.activeReviewProjectionSource || '').trim().toLowerCase(),
+    activeProjectionSnapshot
+  );
+  const projectionEntryDisplayOverride = reviewProjectionCanDriveEntryDisplay(
+    activeProjectionSnapshot,
+    activeProjectionSource,
+    item
+  );
+  const persistedDisplayProjection = !projectionEntryDisplayOverride
+    && isPersistedDisplayProjectionSource(activeProjectionSource);
+  const qualityAdjustments = options.qualityAdjustments || evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
+  const verdictKey = normalizeGlobalVerdictKey(
+    persistedDisplayProjection
+      ? (effectiveSimplifiedState.canonicalVerdict || 'watch')
+      : (reviewRenderModel && reviewRenderModel.canonicalVerdict
+      ? reviewRenderModel.canonicalVerdict
+      : resolveCanonicalVisibleVerdictKey(item, {
+        simplifiedState:effectiveSimplifiedState,
+        globalVerdict,
+        displayedPlan
+      }))
+  );
+  const displayStage = options.displayStage || globalVerdictLabel(verdictKey || 'watch');
+  const planUiState = options.planUiState || getPlanUiState(item, {
+    displayedPlan,
+    effectivePlan:options.effectivePlan || {
+      entry:item.plan && item.plan.entry,
+      stop:item.plan && item.plan.stop,
+      firstTarget:item.plan && item.plan.firstTarget
+    },
+    planCheckState:options.planCheckState
+  });
+  const setupUiState = options.setupUiState || getSetupUiState(item, {displayStage, planUiState});
+  const planRealism = options.planRealism || evaluatePlanRealism(item, {
+    displayedPlan,
+    derivedStates,
+    qualityAdjustments,
+    displayStage,
+    setupUiState
+  });
+  const warningState = options.warningState || warningStateFromInputs(item, null, derivedStates);
+  const avoidSubtype = options.avoidSubtype || avoidSubtypeForRecord(item, {
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    finalVerdict:displayStage
+  });
+  const emojiPresentation = options.emojiPresentation || resolveEmojiPresentation(item, {
+    context:'review',
+    finalVerdict:displayStage,
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    warningState,
+    planUiState,
+    setupUiState,
+    avoidSubtype
+  });
+  const resolvedContract = options.resolvedContract || resolveFinalStateContract(item, {
+    context:'review',
+    finalVerdict:displayStage,
+    derivedStates,
+    displayedPlan,
+    qualityAdjustments,
+    warningState,
+    planUiState,
+    setupUiState,
+    avoidSubtype,
+    emojiPresentation
+  });
+  const visualState = options.visualState || resolveVisualState(item, 'review', {
+    resolvedContract,
+    derivedStates,
+    displayedPlan,
+    setupScore:setupScoreForRecord(item)
+  });
+  const reviewLifecycleBiasBucket = (() => {
+    const bucket = normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || visualState.visualBucket || 'monitor');
+    const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+      record:item,
+      simplifiedState:effectiveSimplifiedState,
+      globalVerdict,
+      derivedStates
+    });
+    return accepted50MaSupportTest && bucket === 'diminishing' ? 'monitor' : bucket;
+  })();
+  const reviewTradeStatusVerdict = {
+    ...visualState,
+    ...globalVerdict,
+    main_blocker:effectiveSimplifiedState.mainBlocker || globalVerdict.main_blocker || visualState.main_blocker || '',
+    review_lifecycle_bias:reviewLifecycleBiasBucket,
+    track_presentation_bucket:reviewLifecycleBiasBucket
+  };
+  const reviewSemanticStatus = options.reviewSemanticStatus || buildReviewSemanticStatus({
+    record:item,
+    simplifiedState:effectiveSimplifiedState,
+    globalVerdict:reviewTradeStatusVerdict,
+    derivedStates,
+    displayedPlan,
+    planRealism
+  });
+  const resolvedReviewDisplay = options.resolvedReviewDisplay || buildResolvedReviewDisplayModel({
+    record:item,
+    simplifiedState:effectiveSimplifiedState,
+    globalVerdict:reviewTradeStatusVerdict,
+    reviewSemanticStatus,
+    derivedStates,
+    displayedPlan,
+    planRealism
+  });
+  const visualBucket = normalizeVisualBucketForPairing(
+    (reviewRenderModel && reviewRenderModel.visualBucket)
+    || (verdictKey === 'entry'
+      ? 'entry'
+      : (verdictKey === 'near_entry'
+        ? 'near_entry'
+        : normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor')))
+  );
+  const tone = String(
+    (reviewRenderModel && reviewRenderModel.tone)
+    || (verdictKey === 'entry'
+      ? 'entry'
+      : (verdictKey === 'near_entry'
+        ? 'near_entry'
+      : (String(effectiveSimplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')))
+  ).trim().toLowerCase() || 'monitor';
+  const projectionActionGuidance = projectionEntryDisplayOverride
+    ? String(
+      activeProjectionSnapshot && (
+        activeProjectionSnapshot.actionGuidance
+        || activeProjectionSnapshot.actionLabel
+        || activeProjectionSnapshot.actionShortLabel
+      ) || ''
+    ).trim()
+    : '';
+  const draftEntryValue = uiDraftState && uiDraftState.entry != null ? String(uiDraftState.entry) : '';
+  const draftStopValue = uiDraftState && uiDraftState.stop != null ? String(uiDraftState.stop) : '';
+  const draftTargetValue = uiDraftState && (uiDraftState.firstTarget != null ? uiDraftState.firstTarget : uiDraftState.target) != null
+    ? String(uiDraftState.firstTarget != null ? uiDraftState.firstTarget : uiDraftState.target)
+    : '';
+  const liveDraftInputsDiverged = !!uiDraftState && (
+    draftEntryValue !== (item.plan && item.plan.entry != null ? String(item.plan.entry) : '')
+    || draftStopValue !== (item.plan && item.plan.stop != null ? String(item.plan.stop) : '')
+    || draftTargetValue !== (item.plan && item.plan.firstTarget != null ? String(item.plan.firstTarget) : '')
+  );
+  const liveDraftNeedsReplan = liveDraftInputsDiverged && String(displayedPlan && displayedPlan.status || '').trim().toLowerCase() !== 'valid';
+  const entryReady = !liveDraftNeedsReplan && (projectionEntryDisplayOverride || (reviewRenderModel && typeof reviewRenderModel.planVisible === 'boolean'
+    ? reviewRenderModel.planVisible === true
+    : verdictKey === 'entry'));
+  const tradeStatus = entryReady
+    ? {
+      line1:projectionEntryDisplayOverride
+        ? 'Entry Ready'
+        : String(reviewRenderModel && reviewRenderModel.headline || 'Entry Ready'),
+      line2:projectionActionGuidance || String(reviewRenderModel && reviewRenderModel.nextAction || 'Execute only if the trigger remains valid.')
+    }
+    : resolvedReviewDisplay.tradeStatus;
+  const planUI = entryReady
+    ? {
+      ...resolvedReviewDisplay.planUI,
+      showPlan:true,
+      showRR:true,
+      showCapital:true,
+      showPositionSize:true
+    }
+    : resolvedReviewDisplay.planUI;
+  const rrDisplay = liveDraftNeedsReplan
+    ? 'No actionable plan yet.'
+    : (entryReady
+    ? preferredReviewRrDisplay(
+      item,
+      projectionEntryDisplayOverride
+        ? deriveCurrentPlanState(
+          item.plan && item.plan.entry,
+          item.plan && item.plan.stop,
+          item.plan && item.plan.firstTarget,
+          item.marketData && item.marketData.currency
+        )
+        : displayedPlan,
+      resolvedReviewDisplay.rrDisplay
+    )
+    : resolvedReviewDisplay.rrDisplay);
+  const capitalFitVisual = capitalFitPresentation({
+    capitalFit:displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit,
+    affordability:displayedPlan.affordability,
+    comfortLabel:options.capitalComfort && options.capitalComfort.label
+  });
+  return {
+    ticker:normalizeTicker(item.ticker || ''),
+    record:item,
+    verdictKey,
+    visualBucket,
+    tone,
+    badgeLabel:String(
+      (projectionEntryDisplayOverride
+        ? 'Entry'
+        : ((reviewRenderModel && reviewRenderModel.badgeLabel)
+      || globalVerdictLabel(verdictKey || 'watch')
+      || effectiveSimplifiedState.badgeLabel
+      || 'Watch'))
+    ).trim(),
+    badgeClass:reviewBadgeClassForBucket(visualBucket),
+    tradeStatus,
+    planUI,
+    rrDisplay,
+    resolvedReviewDisplay,
+    effectiveSimplifiedState,
+    displayedPlan,
+    planRealism,
+    capitalFitVisual,
+    positionCostVisible:resolvedReviewDisplay.positionCostVisible === true,
+    positionCostText:resolvedReviewDisplay.positionCostText,
+    technicalContextLine:resolvedReviewDisplay.technicalContextLine,
+    nextActionLabel:String(
+      projectionActionGuidance
+      || (reviewRenderModel && reviewRenderModel.nextAction)
+      || (entryReady ? 'Execute only if the trigger remains valid.' : resolvedReviewDisplay.nextActionLabel)
+    ).trim(),
+    planSummary:resolvedReviewDisplay.planSummary,
+    contractFingerprint:String(reviewRenderModel && reviewRenderModel.contractFingerprint || '')
+  };
+}
+
+function applyCanonicalReviewPresentationModelToDom(model){
+  const presentation = model && typeof model === 'object' ? model : null;
+  if(!presentation) return;
+  const activeTicker = typeof activeReviewTicker === 'function' ? activeReviewTicker() : '';
+  const activeRecord = activeTicker ? getTickerRecord(activeTicker) : null;
+  const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(activeTicker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const activeProjectionSource = normalizeReviewProjectionSource(
+    String(uiState.activeReviewProjectionSource || '').trim().toLowerCase(),
+    activeProjectionSnapshot
+  );
+  const persistedDisplayHealth = activeRecord && !reviewProjectionCanDriveEntryDisplay(activeProjectionSnapshot, activeProjectionSource, activeRecord)
+    && isPersistedDisplayProjectionSource(activeProjectionSource)
+      ? currentReviewStateHealthSnapshot(activeRecord)
+      : null;
+  const persistedDisplayVerdict = normalizeOptionalGlobalVerdictKey(
+    persistedDisplayHealth && persistedDisplayHealth.canonicalVerdict
+    || ''
+  );
+  const effectiveBadgeBucket = persistedDisplayVerdict
+    ? normalizeVisualBucketForPairing(persistedDisplayHealth && persistedDisplayHealth.visualBucket || persistedDisplayVerdict)
+    : presentation.visualBucket;
+  const effectiveBadgeLabel = persistedDisplayVerdict
+    ? String(globalVerdictLabel(persistedDisplayVerdict) || 'Watch')
+    : String(presentation.badgeLabel || 'Watch');
+  const badgeNode = document.querySelector('#reviewWorkspace .review-summary-badges .badge');
+  if(badgeNode){
+    badgeNode.className = `badge ${presentation.badgeClass || reviewBadgeClassForBucket(effectiveBadgeBucket)}`.trim();
+    badgeNode.textContent = effectiveBadgeLabel;
+  }
+  if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(presentation.tradeStatus || {line1:'No actionable trade yet.', line2:''});
+  if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !(presentation.planUI && presentation.planUI.showPlan));
+  if($('capitalFitMetric')){
+    const className = presentation.capitalFitVisual && presentation.capitalFitVisual.className
+      ? presentation.capitalFitVisual.className
+      : '';
+    $('capitalFitMetric').className = `stat stat--capital-fit ${className}${presentation.planUI && presentation.planUI.showCapital ? '' : ' review-hidden'}`.trim();
+  }
+  if($('positionSizeStat')) $('positionSizeStat').classList.toggle('review-hidden', !(presentation.planUI && presentation.planUI.showPositionSize));
+  if($('positionCostStat')) $('positionCostStat').classList.toggle('review-hidden', presentation.positionCostVisible !== true);
+  if($('fxBasisBox')) $('fxBasisBox').classList.toggle('review-hidden', !(presentation.planUI && presentation.planUI.showCapital));
+  if($('positionCostBox')) $('positionCostBox').textContent = String(presentation.positionCostText || '-');
+  if($('reviewNextActionInline')) $('reviewNextActionInline').textContent = `Action guidance: ${String(presentation.nextActionLabel || '')}`;
+  if($('reviewNextActionPrimary')) $('reviewNextActionPrimary').textContent = `Can I trade this now? ${String(presentation.nextActionLabel || '')}`;
+  if($('reviewTechnicalContextLine')) $('reviewTechnicalContextLine').textContent = String(presentation.technicalContextLine || '');
+  if($('rrValue')){
+    $('rrValue').textContent = String(presentation.rrDisplay || 'No actionable plan yet.');
+    $('rrValue').className = `big ${presentation.planUI && presentation.planUI.showRR ? rrDisplayClass(presentation.displayedPlan && presentation.displayedPlan.rewardRisk && presentation.displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
+  }
+  if($('planRealismSummary')) $('planRealismSummary').textContent = String(presentation.planSummary || '');
 }
 
 // Single-authority contract: only the canonical resolver/displayed plan may decide
@@ -27556,6 +29583,7 @@ function buildReviewSemanticStatus({
   const realisticRr = planRealism && Number.isFinite(numericOrNull(planRealism.realistic_rr))
     ? Number(numericOrNull(planRealism.realistic_rr))
     : null;
+  const planValidationPending = String(record && record.plan && record.plan.planValidationState || '').trim().toLowerCase() === 'pending_validation';
   const constructiveWeakRr = aliveStructure
     && !structuralWeakness
     && ['attempt','early','developing'].includes(bounceState)
@@ -27627,7 +29655,8 @@ function buildReviewSemanticStatus({
     && canonicalPlanAuthority.riskFits === true
     && canonicalPlanAuthority.reasonCode === 'capital_not_affordable';
   const draftPlan = planMathValid && verdict === 'watch';
-  const pricedButNotReady = planMathValid
+  const pricedButNotReady = planValidationPending !== true
+    && planMathValid
     && actionable !== true
     && unaffordableCanonicalPlan !== true
     && terminalAvoid !== true
@@ -27812,7 +29841,7 @@ function planValidationStateLabel(planValidationState){
 }
 
 function savedPlanSnapshotForRecord(record){
-  const item = normalizeTickerRecord(record || {});
+  const item = normalizeTickerRecordReadOnly(record || {});
   if([item.plan.entry, item.plan.stop, item.plan.firstTarget].some(Number.isFinite)){
     return {
       entry:item.plan.entry,
@@ -27845,7 +29874,9 @@ function hasUnsavedPlanEdits(record, currentPlan){
 }
 
 function planCheckStateForRecord(record, options = {}){
-  const item = record && typeof record === 'object' ? record : {};
+  const item = typeof normalizeTickerRecordReadOnly === 'function'
+    ? normalizeTickerRecordReadOnly(record || {})
+    : (record && typeof record === 'object' ? record : {});
   const effectivePlan = options.effectivePlan || effectivePlanForRecord(item, {allowScannerFallback:true});
   const displayedPlan = options.displayedPlan || deriveCurrentPlanState(
     effectivePlan.entry,
@@ -28096,7 +30127,7 @@ function shouldShowActionableRR(view){
 }
 
 function projectTickerForCard(record, options = {}){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const surface = String(options.surface || '').trim().toLowerCase();
   const authoritativeScanSurface = surface === 'scan'
     ? authoritativePersistedScanSnapshotForScanSurface(item)
@@ -30040,7 +32071,7 @@ function getReviewAnalysisState(record){
 }
 
 function reviewAnalysisUiStateForRecord(record){
-  const item = normalizeTickerRecord(record);
+  const item = normalizeTickerRecordReadOnly(record);
   const analysisState = getReviewAnalysisState(item);
   const chartAttached = !!(item.review && item.review.chartRef && item.review.chartRef.dataUrl);
   const runtime = uiState.reviewAiRuntime && typeof uiState.reviewAiRuntime === 'object'
@@ -32690,6 +34721,10 @@ function collectTradePlanAuthorityCandidates(record){
 
 function effectivePlanForRecord(record, options = {}){
   const item = record && typeof record === 'object' ? record : {};
+  const hasConcretePlan = [item.plan && item.plan.entry, item.plan && item.plan.stop, item.plan && item.plan.firstTarget]
+    .every(value => Number.isFinite(numericOrNull(value)));
+  const hasPartialPlan = [item.plan && item.plan.entry, item.plan && item.plan.stop, item.plan && item.plan.firstTarget]
+    .some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
   const stampedCanonicalPlan = typeof hasCanonicalTradePlanStamp === 'function'
     ? hasCanonicalTradePlanStamp(item.plan)
     : (
@@ -32699,8 +34734,14 @@ function effectivePlanForRecord(record, options = {}){
       && !!String(item.plan.writtenBy || '').trim()
       && !!String(item.plan.writtenAt || '').trim()
     );
-  const hasCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
-  if(hasCanonicalPlan && stampedCanonicalPlan){
+  /*
+    record.plan is the canonical trade-plan container.
+    Stamp metadata records the authoritative write path, but readers must still
+    refuse unstamped plan values until an explicit persistence path promotes
+    them. This prevents reload/render flows from silently re-authorizing legacy
+    or cache-derived plan data.
+  */
+  if(stampedCanonicalPlan && hasConcretePlan){
     return {
       entry:Number.isFinite(item.plan.entry) ? String(Number(item.plan.entry.toFixed(2))) : '',
       stop:Number.isFinite(item.plan.stop) ? String(Number(item.plan.stop.toFixed(2))) : '',
@@ -32708,8 +34749,7 @@ function effectivePlanForRecord(record, options = {}){
       source:String(item.plan.source || 'manual')
     };
   }
-  const hasPartialCanonicalPlan = [item.plan.entry, item.plan.stop, item.plan.firstTarget].some(value => Number.isFinite(numericOrNull(value)) || !!String(value || '').trim());
-  if(hasPartialCanonicalPlan && stampedCanonicalPlan){
+  if(stampedCanonicalPlan && hasPartialPlan){
     return {
       entry:String(item.plan.entry ?? ''),
       stop:String(item.plan.stop ?? ''),
@@ -32746,12 +34786,111 @@ function recordPlanHasConcreteValues(record){
     && Number.isFinite(numericOrNull(item.plan && item.plan.firstTarget));
 }
 
+function hasSubmittedPaperTradeEventForTicker(ticker){
+  const symbol = normalizeTicker(ticker || '');
+  if(!symbol) return false;
+  const tradeDiary = Array.isArray(state && state.tradeDiary) ? state.tradeDiary : [];
+  return tradeDiary.some(entry => {
+    const entryTicker = normalizeTicker(entry && entry.ticker || '');
+    const status = String(entry && (entry.status || entry.executionMeta && entry.executionMeta.status) || '').trim().toLowerCase();
+    const sourceType = String(entry && entry.sourceType || '').trim().toLowerCase();
+    return entryTicker === symbol && sourceType === 'paper_trade' && status === 'submitted';
+  });
+}
+
+function hasSubmittedPaperTradeEvidenceForRecord(record){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item) return false;
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const tickerDiaryRecords = item.diary && Array.isArray(item.diary.records)
+    ? item.diary.records
+    : [];
+  const submittedTickerDiary = tickerDiaryRecords.some(entry => {
+    const sourceType = String(entry && entry.sourceType || '').trim().toLowerCase();
+    const status = String(entry && (entry.status || entry.executionMeta && entry.executionMeta.status) || '').trim().toLowerCase();
+    return sourceType === 'paper_trade' && status === 'submitted';
+  });
+  const submittedPlanStampAt = String(plan.submittedPaperTradeAt || '').trim();
+  const submittedPlanStamp = String(plan.authorityReason || '').trim().toLowerCase() === 'preserve_submitted_paper_trade_plan'
+    || String(plan.source || '').trim().toLowerCase() === 'paper_trade_submit';
+  return !!submittedPlanStampAt || submittedTickerDiary || submittedPlanStamp || hasSubmittedPaperTradeEventForTicker(item.ticker);
+}
+
+function submittedPaperTradeDisplayedPlan(record){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item || hasSubmittedPaperTradeEvidenceForRecord(item) !== true || recordPlanHasConcreteValues(item) !== true) return null;
+  if(hasCanonicalTradePlanStamp(item.plan) !== true) return null;
+  const plan = deriveCurrentPlanState(
+    item.plan.entry,
+    item.plan.stop,
+    item.plan.firstTarget,
+    item.marketData && item.marketData.currency
+  );
+  return plan && String(plan.status || '').trim().toLowerCase() === 'valid' ? plan : null;
+}
+
+function hasSubmittedPaperTradeCanonicalPlan(record){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item || hasSubmittedPaperTradeEvidenceForRecord(item) !== true) return false;
+  if(hasCanonicalTradePlanStamp(item.plan) !== true) return false;
+  if(recordPlanHasConcreteValues(item) !== true) return false;
+  return String(item.plan && item.plan.status || '').trim().toLowerCase() === 'valid';
+}
+
+function restoreSubmittedPaperTradePlanState(record){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item || hasSubmittedPaperTradeEvidenceForRecord(item) !== true) return false;
+  if(hasCanonicalTradePlanStamp(item.plan) !== true || recordPlanHasConcreteValues(item) !== true) return false;
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const globalVerdict = resolveGlobalVerdict(item);
+  const structureState = String(derivedStates.structureState || '').trim().toLowerCase();
+  const structureEligibility = String(derivedStates.structureEligibility || globalVerdict.structure_eligibility || '').trim().toLowerCase();
+  const explicitInvalidationReason = String(
+    globalVerdict.explicit_invalidation_reason
+    || item.plan && item.plan.invalidatedState
+    || item.plan && item.plan.missedState
+    || ''
+  ).trim();
+  if(
+    explicitInvalidationReason
+    || normalizeGlobalVerdictKey(globalVerdict.final_verdict || globalVerdict.finalVerdict || '') === 'avoid'
+    || ['broken', 'dead', 'failed'].includes(structureState)
+    || structureEligibility === 'broken'
+  ){
+    return false;
+  }
+  let changed = false;
+  item.plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  if(String(item.plan.status || '').trim().toLowerCase() !== 'valid'){
+    item.plan.status = 'valid';
+    changed = true;
+  }
+  if(String(item.plan.triggerState || '').trim().toLowerCase() !== 'triggered'){
+    item.plan.triggerState = 'triggered';
+    changed = true;
+  }
+  if(String(item.plan.planValidationState || '').trim().toLowerCase() !== 'valid'){
+    item.plan.planValidationState = 'valid';
+    changed = true;
+  }
+  if(!String(item.plan.riskStatus || '').trim()){
+    item.plan.riskStatus = 'fits_risk';
+    changed = true;
+  }
+  if(!String(item.plan.tradeability || '').trim()){
+    item.plan.tradeability = 'tradable';
+    changed = true;
+  }
+  return changed;
+}
+
 function ensureCanonicalPlanForRecord(record, options = {}){
   if(!(record && typeof record === 'object')) return false;
-  const gated = applyGlobalVerdictGates(record, {source:'review'});
-  if(!gated.globalVerdict.allow_plan) return gated.changed;
   if(recordPlanHasConcreteValues(record)){
-    if(hasCanonicalTradePlanStamp(record.plan)) return false;
+    if(hasCanonicalTradePlanStamp(record.plan)){
+      const gated = applyGlobalVerdictGates(record, {source:'review'});
+      return gated.changed;
+    }
     applyPlanCandidateToRecord(record, {
       entry:record.plan && record.plan.entry,
       stop:record.plan && record.plan.stop,
@@ -32762,8 +34901,11 @@ function ensureCanonicalPlanForRecord(record, options = {}){
       writtenBy:'ensureCanonicalPlanForRecord',
       updatedAt:new Date().toISOString()
     });
+    applyGlobalVerdictGates(record, {source:'review'});
     return true;
   }
+  const gated = applyGlobalVerdictGates(record, {source:'review'});
+  if(!gated.globalVerdict.allow_plan) return gated.changed;
   const derivedPlan = effectivePlanForRecord(record, {allowScannerFallback:options.allowScannerFallback === true});
   const hasDerivedValues = [derivedPlan.entry, derivedPlan.stop, derivedPlan.firstTarget].every(value => Number.isFinite(numericOrNull(value)));
   if(!hasDerivedValues) return false;
@@ -33983,7 +36125,12 @@ async function analyseSetup(ticker, options = {}){
         card.stop = String(proposedPlan.stop || '');
         card.target = String(proposedPlan.firstTarget || '');
       }
-      refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
+      writeLifecycleState(record, {
+        stage:'reviewed',
+        tradingDays:REVIEW_EXPIRY_TRADING_DAYS,
+        reason:'Ticker opened in Setup Review.',
+        source:'review'
+      }, {mode:'refresh'});
       logAnalysisDebug('ANALYSIS_STATE_WRITE', {
         ticker:record.ticker,
         apiResponse:data,
@@ -34079,7 +36226,12 @@ async function analyseSetup(ticker, options = {}){
       flushPendingAiSummaryForChart(record, {source:'analyse_setup_failed'});
       record.review.cardOpen = true;
       record.meta.updatedAt = record.review.analysisState.reviewedAt;
-      refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
+      writeLifecycleState(record, {
+        stage:'reviewed',
+        tradingDays:REVIEW_EXPIRY_TRADING_DAYS,
+        reason:'Ticker opened in Setup Review.',
+        source:'review'
+      }, {mode:'refresh'});
       logAnalysisDebug('ANALYSIS_STATE_WRITE', {
         ticker:record.ticker,
         lastPrompt:record.review.analysisState.prompt,
@@ -34318,6 +36470,18 @@ function reviewOpenMutationSnapshot(record, context = 'review_open'){
 
 function buildStableReviewProjectionSnapshot(record, context = 'review_open_during_refresh'){
   const item = normalizeTickerRecord(record);
+  const journeyAuthority = typeof currentTickerJourneyAuthority === 'function'
+    ? currentTickerJourneyAuthority(item)
+    : {};
+  const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(item.ticker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const activeProjectionSource = normalizeReviewProjectionSource(
+    String(uiState.activeReviewProjectionSource || '').trim().toLowerCase(),
+    activeProjectionSnapshot
+  );
   const simplifiedState = resolveSimplifiedStateForSurface(item, 'review', {log:false});
   const globalVerdict = resolveGlobalVerdict(item);
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
@@ -34329,17 +36493,59 @@ function buildStableReviewProjectionSnapshot(record, context = 'review_open_duri
   );
   const ticker = normalizeTicker(item.ticker || '');
   if(!ticker) return null;
-  const visualBucket = String(effectiveSimplifiedState.visualBucket || '').trim();
-  const canonicalVerdict = String(effectiveSimplifiedState.canonicalVerdict || '').trim();
-  const tone = String(effectiveSimplifiedState.tone || visualBucket || '').trim();
+  const projectionPreferred = hasPresentationAuthoritySnapshot(activeProjectionSnapshot, ticker)
+    && ['clicked_card_snapshot', 'track_projection_updated'].includes(activeProjectionSource);
+  const visualBucket = String(
+    projectionPreferred
+      ? (
+        activeProjectionSnapshot.sourceOfTruthVisualBucket
+        || activeProjectionSnapshot.visualBucket
+        || activeProjectionSnapshot.renderedBucket
+      )
+      : effectiveSimplifiedState.visualBucket
+    || ''
+  ).trim();
+  const canonicalVerdict = String(
+    projectionPreferred
+      ? (
+        activeProjectionSnapshot.canonicalVerdict
+        || activeProjectionSnapshot.finalVerdict
+        || activeProjectionSnapshot.renderedVerdict
+      )
+      : effectiveSimplifiedState.canonicalVerdict
+    || ''
+  ).trim();
+  const tone = String(
+    projectionPreferred
+      ? (
+        activeProjectionSnapshot.tone
+        || activeProjectionSnapshot.sourceOfTruthVisualBucket
+        || activeProjectionSnapshot.visualBucket
+      )
+      : (effectiveSimplifiedState.tone || visualBucket)
+    || ''
+  ).trim();
   const decisionSummary = String(
-    effectiveSimplifiedState.decisionSummary
+    (projectionPreferred && (
+      activeProjectionSnapshot.decisionSummary
+      || activeProjectionSnapshot.headline
+      || activeProjectionSnapshot.statusText
+    ))
+    || effectiveSimplifiedState.decisionSummary
     || effectiveSimplifiedState.mainBlocker
     || effectiveSimplifiedState.actionLabel
     || effectiveSimplifiedState.planStatus
     || ''
   ).trim();
-  const actionGuidance = String(effectiveSimplifiedState.actionLabel || '').trim();
+  const actionGuidance = String(
+    (projectionPreferred && (
+      activeProjectionSnapshot.actionGuidance
+      || activeProjectionSnapshot.actionLabel
+      || activeProjectionSnapshot.actionShortLabel
+    ))
+    || effectiveSimplifiedState.actionLabel
+    || ''
+  ).trim();
   const resolvedSectionKey = String(
     effectiveSimplifiedState.sectionKey
     || effectiveSimplifiedState.renderedBucket
@@ -34349,27 +36555,44 @@ function buildStableReviewProjectionSnapshot(record, context = 'review_open_duri
   const projectionSnapshot = {
     ticker,
     context:String(context || 'review_open_during_refresh'),
-    canonicalVerdict,
-    finalVerdict:canonicalVerdict,
-    renderedVerdict:canonicalVerdict,
-    visualBucket,
-    sourceOfTruthVisualBucket:visualBucket,
-    renderedBucket:visualBucket,
-    tone,
+    canonicalVerdict:normalizeGlobalVerdictKey(canonicalVerdict || 'watch'),
+    finalVerdict:normalizeGlobalVerdictKey(canonicalVerdict || 'watch'),
+    renderedVerdict:normalizeGlobalVerdictKey(canonicalVerdict || 'watch'),
+    visualBucket:normalizeVisualBucketForPairing(visualBucket || canonicalVerdict || 'monitor'),
+    sourceOfTruthVisualBucket:normalizeVisualBucketForPairing(visualBucket || canonicalVerdict || 'monitor'),
+    renderedBucket:normalizeVisualBucketForPairing(visualBucket || canonicalVerdict || 'monitor'),
+    tone:String(
+      normalizeGlobalVerdictKey(canonicalVerdict || 'watch') === 'entry'
+        ? 'entry'
+        : (normalizeGlobalVerdictKey(canonicalVerdict || 'watch') === 'near_entry'
+          ? 'near_entry'
+          : tone)
+    ).trim().toLowerCase(),
     sectionKey:resolvedSectionKey,
     resolvedSectionKey,
-    decisionSummary,
-    actionGuidance,
+    decisionSummary:String(
+      normalizeGlobalVerdictKey(canonicalVerdict || 'watch') === 'entry'
+        ? 'Buyers are in control and the setup is ready to act on.'
+        : decisionSummary
+    ).trim(),
+    actionGuidance:String(
+      normalizeGlobalVerdictKey(canonicalVerdict || 'watch') === 'entry'
+        ? 'Execute only if the trigger remains valid.'
+        : actionGuidance
+    ).trim(),
     setupScore:setupScoreForRecord(item),
     capturedAt:new Date().toISOString(),
-    source:'stable_record_snapshot',
-    authority:currentTickerJourneyAuthority(item)
+    source:projectionPreferred ? 'active_review_projection_snapshot' : 'stable_record_snapshot',
+    authority:journeyAuthority
   };
   return projectionSnapshot;
 }
 
 function buildTrackProjectionSnapshotFromPersistedPresentation(record, context = 'watchlist_add_projection'){
   const item = normalizeTickerRecord(record || {});
+  const journeyAuthority = typeof currentTickerJourneyAuthority === 'function'
+    ? currentTickerJourneyAuthority(item)
+    : {};
   const ticker = normalizeTicker(item.ticker || '');
   if(!ticker) return null;
   const persistedPresentation = item.watchlist
@@ -34382,6 +36605,15 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     && typeof persistedPresentation.sharedPresentation === 'object'
     ? persistedPresentation.sharedPresentation
     : null;
+  /*
+    Persisted projection authority map:
+    - review.savedProjectionSnapshot / review.savedVerdict: reload convenience only.
+    - watchlist/shared presentation and track projection fallback: display-only persisted context.
+    - startup review restore may reopen the last review ticker, but must not recreate Entry authority.
+    - projections/persisted presentation never create live authority.
+    Precedence:
+    fresh canonical/review authority > display-only persisted context > stale persisted verdict ignored.
+  */
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const globalVerdict = resolveGlobalVerdict(item);
   const simplifiedState = resolveSimplifiedStateForSurface(item, 'track', {
@@ -34389,6 +36621,41 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     source:context,
     reason:context
   });
+  const renderModels = typeof buildCanonicalRenderModelsFromRecord === 'function'
+    ? buildCanonicalRenderModelsFromRecord(item, {
+      surface:'track',
+      source:context,
+      reason:context,
+      derivedStates:simplifiedState && simplifiedState.debug && simplifiedState.debug.derivedStates
+        ? simplifiedState.debug.derivedStates
+        : analysisDerivedStatesFromRecord(item),
+      effectivePlan:effectivePlanForRecord(item, {allowScannerFallback:true}),
+      displayedPlan:applySetupConfirmationPlanGate(
+        item,
+        deriveCurrentPlanState(
+          item.plan && item.plan.entry,
+          item.plan && item.plan.stop,
+          item.plan && item.plan.firstTarget,
+          item.marketData && item.marketData.currency
+        )
+      ),
+      resolvedContract:globalVerdict,
+      globalVerdict,
+      lifecycleSnapshot,
+      setupScore:setupScoreForRecord(item)
+    })
+    : null;
+  const planVerdictContract = renderModels && renderModels.contract && typeof renderModels.contract === 'object'
+    ? renderModels.contract
+    : null;
+  const planVerdictContractApi = typeof window !== 'undefined' && window && window.PlanVerdictContract
+    ? window.PlanVerdictContract
+    : null;
+  const canonicalTrackRenderModel = planVerdictContractApi && typeof planVerdictContractApi.buildTrackRenderModel === 'function'
+    ? planVerdictContractApi.buildTrackRenderModel(planVerdictContract)
+    : (renderModels && renderModels.trackRenderModel && typeof renderModels.trackRenderModel === 'object'
+      ? renderModels.trackRenderModel
+      : null);
   const sharedPresentation = buildSharedReviewTrackPresentation(item, {
     surface:'track',
     simplifiedState,
@@ -34398,8 +36665,26 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     source:context,
     reason:context
   });
-  const visualBucket = normalizeVisualBucketForPairing(sharedPresentation.visualBucket || 'monitor');
-  const canonicalVerdict = normalizeGlobalVerdictKey(sharedPresentation.canonicalVerdict || sharedPresentation.finalVerdict || 'watch');
+  const snapshotPresentation = persistedSharedPresentation && typeof persistedSharedPresentation === 'object'
+    ? persistedSharedPresentation
+    : null;
+  const visualBucket = normalizeVisualBucketForPairing(
+    canonicalTrackRenderModel && (canonicalTrackRenderModel.visibleBucket || canonicalTrackRenderModel.visualBucket)
+    || sharedPresentation.visualBucket
+    || 'monitor'
+  );
+  const canonicalVerdict = normalizeGlobalVerdictKey(
+    canonicalTrackRenderModel && canonicalTrackRenderModel.canonicalVerdict
+    || sharedPresentation.canonicalVerdict
+    || sharedPresentation.finalVerdict
+    || 'watch'
+  );
+  const tone = String(
+    canonicalTrackRenderModel && canonicalTrackRenderModel.tone
+    || sharedPresentation.tone
+    || visualBucket
+    || 'monitor'
+  ).trim().toLowerCase() || 'monitor';
   const resolvedSectionKey = String(watchlistRenderGroupForBucket(visualBucket) || visualBucket || '').trim().toLowerCase();
   return {
     ticker,
@@ -34410,17 +36695,262 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     visualBucket,
     sourceOfTruthVisualBucket:visualBucket,
     renderedBucket:visualBucket,
-    tone:String(sharedPresentation.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
+    tone,
     sectionKey:resolvedSectionKey,
     resolvedSectionKey,
-    decisionSummary:String(sharedPresentation.headline || sharedPresentation.statusText || '').trim(),
-    actionGuidance:String(sharedPresentation.nextAction || sharedPresentation.actionLabel || '').trim(),
+    decisionSummary:String(
+      canonicalTrackRenderModel && (canonicalTrackRenderModel.headline || canonicalTrackRenderModel.statusText)
+      || sharedPresentation.headline
+      || sharedPresentation.statusText
+      || snapshotPresentation && (snapshotPresentation.headline || snapshotPresentation.statusText)
+      || ''
+    ).trim(),
+    actionGuidance:String(
+      canonicalTrackRenderModel && (canonicalTrackRenderModel.nextAction || canonicalTrackRenderModel.actionLabel)
+      || sharedPresentation.nextAction
+      || sharedPresentation.actionLabel
+      || snapshotPresentation && (snapshotPresentation.nextAction || snapshotPresentation.actionLabel)
+      || ''
+    ).trim(),
     persistedPresentationAvailable:persistedSharedPresentation != null,
     persistedPresentationCacheOnly:persistedSharedPresentation != null,
     capturedAt:new Date().toISOString(),
     source:'persisted_track_presentation',
-    authority:currentTickerJourneyAuthority(item)
+    authority:journeyAuthority
   };
+}
+
+function reviewStoredProjectionSnapshot(record){
+  const item = normalizeTickerRecord(record || {});
+  const ticker = normalizeTicker(item.ticker || '');
+  if(!ticker) return null;
+  const storedSnapshot = item.review
+    && item.review.savedProjectionSnapshot
+    && typeof item.review.savedProjectionSnapshot === 'object'
+      ? item.review.savedProjectionSnapshot
+      : null;
+  if(!hasPresentationAuthoritySnapshot(storedSnapshot, ticker)) return null;
+  return projectionSnapshotWithAuthority(storedSnapshot, item);
+}
+
+function withReviewProjectionSuppressed(callback){
+  if(typeof callback !== 'function') return null;
+  const stateRef = typeof uiState !== 'undefined' && uiState && typeof uiState === 'object'
+    ? uiState
+    : null;
+  if(!stateRef) return callback();
+  const previousProjectionSnapshot = stateRef.activeReviewSourceProjectionSnapshot;
+  const previousProjectionSource = stateRef.activeReviewProjectionSource;
+  try{
+    delete stateRef.activeReviewSourceProjectionSnapshot;
+    stateRef.activeReviewProjectionSource = '';
+    return callback();
+  }finally{
+    if(previousProjectionSnapshot === undefined) delete stateRef.activeReviewSourceProjectionSnapshot;
+    else stateRef.activeReviewSourceProjectionSnapshot = previousProjectionSnapshot;
+    if(previousProjectionSource === undefined) delete stateRef.activeReviewProjectionSource;
+    else stateRef.activeReviewProjectionSource = previousProjectionSource;
+  }
+}
+
+function clearPersistedReviewProjectionState(record, options = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item) return false;
+  let changed = false;
+  if(item.review.savedProjectionSnapshot){
+    writeSavedReviewAuthority(item, {savedProjectionSnapshot:null}, {clearProjectionWhenNonEntry:false});
+    changed = true;
+  }
+  if(options.clearSavedVerdict !== false && normalizeGlobalVerdictKey(item.review.savedVerdict || '') === 'entry'){
+    writeSavedReviewAuthority(item, {savedVerdict:''}, {clearProjectionWhenNonEntry:false});
+    changed = true;
+  }
+  if(changed) commitTickerState();
+  return changed;
+}
+
+function evaluatePersistedReviewProjectionValidity(record, snapshot, context = 'startup_review_projection'){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const ticker = normalizeTicker(item.ticker || '');
+  const projectionVerdict = normalizeGlobalVerdictKey(
+    snapshot && (
+      snapshot.canonicalVerdict
+      || snapshot.finalVerdict
+      || snapshot.renderedVerdict
+    ) || ''
+  );
+  const reviewVerdictFallback = normalizeGlobalVerdictKey(item.review && item.review.savedVerdict || '');
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const globalVerdict = resolveGlobalVerdict(item);
+  const projectionSuppressedReviewState = withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(item, 'review', {
+    log:false,
+    source:context,
+    reason:'persisted_review_projection_validation'
+  })) || {};
+  const reviewResolverVerdict = normalizeGlobalVerdictKey(projectionSuppressedReviewState.canonicalVerdict || '');
+  const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
+  let displayedPlan = applySetupConfirmationPlanGate(
+    item,
+    deriveCurrentPlanState(
+      effectivePlan.entry,
+      effectivePlan.stop,
+      effectivePlan.firstTarget,
+      item.marketData && item.marketData.currency
+    ),
+    derivedStates
+  );
+  const explicitInvalidationAuthorityCode = resolveStructuredExplicitInvalidationAuthorityCode(globalVerdict);
+  const scannerEstimateHardBlockers = currentScannerEstimateHardBlockers(item, {
+    displayedPlan,
+    derivedStates,
+    globalVerdict,
+    explicitInvalidationReasonCode:explicitInvalidationAuthorityCode
+  });
+  const technicalInvalidation = isCurrentTechnicalInvalidation(item, globalVerdict, displayedPlan);
+  const structureState = String(derivedStates.structureState || '').trim().toLowerCase();
+  const structureEligibility = String(derivedStates.structureEligibility || globalVerdict.structure_eligibility || '').trim().toLowerCase();
+  const scanVerdict = normalizeGlobalVerdictKey(item.scan && (item.scan.resolvedVerdict || item.scan.verdict) || '');
+  const scanUpdatedAt = String(item.scan && (item.scan.updatedAt || item.scan.lastScannedAt) || '').trim();
+  const projectionCapturedAtMs = Date.parse(String(snapshot && snapshot.capturedAt || ''));
+  const scanUpdatedAtMs = Date.parse(scanUpdatedAt);
+  const fresherScannerInvalidation = Number.isFinite(projectionCapturedAtMs)
+    && Number.isFinite(scanUpdatedAtMs)
+    && scanUpdatedAtMs > projectionCapturedAtMs
+    && !!scanVerdict
+    && scanVerdict !== 'entry';
+  const precedence = [
+    'fresh canonical authority',
+    'current review resolver',
+    'valid persisted review projection',
+    'stale saved verdict fallback'
+  ];
+
+  if(!projectionVerdict){
+    return {valid:false, reason:'missing_projection_verdict', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(projectionVerdict !== 'entry'){
+    return {valid:true, reason:'non_entry_projection', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(normalizeGlobalVerdictKey(globalVerdict.final_verdict || '') === 'avoid'){
+    return {valid:false, reason:'fresh_canonical_avoid', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(['broken','dead','failed'].includes(structureState) || structureEligibility === 'broken'){
+    return {valid:false, reason:'structural_damage', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(technicalInvalidation || scannerEstimateHardBlockers.currentInvalidated){
+    return {valid:false, reason:'explicit_invalidation', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(scannerEstimateHardBlockers.currentMissed){
+    return {valid:false, reason:'missed_setup', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(scannerEstimateHardBlockers.currentTargetTooClose){
+    return {valid:false, reason:'target_too_close', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(scannerEstimateHardBlockers.terminalLifecycle){
+    return {valid:false, reason:'terminal_lifecycle', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(
+    String(displayedPlan.status || '').trim().toLowerCase() !== 'valid'
+    && (fresherScannerInvalidation || reviewVerdictFallback && reviewVerdictFallback !== 'entry')
+  ){
+    return {valid:false, reason:'missing_actionable_plan', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(
+    reviewResolverVerdict === 'avoid'
+    && (fresherScannerInvalidation || reviewVerdictFallback && reviewVerdictFallback !== 'entry')
+  ){
+    return {valid:false, reason:'current_review_resolver_avoid', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(reviewVerdictFallback && reviewVerdictFallback !== 'entry'){
+    return {valid:false, reason:'explicit_review_downgrade', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(fresherScannerInvalidation){
+    return {valid:false, reason:'fresher_scanner_downgrade', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  return {
+    valid:true,
+    reason:'no_fresher_invalidating_state',
+    precedence,
+    reviewResolverVerdict,
+    reviewVerdictFallback
+  };
+}
+
+function persistReviewProjectionSnapshotOnRecord(record, snapshot){
+  const item = record && typeof record === 'object' ? record : null;
+  const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : null;
+  if(!item || !safeSnapshot) return false;
+  const ticker = normalizeTicker(item.ticker || '');
+  if(!ticker || !hasPresentationAuthoritySnapshot(safeSnapshot, ticker)) return false;
+  item.review = item.review && typeof item.review === 'object' ? item.review : {};
+  const nextSnapshot = projectionSnapshotWithAuthority(cloneData(safeSnapshot, null), item);
+  const previousSerialized = JSON.stringify(item.review.savedProjectionSnapshot || null);
+  const nextSerialized = JSON.stringify(nextSnapshot || null);
+  if(previousSerialized === nextSerialized) return false;
+  writeSavedReviewAuthority(item, {savedProjectionSnapshot:nextSnapshot}, {clearProjectionWhenNonEntry:false});
+  commitTickerState();
+  return true;
+}
+
+function syncPersistedReviewEntryVerdict(record, options = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item) return false;
+  const ticker = normalizeTicker(item.ticker || '');
+  if(!ticker) return false;
+  const explicitSnapshot = options.snapshot && typeof options.snapshot === 'object'
+    ? options.snapshot
+    : null;
+  const snapshot = projectionSnapshotWithAuthority(
+    explicitSnapshot || buildStableReviewProjectionSnapshot(item, 'watchlist_add_projection'),
+    item
+  );
+  const snapshotVerdict = normalizeGlobalVerdictKey(
+    options.savedVerdict
+    || (
+    snapshot && (
+      snapshot.canonicalVerdict
+      || snapshot.finalVerdict
+      || snapshot.renderedVerdict
+    )
+    )
+  );
+  if(snapshotVerdict !== 'entry') return false;
+  const previousSavedVerdict = String(item.review && item.review.savedVerdict || '').trim();
+  const previousSnapshotSerialized = JSON.stringify(item.review && item.review.savedProjectionSnapshot || null);
+  const nextSnapshotSerialized = JSON.stringify(snapshot || null);
+  writeSavedReviewAuthority(item, {
+    savedVerdict:'Entry',
+    savedProjectionSnapshot:snapshot
+  }, {
+    clearProjectionWhenNonEntry:false
+  });
+  return previousSavedVerdict !== 'Entry' || previousSnapshotSerialized !== nextSnapshotSerialized;
+}
+
+function persistedReviewProjectionSnapshot(record, context = 'startup_review_projection'){
+  const item = record && typeof record === 'object' ? record : null;
+  const normalizedItem = normalizeTickerRecordReadOnly(record || {});
+  const evaluationTarget = item || normalizedItem;
+  const ticker = normalizeTicker(normalizedItem.ticker || '');
+  if(!ticker) return null;
+  const savedReviewVerdict = normalizeGlobalVerdictKey(
+    normalizedItem.review && normalizedItem.review.savedVerdict || ''
+  );
+  if(savedReviewVerdict && savedReviewVerdict !== 'entry'){
+    clearPersistedReviewProjectionState(item || evaluationTarget, {clearSavedVerdict:false});
+    return null;
+  }
+  const storedSnapshot = reviewStoredProjectionSnapshot(evaluationTarget);
+  if(storedSnapshot){
+    const validity = evaluatePersistedReviewProjectionValidity(evaluationTarget, storedSnapshot, context);
+    if(validity.valid){
+      return projectionSnapshotWithAuthority(storedSnapshot, evaluationTarget, {
+        restoreAuthorityMode:'persisted_display_context'
+      });
+    }
+    clearPersistedReviewProjectionState(item || evaluationTarget, {clearSavedVerdict:true});
+  }
+  return null;
 }
 
 function logReviewOpenMutationTrace(ticker, writerPath, beforeSnapshot, afterSnapshot){
@@ -34497,80 +37027,14 @@ function setActiveReviewSourceProjectionSnapshot(ticker, snapshot, sourceContext
 }
 
 function maybeInvalidateActiveReviewProjectionFromTrack(ticker, nextProjectionSnapshot, reason = 'track_projection_changed'){
-  const symbol = normalizeTicker(ticker);
-  if(!symbol) return {invalidated:false, rerendered:false, reason:'invalid_ticker'};
-  const currentLiveState = uiState.liveProcessStatus && typeof uiState.liveProcessStatus === 'object'
-    ? String(uiState.liveProcessStatus.state || '')
-    : '';
-  const refreshBusy = ['refreshing_watchlist','waiting_for_refresh_before_scan'].includes(currentLiveState);
-  const pendingSymbol = pendingReviewTicker();
-  if(activeReviewTicker() !== symbol) return {invalidated:false, rerendered:false, reason:'inactive_review_ticker'};
-  if(refreshBusy || pendingSymbol === symbol){
-    if(typeof console !== 'undefined' && console.info){
-      console.info('[WATCHLIST_REFRESH_COMMIT_BLOCKED_FOR_ACTIVE_REVIEW]', {
-        ticker:symbol,
-        reason:String(reason || 'track_projection_changed'),
-        activeTicker:activeReviewTicker() || '',
-        pendingTicker:pendingSymbol || '',
-        liveState:currentLiveState
-      });
-    }
-    return {invalidated:false, rerendered:false, reason:'active_review_refresh_locked'};
-  }
-  const nextSnapshot = nextProjectionSnapshot && typeof nextProjectionSnapshot === 'object'
-    ? {...nextProjectionSnapshot, ticker:symbol}
-    : null;
-  if(!nextSnapshot) return {invalidated:false, rerendered:false, reason:'missing_projection_snapshot'};
-  const previousSnapshot = (
-    uiState.activeReviewSourceProjectionSnapshot
-    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
-    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === symbol
-  )
-    ? uiState.activeReviewSourceProjectionSnapshot
-    : null;
-  const oldBucket = normalizeVisualBucketForPairing(
-    previousSnapshot && (previousSnapshot.sourceOfTruthVisualBucket || previousSnapshot.visualBucket) || ''
-  );
-  const newBucket = normalizeVisualBucketForPairing(
-    nextSnapshot.sourceOfTruthVisualBucket || nextSnapshot.visualBucket || ''
-  );
-  const authority = String(uiState.activeReviewProjectionSource || '').trim().toLowerCase();
-  const bucketChanged = !!(oldBucket && newBucket && oldBucket !== newBucket);
-  const mustInvalidate = bucketChanged || authority === 'clicked_card_snapshot';
-  if(!mustInvalidate){
-    return {invalidated:false, rerendered:false, reason:'no_bucket_change'};
-  }
-  uiState.activeReviewSourceProjectionSnapshot = nextSnapshot;
-  uiState.activeReviewProjectionSource = 'track_projection_updated';
-  uiState.activeReviewVerdictOverride = '';
-  const liveRecord = getTickerRecord(symbol);
-  if(bucketChanged){
-    if(liveRecord && liveRecord.resolvedStateBundleCache) delete liveRecord.resolvedStateBundleCache;
-    if(liveRecord && liveRecord.resolvedStateBundle) delete liveRecord.resolvedStateBundle;
-  }
-  if(bucketChanged){
-    console.info('[ReviewProjectionInvalidated]', {
-      ticker:symbol,
-      oldBucket,
-      newBucket,
-      reason:String(reason || 'track_projection_changed')
-    });
-  }
-  const rerender = () => {
-    if(activeReviewTicker() !== symbol) return;
-    renderReviewWorkspace({
-      source:'track_projection_updated',
-      skipWatchlistLifecycle:true,
-      recompute:false,
-      persistDraft:false
-    });
-  };
-  if(typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function'){
-    window.requestAnimationFrame(() => rerender());
-  }else{
-    setTimeout(rerender, 0);
-  }
-  return {invalidated:true, rerendered:true, reason:'track_projection_updated'};
+  void ticker;
+  void nextProjectionSnapshot;
+  void reason;
+  /*
+    Track/shared presentation is display-only.
+    It must never invalidate, repaint, or soften active Review authority.
+  */
+  return {invalidated:false, rerendered:false, reason:'track_presentation_display_only'};
 }
 
 function loadTickerIntoReview(ticker, options = {}){
@@ -35249,7 +37713,7 @@ const TRACKED_TICKER_REFRESH_COOLDOWN_MS = 450;
 
 function buildResolvedStateBundleFromRecord(record, options = {}){
   const liveRecord = record && typeof record === 'object' ? record : upsertTickerRecord(normalizeTicker(record && record.ticker));
-  const item = normalizeTickerRecord(liveRecord);
+  const item = normalizeDetachedTickerRecord(liveRecord && typeof liveRecord === 'object' ? liveRecord : {});
   const source = String(options.source || 'track');
   const sourceSurface = String(options.sourceSurface || source || 'track');
   const reason = String(options.reason || source);
@@ -35272,19 +37736,28 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
     warningState
   });
   const setupScore = setupScoreForRecord(item);
+  const globalVerdict = resolveGlobalVerdict(item);
   const visualState = resolveVisualState(item, 'watchlist', {
     resolvedContract,
     derivedStates,
     displayedPlan,
     setupScore
   });
-  const canonicalVerdictKey = normalizeGlobalVerdictKey(
-    resolvedContract && (
-      resolvedContract.finalVerdict
-      || resolvedContract.final_verdict_rendered
-      || resolvedContract.final_verdict
-    ) || 'watch'
-  );
+  const provisionalLifecycleSnapshot = watchlistLifecycleSnapshot(item);
+  const planVerdictContract = buildCanonicalPlanVerdictContract(item, {
+    surface:sourceSurface,
+    source,
+    reason,
+    derivedStates,
+    effectivePlan,
+    displayedPlan,
+    resolvedContract,
+    visualState,
+    globalVerdict,
+    lifecycleSnapshot:provisionalLifecycleSnapshot,
+    setupScore
+  });
+  const canonicalVerdictKey = normalizeGlobalVerdictKey(planVerdictContract && planVerdictContract.canonicalVerdict || 'watch');
   const visualBucketForCheck = String(visualState.visualBucket || visualState.presentationBucket || '').trim().toLowerCase();
   if(!isAllowedCanonicalVisualPair(canonicalVerdictKey, visualBucketForCheck)){
     console.warn('[STATE_CONTRADICTION]', {
@@ -35297,9 +37770,9 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
   const canonicalContract = {
     canonicalVerdictKey,
     presentationLabel:verdictPresentationLabelForKey(canonicalVerdictKey),
-    lifecycleState:String(resolvedContract && resolvedContract.structuralState || ''),
-    bucket:String(resolvedContract && resolvedContract.bucket || ''),
-    tone:String(resolvedContract && resolvedContract.actionTone || ''),
+    lifecycleState:String(planVerdictContract && planVerdictContract.lifecycleAuthority && planVerdictContract.lifecycleAuthority.state || resolvedContract && resolvedContract.structuralState || ''),
+    bucket:String(planVerdictContract && planVerdictContract.canonicalVisualBucket || resolvedContract && resolvedContract.bucket || ''),
+    tone:String(visualState && visualState.tone || resolvedContract && resolvedContract.actionTone || ''),
     reason:String(
       (resolvedContract && resolvedContract.reasonParts && resolvedContract.reasonParts[0])
       || (resolvedContract && resolvedContract.actionLabel)
@@ -35313,23 +37786,24 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
       sourceSurface,
       resolver:'resolveFinalStateContract',
       planSource:String(effectivePlan && effectivePlan.source || '')
-    }
+    },
+    planVerdictContract,
+    contractFingerprint:String(planVerdictContract && planVerdictContract.contractFingerprint || '')
   };
-  const globalVerdict = resolveGlobalVerdict(liveRecord);
   const simplifiedStateSurface = String(sourceSurface || '').trim().toLowerCase() === 'review'
     ? 'review'
     : 'track';
-  const resolvedSimplifiedState = resolveSimplifiedStateForSurface(liveRecord, simplifiedStateSurface, {
+  const resolvedSimplifiedState = resolveSimplifiedStateForSurface(item, simplifiedStateSurface, {
     log:false,
     source,
     reason
   });
   const simplifiedState = simplifiedStateSurface === 'review'
     ? applyReviewWatchlistSoftReadinessDisplayOverride(
-      liveRecord,
+      item,
       resolvedSimplifiedState,
       globalVerdict,
-      watchlistLifecycleSnapshot(liveRecord)
+      watchlistLifecycleSnapshot(item)
     )
     : resolvedSimplifiedState;
   const persistedPresentation = persistTrackPresentationOnRecord(liveRecord, {
@@ -35342,11 +37816,22 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
     qualityAdjustments,
     warningState,
     simplifiedState,
+    presentationProjectionSnapshot:options.presentationProjectionSnapshot || null,
+    presentationProjectionSource:options.presentationProjectionSource || '',
+    allowTrackProjection:options.allowTrackProjection === true,
     source,
     sourceSurface,
     reason
   }, {source, sourceSurface, reason});
   const lifecycleSnapshot = syncWatchlistLifecycle(liveRecord) || watchlistLifecycleSnapshot(liveRecord);
+  if(canonicalContract.planVerdictContract && canonicalContract.planVerdictContract.lifecycleAuthority){
+    canonicalContract.planVerdictContract.lifecycleAuthority = {
+      ...canonicalContract.planVerdictContract.lifecycleAuthority,
+      stage:String(lifecycleSnapshot.stage || canonicalContract.planVerdictContract.lifecycleAuthority.stage || ''),
+      status:String(lifecycleSnapshot.status || canonicalContract.planVerdictContract.lifecycleAuthority.status || ''),
+      state:String(lifecycleSnapshot.state || canonicalContract.planVerdictContract.lifecycleAuthority.state || '')
+    };
+  }
   return {
     record:liveRecord,
     normalizedRecordSnapshot:item,
@@ -35370,14 +37855,27 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
 
 function toResolvedStateBundleCache(bundle){
   const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
+  const cacheRecord = safeBundle.record && typeof safeBundle.record === 'object'
+    ? safeBundle.record
+    : {};
   return {
+    schemaVersion:'resolved-state-bundle-cache-v2',
+    inputFingerprint:resolvedStateBundleInputFingerprint(cacheRecord, {
+      surface:safeBundle.sourceSurface || safeBundle.source || 'track',
+      source:safeBundle.source || 'track',
+      reason:safeBundle.reason || 'track'
+    }),
+    contractFingerprint:String(
+      safeBundle.canonicalContract
+      && safeBundle.canonicalContract.planVerdictContract
+      && safeBundle.canonicalContract.planVerdictContract.contractFingerprint
+      || ''
+    ),
     canonicalContract:safeBundle.canonicalContract || null,
     resolvedContract:safeBundle.resolvedContract || null,
     visualState:safeBundle.visualState || null,
     globalVerdict:safeBundle.globalVerdict || null,
     lifecycleSnapshot:safeBundle.lifecycleSnapshot || null,
-    simplifiedState:safeBundle.simplifiedState || null,
-    persistedPresentation:safeBundle.persistedPresentation || null,
     effectivePlan:safeBundle.effectivePlan || null,
     displayedPlan:safeBundle.displayedPlan || null,
     qualityAdjustments:safeBundle.qualityAdjustments || null,
@@ -35385,13 +37883,48 @@ function toResolvedStateBundleCache(bundle){
     derivedStates:safeBundle.derivedStates || null,
     source:String(safeBundle.source || ''),
     sourceSurface:String(safeBundle.sourceSurface || ''),
-    reason:String(safeBundle.reason || ''),
-    cachedAt:new Date().toISOString()
+    reason:String(safeBundle.reason || '')
   };
 }
 
-function withLiveRecordFromCache(liveRecord, cache){
+function withLiveRecordFromCache(liveRecord, cache, options = {}){
   const safeCache = cache && typeof cache === 'object' ? cache : {};
+  const item = liveRecord && typeof liveRecord === 'object'
+    ? liveRecord
+    : {};
+  const source = String(options.source || safeCache.source || '');
+  const sourceSurface = String(options.sourceSurface || safeCache.sourceSurface || source || 'track');
+  const reason = String(options.reason || safeCache.reason || '');
+  const simplifiedSurface = sourceSurface === 'review'
+    ? 'review'
+    : 'track';
+  const simplifiedState = resolveSimplifiedStateForSurface(item, simplifiedSurface, {
+    log:false,
+    source:source || 'resolved_state_bundle_cache',
+    reason:reason || 'resolved_state_bundle_cache'
+  });
+  const persistedPresentation = buildPersistedTrackPresentation(item, {
+    resolvedContract:safeCache.resolvedContract || null,
+    visualState:safeCache.visualState || null,
+    globalVerdict:safeCache.globalVerdict || null,
+    lifecycleSnapshot:safeCache.lifecycleSnapshot || null,
+    simplifiedState,
+    effectivePlan:safeCache.effectivePlan || null,
+    displayedPlan:safeCache.displayedPlan || null,
+    qualityAdjustments:safeCache.qualityAdjustments || null,
+    warningState:safeCache.warningState || null,
+    derivedStates:safeCache.derivedStates || null,
+    source,
+    sourceSurface,
+    reason
+  }, {
+    source,
+    sourceSurface,
+    reason,
+    presentationProjectionSnapshot:options.presentationProjectionSnapshot || null,
+    presentationProjectionSource:options.presentationProjectionSource || '',
+    allowTrackProjection:options.allowTrackProjection === true
+  });
   return {
     record:liveRecord,
     canonicalContract:safeCache.canonicalContract || null,
@@ -35399,18 +37932,54 @@ function withLiveRecordFromCache(liveRecord, cache){
     visualState:safeCache.visualState || null,
     globalVerdict:safeCache.globalVerdict || null,
     lifecycleSnapshot:safeCache.lifecycleSnapshot || null,
-    simplifiedState:safeCache.simplifiedState || null,
-    persistedPresentation:safeCache.persistedPresentation || null,
+    simplifiedState,
+    persistedPresentation,
     effectivePlan:safeCache.effectivePlan || null,
     displayedPlan:safeCache.displayedPlan || null,
     qualityAdjustments:safeCache.qualityAdjustments || null,
     warningState:safeCache.warningState || null,
     derivedStates:safeCache.derivedStates || null,
-    source:String(safeCache.source || ''),
-    sourceSurface:String(safeCache.sourceSurface || ''),
-    reason:String(safeCache.reason || ''),
-    cachedAt:String(safeCache.cachedAt || '')
+    source,
+    sourceSurface,
+    reason,
+    inputFingerprint:String(safeCache.inputFingerprint || ''),
+    contractFingerprint:String(safeCache.contractFingerprint || '')
   };
+}
+
+function resolvedStateBundleInputFingerprint(record, context = {}){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  if(window.PlanVerdictContract && typeof window.PlanVerdictContract.canonicalInputFingerprint === 'function'){
+    return String(window.PlanVerdictContract.canonicalInputFingerprint(item, context) || '');
+  }
+  return [
+    normalizeTicker(item.ticker || ''),
+    String(item.watchlist && item.watchlist.inWatchlist === true),
+    String(item.scan && (item.scan.resolvedVerdict || item.scan.verdict) || ''),
+    String(item.setup && item.setup.structureState || ''),
+    String(item.setup && item.setup.structureEligibility || ''),
+    String(item.setup && item.setup.setupLocationState || ''),
+    String(item.setup && item.setup.pullbackZone || ''),
+    String(item.setup && item.setup.priceabilityState || ''),
+    String(item.setup && item.setup.bounceState || ''),
+    String(item.setup && item.setup.stabilisationState || ''),
+    String(item.plan && item.plan.status || ''),
+    String(item.plan && item.plan.source || ''),
+    String(item.plan && item.plan.authoritySource || ''),
+    String(item.plan && item.plan.triggerState || ''),
+    String((item.plan && item.plan.entry) ?? ''),
+    String((item.plan && item.plan.stop) ?? ''),
+    String((item.plan && (item.plan.firstTarget ?? item.plan.target)) ?? ''),
+    String(item.review && item.review.savedVerdict || ''),
+    String(item.review && item.review.lastReviewedAt || '')
+  ].join('|');
+}
+
+function resolvedStateBundleCacheMatchesRecord(record, cache, context = {}){
+  const safeCache = cache && typeof cache === 'object' ? cache : null;
+  if(!safeCache) return false;
+  const currentFingerprint = resolvedStateBundleInputFingerprint(record, context);
+  return !!currentFingerprint && currentFingerprint === String(safeCache.inputFingerprint || '');
 }
 
 function resolveStructuredExplicitInvalidationAuthorityCode(source){
@@ -35493,6 +38062,128 @@ function applyProjectionSnapshotToReviewBundle(bundle, projectionSnapshot){
   const baseBundle = bundle && typeof bundle === 'object' ? bundle : {};
   const snapshot = projectionSnapshot && typeof projectionSnapshot === 'object' ? projectionSnapshot : null;
   if(!snapshot) return {bundle:baseBundle, applied:false};
+  {
+    const displayCanonicalKey = normalizeGlobalVerdictKey(
+      snapshot.finalVerdict
+      || snapshot.renderedVerdict
+      || snapshot.canonicalVerdict
+      || 'watch'
+    );
+    const rawRequestedBucket = String(
+      snapshot.sourceOfTruthVisualBucket
+      || snapshot.visualBucket
+      || snapshot.renderedBucket
+      || ''
+    ).trim().toLowerCase();
+    const requestedBucket = rawRequestedBucket || normalizeVisualBucketForPairing(
+      snapshot.sourceOfTruthVisualBucket
+      || snapshot.visualBucket
+      || snapshot.renderedBucket
+      || '',
+      displayCanonicalKey
+    );
+    const terminalProjection = snapshot.terminalAvoidApplied === true
+      || snapshot.terminal_avoid_applied === true
+      || /terminal|broken_structure|explicit_invalidation|dead|avoid/i.test(String(snapshot.avoidTriggerSource || '').trim().toLowerCase());
+    const normalizedProjectionVerdict = !terminalProjection && displayCanonicalKey === 'avoid'
+      ? 'watch'
+      : displayCanonicalKey;
+    const allowedRequestedBucket = requestedBucket && isAllowedCanonicalVisualPair(normalizedProjectionVerdict, requestedBucket);
+    const displayVisualBucket = allowedRequestedBucket
+      ? requestedBucket
+      : (normalizedProjectionVerdict === 'entry'
+        ? 'entry'
+        : (normalizedProjectionVerdict === 'near_entry' ? 'monitor' : (normalizedProjectionVerdict === 'avoid' ? 'avoid' : 'monitor')));
+    const actionGuidance = String(
+      snapshot.actionGuidance
+      || snapshot.actionLabel
+      || snapshot.actionShortLabel
+      || ''
+    ).trim();
+    const safeActionGuidance = normalizedProjectionVerdict !== 'avoid' && /avoid|too weak|broken|leave it alone/i.test(actionGuidance)
+      ? (normalizedProjectionVerdict === 'near_entry' ? 'Near Entry - waiting for confirmation' : 'Monitor - waiting for confirmation')
+      : actionGuidance;
+    const rawBaseCanonicalVerdict = String(
+      baseBundle.canonicalContract && baseBundle.canonicalContract.canonicalVerdictKey
+      || baseBundle.resolvedContract && (baseBundle.resolvedContract.finalVerdict || baseBundle.resolvedContract.final_verdict)
+      || baseBundle.visualState && (baseBundle.visualState.canonicalVerdict || baseBundle.visualState.finalVerdict)
+      || baseBundle.globalVerdict && (baseBundle.globalVerdict.final_verdict || baseBundle.globalVerdict.finalVerdict)
+      || ''
+    ).trim();
+    const baseCanonicalVerdict = rawBaseCanonicalVerdict
+      ? normalizeGlobalVerdictKey(rawBaseCanonicalVerdict)
+      : '';
+    const projectionPromotionSuppressed = !!(
+      baseCanonicalVerdict
+      && ['watch', 'near_entry'].includes(normalizedProjectionVerdict)
+      && (
+        (baseCanonicalVerdict === 'watch' && ['near_entry', 'entry'].includes(normalizedProjectionVerdict))
+        || (baseCanonicalVerdict === 'near_entry' && normalizedProjectionVerdict === 'entry')
+      )
+    );
+    const effectiveProjectionVerdict = projectionPromotionSuppressed
+      ? baseCanonicalVerdict
+      : normalizedProjectionVerdict;
+    const effectiveProjectionBucket = projectionPromotionSuppressed
+      ? 'monitor'
+      : displayVisualBucket;
+    const sanitizedProjectionSnapshot = {
+      ...JSON.parse(JSON.stringify(snapshot)),
+      canonicalVerdict:effectiveProjectionVerdict,
+      finalVerdict:effectiveProjectionVerdict,
+      renderedVerdict:effectiveProjectionVerdict,
+      visualBucket:effectiveProjectionBucket,
+      sourceOfTruthVisualBucket:effectiveProjectionBucket,
+      renderedBucket:effectiveProjectionBucket,
+      tone:String(snapshot.tone || effectiveProjectionBucket || 'monitor').trim().toLowerCase() || 'monitor'
+    };
+    return {
+      bundle:{
+        ...baseBundle,
+        projectionSnapshot:sanitizedProjectionSnapshot,
+        globalVerdict:{
+          ...(baseBundle.globalVerdict || {}),
+          final_verdict:effectiveProjectionVerdict,
+          finalVerdict:effectiveProjectionVerdict
+        },
+        resolvedContract:{
+          ...(baseBundle.resolvedContract || {}),
+          finalVerdict:effectiveProjectionVerdict,
+          final_verdict:effectiveProjectionVerdict,
+          final_verdict_rendered:effectiveProjectionVerdict,
+          actionLabel:safeActionGuidance,
+          actionShortLabel:safeActionGuidance,
+          visualBucket:effectiveProjectionBucket,
+          presentationBucket:effectiveProjectionBucket
+        },
+        visualState:{
+          ...(baseBundle.visualState || {}),
+          canonicalVerdict:effectiveProjectionVerdict,
+          finalVerdict:effectiveProjectionVerdict,
+          renderedVerdict:effectiveProjectionVerdict,
+          visualBucket:effectiveProjectionBucket,
+          sourceOfTruthVisualBucket:effectiveProjectionBucket,
+          renderedBucket:effectiveProjectionBucket,
+          tone:String(snapshot.tone || effectiveProjectionBucket || 'monitor').trim().toLowerCase() || 'monitor',
+          reviewProjectionPromotionSuppressed:projectionPromotionSuppressed,
+          reviewProjectionPromotionSuppressedReason:projectionPromotionSuppressed
+            ? 'projection_display_only_cannot_promote_canonical_state'
+            : ''
+        },
+        canonicalContract:{
+          ...(baseBundle.canonicalContract || {}),
+          canonicalVerdictKey:effectiveProjectionVerdict,
+          presentationLabel:verdictPresentationLabelForKey(effectiveProjectionVerdict)
+        }
+      },
+      applied:true,
+      projectionDisplayOnly:true,
+      coerced:allowedRequestedBucket !== true,
+      sanitizedProjectionSnapshot
+    };
+  }
+  /* Projection snapshots are display-only. Keep the legacy coercion code below unreachable
+     until the old path is fully removed, so no projection can rewrite canonical state. */
   const rawBaseCanonical = String(
     baseBundle.canonicalContract && baseBundle.canonicalContract.canonicalVerdictKey
     || baseBundle.resolvedContract && (baseBundle.resolvedContract.finalVerdict || baseBundle.resolvedContract.final_verdict)
@@ -35783,7 +38474,7 @@ function normalizeStateDivergenceValue(value){
 }
 
 function collectStateDivergence(record, sourcePath, simplifiedState, legacyState, fieldPairs = []){
-  const item = normalizeTickerRecord(record || {});
+  const item = record && typeof record === 'object' ? record : {};
   const ticker = normalizeTicker(item.ticker || '');
   const simplified = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const legacy = legacyState && typeof legacyState === 'object' ? legacyState : {};
@@ -36029,15 +38720,34 @@ function refreshTrackedTickerState(ticker, options = {}){
   const liveRecord = getTickerRecord(symbol) || upsertTickerRecord(symbol);
   const readOnlyRecordSnapshot = persist
     ? null
-    : normalizeTickerRecord(cloneData(liveRecord));
+    : cloneData(liveRecord);
   if(persist && liveRecord && liveRecord.resolvedStateBundle) delete liveRecord.resolvedStateBundle;
   const cachedBundle = liveRecord && liveRecord.resolvedStateBundleCache && typeof liveRecord.resolvedStateBundleCache === 'object'
+    && resolvedStateBundleCacheMatchesRecord(liveRecord, liveRecord.resolvedStateBundleCache, {
+      surface:sourceSurface,
+      source,
+      reason
+    })
     ? liveRecord.resolvedStateBundleCache
     : null;
   if(inFlight){
     const bundle = cachedBundle
-      ? withLiveRecordFromCache(persist ? liveRecord : readOnlyRecordSnapshot, cachedBundle)
-      : buildResolvedStateBundleFromRecord(readOnlyRecordSnapshot || liveRecord, {source, sourceSurface, reason});
+      ? withLiveRecordFromCache(persist ? liveRecord : readOnlyRecordSnapshot, cachedBundle, {
+        source,
+        sourceSurface,
+        reason,
+        presentationProjectionSnapshot:options.presentationProjectionSnapshot || null,
+        presentationProjectionSource:options.presentationProjectionSource || '',
+        allowTrackProjection:options.allowTrackProjection === true
+      })
+      : buildResolvedStateBundleFromRecord(readOnlyRecordSnapshot || liveRecord, {
+        source,
+        sourceSurface,
+        reason,
+        presentationProjectionSnapshot:options.presentationProjectionSnapshot || null,
+        presentationProjectionSource:options.presentationProjectionSource || '',
+        allowTrackProjection:options.allowTrackProjection === true
+      });
     if(persist && !cachedBundle){
       liveRecord.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
     }
@@ -36053,8 +38763,22 @@ function refreshTrackedTickerState(ticker, options = {}){
   }
   if(!force && lastRunAt > 0 && (now - lastRunAt) < TRACKED_TICKER_REFRESH_COOLDOWN_MS){
     const bundle = cachedBundle
-      ? withLiveRecordFromCache(persist ? liveRecord : readOnlyRecordSnapshot, cachedBundle)
-      : buildResolvedStateBundleFromRecord(readOnlyRecordSnapshot || liveRecord, {source, sourceSurface, reason});
+      ? withLiveRecordFromCache(persist ? liveRecord : readOnlyRecordSnapshot, cachedBundle, {
+        source,
+        sourceSurface,
+        reason,
+        presentationProjectionSnapshot:options.presentationProjectionSnapshot || null,
+        presentationProjectionSource:options.presentationProjectionSource || '',
+        allowTrackProjection:options.allowTrackProjection === true
+      })
+      : buildResolvedStateBundleFromRecord(readOnlyRecordSnapshot || liveRecord, {
+        source,
+        sourceSurface,
+        reason,
+        presentationProjectionSnapshot:options.presentationProjectionSnapshot || null,
+        presentationProjectionSource:options.presentationProjectionSource || '',
+        allowTrackProjection:options.allowTrackProjection === true
+      });
     if(persist && !cachedBundle){
       liveRecord.resolvedStateBundleCache = toResolvedStateBundleCache(bundle);
     }
@@ -36073,8 +38797,15 @@ function refreshTrackedTickerState(ticker, options = {}){
   try{
     const record = persist
       ? upsertTickerRecord(symbol)
-      : (readOnlyRecordSnapshot || normalizeTickerRecord(cloneData(liveRecord)));
-    const bundle = buildResolvedStateBundleFromRecord(record, {source, sourceSurface, reason});
+      : (readOnlyRecordSnapshot || cloneData(liveRecord));
+    const bundle = buildResolvedStateBundleFromRecord(record, {
+      source,
+      sourceSurface,
+      reason,
+      presentationProjectionSnapshot:options.presentationProjectionSnapshot || null,
+      presentationProjectionSource:options.presentationProjectionSource || '',
+      allowTrackProjection:options.allowTrackProjection === true
+    });
     const canonicalContract = bundle.canonicalContract;
 
     if(persist){
@@ -37014,6 +39745,11 @@ function addActiveReviewTickerToWatchlist(){
   if(reviewNotes) liveRecord.review.notes = reviewNotes.value;
   const reviewChecks = currentChecks();
   if(reviewChecks && typeof reviewChecks === 'object') liveRecord.review.checks = cloneData(reviewChecks, {});
+  const canonicalPlanPromoted = ensureCanonicalPlanForRecord(liveRecord, {
+    allowScannerFallback:true,
+    source:'review'
+  });
+  if(canonicalPlanPromoted) commitTickerState();
   liveRecord.watchlist.debug = liveRecord.watchlist.debug && typeof liveRecord.watchlist.debug === 'object' ? liveRecord.watchlist.debug : {};
   if(eligibility.inWatchlist){
     liveRecord.watchlist.debug.lastAddResult = 'already_present';
@@ -37024,7 +39760,35 @@ function addActiveReviewTickerToWatchlist(){
     renderReviewWorkspace();
     return;
   }
+  const rawActiveReviewProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(liveRecord.ticker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const rawActiveReviewProjectionSource = normalizeReviewProjectionSource(
+    String(uiState.activeReviewProjectionSource || '').trim().toLowerCase(),
+    rawActiveReviewProjectionSnapshot
+  );
+  const activeReviewProjectionSnapshot = rawActiveReviewProjectionSnapshot
+    && (
+      hasPresentationAuthoritySnapshot(rawActiveReviewProjectionSnapshot, liveRecord.ticker || '')
+      || (
+        isLiveReviewProjectionAuthoritySource(rawActiveReviewProjectionSource)
+        && !!normalizeGlobalVerdictKey(
+          rawActiveReviewProjectionSnapshot.canonicalVerdict
+          || rawActiveReviewProjectionSnapshot.finalVerdict
+          || rawActiveReviewProjectionSnapshot.renderedVerdict
+          || ''
+        )
+      )
+    )
+      ? cloneData(rawActiveReviewProjectionSnapshot, null)
+      : null;
   const preAddReviewProjectionSnapshot = buildStableReviewProjectionSnapshot(liveRecord, 'watchlist_add_projection');
+  const preAddReviewProjectionSnapshotWithAuthority = projectionSnapshotWithAuthority(
+    preAddReviewProjectionSnapshot,
+    liveRecord
+  );
   const reviewProjectedVerdictWhenAdded = normalizeAnalysisVerdict(
     preAddReviewProjectionSnapshot && (
       preAddReviewProjectionSnapshot.canonicalVerdict
@@ -37040,6 +39804,10 @@ function addActiveReviewTickerToWatchlist(){
     scoreWhenAdded:preferredScoreForRecord(liveRecord),
     verdictWhenAdded:reviewProjectedVerdictWhenAdded,
     expiryAfterTradingDays:5
+  }, {
+    presentationProjectionSnapshot:preAddReviewProjectionSnapshot,
+    presentationProjectionSource:'track_projection_updated',
+    allowTrackProjection:true
   });
   renderReviewLifecycleSummary(ticker);
   if(entry && entry.error){
@@ -37052,6 +39820,16 @@ function addActiveReviewTickerToWatchlist(){
   const statusMarkup = entry && entry.updated
     ? `<span class="ok">${escapeHtml(ticker)} is already in the watchlist.</span>`
     : `<span class="ok">${escapeHtml(ticker)} added to the watchlist.</span>`;
+  const persistedPostAddRefresh = refreshTrackedTickerState(liveRecord.ticker, {
+    source:'watchlist_add_projection',
+    sourceSurface:'track',
+    reason:'watchlist_add_projection',
+    presentationProjectionSnapshot:preAddReviewProjectionSnapshot,
+    presentationProjectionSource:'track_projection_updated',
+    allowTrackProjection:true,
+    force:true,
+    persist:true
+  });
   if(PP_PERF_DEBUG){
     console.debug('[PP_PERF] track_marked_dirty_from_review_add', {
       ticker:liveRecord.ticker,
@@ -37092,16 +39870,35 @@ function addActiveReviewTickerToWatchlist(){
     : buildTrackProjectionSnapshotFromPersistedPresentation(entry && entry.record ? entry.record : liveRecord, 'watchlist_add_projection');
   const postAddProjectionSnapshotWithAuthority = projectionSnapshotWithAuthority(
     postAddProjectionSnapshot,
-    entry && entry.record ? entry.record : liveRecord
+    persistedPostAddRefresh && persistedPostAddRefresh.record
+      ? persistedPostAddRefresh.record
+      : (entry && entry.record ? entry.record : liveRecord)
   );
   if(postAddProjectionSnapshotWithAuthority && activeReviewTicker() === liveRecord.ticker){
-    uiState.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshotWithAuthority;
+    const livePersistTarget = getTickerRecord(liveRecord.ticker) || liveRecord;
+    uiState.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshot;
+    uiState.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshotWithAuthority || postAddProjectionSnapshot;
     uiState.activeReviewProjectionSource = 'track_projection_updated';
     uiState.activeReviewVerdictOverride = '';
+    persistReviewProjectionSnapshotOnRecord(livePersistTarget, postAddProjectionSnapshotWithAuthority);
+  }
+  if(normalizeGlobalVerdictKey(reviewProjectedVerdictWhenAdded) === 'entry'){
+    const livePersistTarget = getTickerRecord(liveRecord.ticker) || liveRecord;
+    const persistedEntryProjectionSnapshot = projectionSnapshotWithAuthority(
+      preAddReviewProjectionSnapshotWithAuthority || preAddReviewProjectionSnapshot || postAddProjectionSnapshotWithAuthority,
+      livePersistTarget
+    );
+    writeSavedReviewAuthority(livePersistTarget, {
+      savedVerdict:'Entry',
+      savedProjectionSnapshot:persistedEntryProjectionSnapshot
+    }, {
+      clearProjectionWhenNonEntry:false
+    });
+    commitTickerState();
   }
   setStatus('reviewWorkspaceStatus', statusMarkup);
   setStatus('inputStatus', statusMarkup);
-  renderReviewWorkspace(postAddProjectionSnapshotWithAuthority
+  renderReviewWorkspace(postAddProjectionSnapshot
     ? {
       source:'track_projection_updated',
       skipWatchlistLifecycle:true,
@@ -37773,6 +40570,11 @@ function setPaperTradeDebugSnapshotForTicker(ticker, snapshot = null){
 function currentPaperTradeContextForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return null;
+  const previewUiState = paperTradeUiStateForTicker(symbol);
+  const previewSnapshotApproved = previewUiState.previewOpen === true
+    && previewUiState.snapshot
+    && typeof previewUiState.snapshot === 'object';
+  const existingRecord = getTickerRecord(symbol) || upsertTickerRecord(symbol);
   const refreshed = refreshTrackedTickerState(symbol, {
     source:'review',
     sourceSurface:'review',
@@ -37783,18 +40585,90 @@ function currentPaperTradeContextForTicker(ticker){
   });
   const liveRecord = refreshed.record;
   if(!liveRecord) return null;
-  const record = normalizeTickerRecord(liveRecord);
+  const record = liveRecord && typeof liveRecord === 'object' ? liveRecord : {};
   const effectivePlan = refreshed.effectivePlan;
-  const displayedPlan = applySetupConfirmationPlanGate(
-    record,
-    deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency)
-  );
+  const derivedStates = refreshed.derivedStates;
   const resolvedContract = refreshed.resolvedContract;
   const visualState = refreshed.visualState;
-  const derivedStates = refreshed.derivedStates;
   const globalVerdict = refreshed.globalVerdict || resolveGlobalVerdict(record);
   const lifecycleSnapshot = refreshed.lifecycleSnapshot || watchlistLifecycleSnapshot(record);
-  const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+  const paperTradeActiveProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === symbol
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const paperTradeActiveProjectionSource = normalizeReviewProjectionSource(
+    String(uiState.activeReviewProjectionSource || '').trim().toLowerCase(),
+    paperTradeActiveProjectionSnapshot
+  );
+  const paperTradeSavedEntryAuthority = normalizeGlobalVerdictKey(record.review && record.review.savedVerdict || '') === 'entry';
+  const paperTradeScanEntryAuthority = normalizeGlobalVerdictKey(
+    record.scan && (record.scan.resolvedVerdict || record.scan.verdict)
+    || ''
+  ) === 'entry';
+  const paperTradeProjectionVerdict = normalizeGlobalVerdictKey(
+    paperTradeActiveProjectionSnapshot && (
+      paperTradeActiveProjectionSnapshot.canonicalVerdict
+      || paperTradeActiveProjectionSnapshot.finalVerdict
+      || paperTradeActiveProjectionSnapshot.renderedVerdict
+    )
+  );
+  const paperTradeProjectionEntryAuthority = reviewProjectionCanDriveEntryDisplay(
+    paperTradeActiveProjectionSnapshot,
+    paperTradeActiveProjectionSource,
+    record
+  )
+    && paperTradeProjectionVerdict === 'entry'
+    && (
+      paperTradeActiveProjectionSource === 'track_projection_updated'
+      || (
+        paperTradeActiveProjectionSource === 'clicked_card_snapshot'
+        && paperTradeScanEntryAuthority
+      )
+    );
+  let displayedPlan = applySetupConfirmationPlanGate(
+    record,
+    deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency),
+    derivedStates
+  );
+  if(paperTradeProjectionEntryAuthority && displayedPlan.status !== 'valid'){
+    const fallbackDisplayedPlan = reviewFallbackDisplayedPlan(record, derivedStates);
+    if(fallbackDisplayedPlan && fallbackDisplayedPlan.status === 'valid'){
+      displayedPlan = fallbackDisplayedPlan;
+    }
+  }
+  const paperTradeStampedEntryFallbackSeed = paperTradeActiveProjectionSource !== 'clicked_card_snapshot'
+    && paperTradeActiveProjectionSource !== 'track_projection_updated'
+    && hasCanonicalTradePlanStamp(record.plan)
+    && displayedPlan.status === 'valid'
+    && paperTradeScanEntryAuthority;
+  const renderModels = buildCanonicalRenderModelsFromRecord(record, {
+      surface:'review',
+      source:'paper_trade_context',
+      reason:'paper_trade_context',
+      derivedStates,
+      effectivePlan,
+      displayedPlan,
+      resolvedContract,
+      visualState,
+      globalVerdict,
+      lifecycleSnapshot,
+      setupScore:setupScoreForRecord(record)
+    });
+  const activeReviewStateHealth = typeof activeReviewTicker === 'function'
+    && normalizeTicker(activeReviewTicker()) === symbol
+    && typeof currentReviewStateHealthSnapshot === 'function'
+      ? currentReviewStateHealthSnapshot(record)
+      : null;
+  const planVerdictContract = refreshed.canonicalContract && refreshed.canonicalContract.planVerdictContract
+    ? refreshed.canonicalContract.planVerdictContract
+    : (renderModels && renderModels.contract
+    ? renderModels.contract
+    : (activeReviewStateHealth && activeReviewStateHealth.contract
+      ? activeReviewStateHealth.contract
+      : null));
+  const reviewRenderModel = renderModels && renderModels.reviewRenderModel ? renderModels.reviewRenderModel : null;
+  const simplifiedState = withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(record, 'review', {log:false})) || {};
   const reviewEffectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(
     record,
     simplifiedState,
@@ -37807,34 +40681,102 @@ function currentPaperTradeContextForTicker(ticker){
     || globalVerdict.final_verdict_rendered
     || ''
   );
-  const authoritativeReviewVerdictKey = normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || 'watch');
-  const paperTradeAuthoritySimplifiedState = canonicalResolverVerdict
-    ? {
-      ...simplifiedState,
-      canonicalVerdict:authoritativeReviewVerdictKey || canonicalResolverVerdict
-    }
-    : authoritativeReviewVerdictKey
-      ? {
-        ...simplifiedState,
-        canonicalVerdict:authoritativeReviewVerdictKey
-      }
-    : simplifiedState;
-  const planAuthority = resolveCanonicalTradePlanAuthority({
-    record,
-    simplifiedState:paperTradeAuthoritySimplifiedState,
+  const paperTradeStampedEntryFallback = paperTradeStampedEntryFallbackSeed
+    && (
+      normalizeGlobalVerdictKey(planVerdictContract && planVerdictContract.canonicalVerdict || '') === 'entry'
+      || (
+        String(record.plan && record.plan.authoritySource || '').trim() === 'applyPlanCandidateToRecord'
+        && String(record.plan && record.plan.tradeability || '').trim().toLowerCase() !== 'too_expensive'
+        && String(record.plan && record.plan.capitalFit || '').trim().toLowerCase() !== 'too_expensive'
+      )
+    );
+  const reviewPresentation = buildCanonicalReviewPresentationModel(record, {
+    displayedPlan,
+    derivedStates,
     globalVerdict,
+    lifecycleSnapshot,
+    simplifiedState:reviewEffectiveSimplifiedState,
+    resolvedContract,
+    visualState
+  });
+  const persistedPaperTradeEntryProjection = paperTradeSavedEntryAuthority
+    ? persistedReviewProjectionSnapshot(record, 'paper_trade_context')
+    : null;
+  const activeReviewProjectionBackedEntry = !!(
+    persistedPaperTradeEntryProjection
+    || (
+      activeReviewStateHealth
+      && String(activeReviewStateHealth.sourceOfTruth || '').trim().toLowerCase() === 'review_projection_snapshot'
+      && (
+        paperTradeActiveProjectionSource === 'track_projection_updated'
+          ? paperTradeSavedEntryAuthority
+          : (paperTradeActiveProjectionSource === 'clicked_card_snapshot'
+            ? paperTradeScanEntryAuthority
+            : (paperTradeScanEntryAuthority || paperTradeSavedEntryAuthority))
+      )
+    )
+  );
+  const projectionOnlyReviewEntryBlocked = ['clicked_card_snapshot', 'track_projection_updated'].includes(paperTradeActiveProjectionSource)
+    && paperTradeProjectionEntryAuthority !== true
+    && paperTradeStampedEntryFallback !== true
+    && !activeReviewProjectionBackedEntry;
+  const authoritativeReviewVerdictKey = normalizeGlobalVerdictKey(
+    paperTradeStampedEntryFallback
+      ? 'entry'
+      : (projectionOnlyReviewEntryBlocked
+        ? (canonicalResolverVerdict || 'watch')
+        : (
+        ((activeReviewStateHealth && String(activeReviewStateHealth.sourceOfTruth || '').trim().toLowerCase() !== 'review_projection_snapshot')
+          || activeReviewProjectionBackedEntry)
+          && activeReviewStateHealth && activeReviewStateHealth.canonicalVerdict
+        || 
+        reviewRenderModel && reviewRenderModel.canonicalVerdict
+        || reviewPresentation.verdictKey
+        || reviewPresentation.effectiveSimplifiedState && reviewPresentation.effectiveSimplifiedState.canonicalVerdict
+        || canonicalResolverVerdict
+        || 'watch'
+      ))
+  );
+  const authoritySimplifiedState = {
+    ...(reviewPresentation.effectiveSimplifiedState || reviewEffectiveSimplifiedState || {}),
+    canonicalVerdict:authoritativeReviewVerdictKey || canonicalResolverVerdict || 'watch',
+    visualBucket:String(reviewRenderModel && reviewRenderModel.visualBucket || reviewEffectiveSimplifiedState && reviewEffectiveSimplifiedState.visualBucket || '').trim(),
+    tone:String(reviewRenderModel && reviewRenderModel.tone || reviewEffectiveSimplifiedState && reviewEffectiveSimplifiedState.tone || '').trim().toLowerCase()
+  };
+  const paperTradeAuthorityGlobalVerdict = projectionOnlyReviewEntryBlocked
+    ? {
+      ...(globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {}),
+      final_verdict:canonicalResolverVerdict || 'watch',
+      finalVerdict:canonicalResolverVerdict || 'watch',
+      final_verdict_rendered:canonicalResolverVerdict || 'watch'
+    }
+    : globalVerdict;
+  let planAuthority = resolveCanonicalTradePlanAuthority({
+    record,
+    simplifiedState:authoritySimplifiedState,
+    globalVerdict:paperTradeAuthorityGlobalVerdict,
     displayedPlan,
     derivedStates,
     context:'paper_trade_context'
   });
-  const projectedEntryAuthority = false;
+  if(projectionOnlyReviewEntryBlocked && planAuthority && typeof planAuthority === 'object'){
+    planAuthority = {
+      ...planAuthority,
+      actionable:false,
+      verdict:'watch',
+      reasonCode:String(planAuthority.reasonCode || '').trim() || 'verdict_not_entry'
+    };
+  }
   const canonicalPlanVerdict = normalizeGlobalVerdictKey(
     planAuthority.verdict
     || globalVerdict.final_verdict
     || globalVerdict.finalVerdict
     || ''
   );
-  const canonicalPlanActionableEntry = planAuthority.actionable === true
+  const canonicalPlanActionableEntry = (
+    planAuthority.actionable === true
+    || paperTradeStampedEntryFallback
+  )
     && planAuthority.planStatus === 'valid'
     && planAuthority.riskFits === true
     && planAuthority.capitalAffordable === true
@@ -37842,9 +40784,12 @@ function currentPaperTradeContextForTicker(ticker){
     && planAuthority.terminalAvoid !== true
     && planAuthority.structuralWeakness !== true
     && planAuthority.planFieldsPresent === true;
-  const finalVerdict = canonicalPlanActionableEntry
-    ? 'Entry'
-    : 'Watch';
+  const submittedPaperTradeLifecycleState = planVerdictContract
+    && planVerdictContract.paperTradeAuthority
+    && Array.isArray(planVerdictContract.paperTradeAuthority.submittedTrades)
+    && planVerdictContract.paperTradeAuthority.submittedTrades.length
+      ? 'submitted'
+      : '';
   const reviewFinalVerdict = canonicalPlanActionableEntry
     ? 'Entry'
     : 'Watch';
@@ -37891,15 +40836,28 @@ function currentPaperTradeContextForTicker(ticker){
     primaryState:primaryStateForEligibility,
     hardBlocker:hardBlockerForEligibility
   });
-  const mergedEligibility = applyPaperTradeEligibilityDebugOverride(eligibility, {
+  let mergedEligibility = applyPaperTradeEligibilityDebugOverride(eligibility, {
     ticker:symbol,
     marketStatus:record.meta.marketStatus || state.marketStatus || ''
   });
+  if(previewSnapshotApproved){
+    mergedEligibility = {
+      ...mergedEligibility,
+      eligible:true,
+      reasons:[]
+    };
+  }
+  const finalVerdict = (
+    previewSnapshotApproved
+    || (canonicalPlanActionableEntry && mergedEligibility.eligible === true)
+  )
+    ? 'Entry'
+    : 'Watch';
   const debugSnapshot = {
     ticker:symbol,
-    finalVerdict:reviewFinalVerdict,
-    projectionCanonicalVerdict:'',
-    projectedEntryAuthority,
+    finalVerdict,
+    projectionCanonicalVerdict:paperTradeProjectionVerdict || '',
+    projectedEntryAuthority:paperTradeProjectionEntryAuthority === true,
     reviewHeaderVerdict:finalVerdict,
     authoritativeReviewVerdict:authoritativeReviewVerdictKey,
     visualFinalVerdict:String(visualState.finalVerdict || visualState.final_verdict || '').trim(),
@@ -37916,6 +40874,7 @@ function currentPaperTradeContextForTicker(ticker){
     affordability:displayedPlan.affordability,
     primaryState:primaryStateForEligibility,
     blockerReason:hardBlockerForEligibility,
+    paperTradeLifecycleState:submittedPaperTradeLifecycleState,
     planAuthority,
     reasons:Array.isArray(mergedEligibility.reasons) ? mergedEligibility.reasons.slice() : []
   };
@@ -37923,12 +40882,16 @@ function currentPaperTradeContextForTicker(ticker){
     ticker:symbol,
     record,
     displayedPlan,
-    finalVerdict:reviewFinalVerdict,
+    finalVerdict,
     derivedStates,
-    setupScore:setupScoreForRecord(record),
+    setupScore:Number.isFinite(Number(planVerdictContract && planVerdictContract.derivedStates && planVerdictContract.derivedStates.setupScore))
+      ? Number(planVerdictContract.derivedStates.setupScore)
+      : setupScoreForRecord(record),
     resolvedContract:authoritativeResolvedContract,
     eligibility:mergedEligibility,
-    debugSnapshot
+    debugSnapshot,
+    planVerdictContract,
+    paperTradeLifecycleState:submittedPaperTradeLifecycleState
   };
 }
 
@@ -38084,7 +41047,21 @@ function openPaperTradePreview(ticker){
   const context = currentPaperTradeContextForTicker(ticker);
   if(!context) return;
   logPaperTradeContextDiagnostics(context, 'paper_trade_click');
-  if(!context.eligibility.eligible){
+  const renderApprovedButton = !!($('paperTradeBtn') && $('paperTradeBtn').disabled !== true);
+  if(renderApprovedButton && String(context.finalVerdict || '').trim().toLowerCase() !== 'entry'){
+    const restoredProjectionSnapshot = persistedReviewProjectionSnapshot(context.record, 'paper_trade_preview')
+      || projectionSnapshotWithAuthority(
+        buildStableReviewProjectionSnapshot(context.record, 'paper_trade_preview'),
+        context.record
+      );
+    if(restoredProjectionSnapshot){
+      uiState.activeReviewSourceProjectionSnapshot = restoredProjectionSnapshot;
+      uiState.activeReviewProjectionSource = context.record && context.record.watchlist && context.record.watchlist.inWatchlist
+        ? 'track_projection_updated'
+        : 'clicked_card_snapshot';
+    }
+  }
+  if(!context.eligibility.eligible && !renderApprovedButton){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
     const snapshot = context.debugSnapshot && typeof context.debugSnapshot === 'object' ? context.debugSnapshot : null;
     const compactTrace = snapshot
@@ -38133,7 +41110,7 @@ async function submitPaperTradeFromReview(ticker){
   const frozenSnapshot = currentUiState.snapshot && typeof currentUiState.snapshot === 'object'
     ? currentUiState.snapshot
     : buildPaperTradeConfirmedSnapshot(context);
-  if(!context.eligibility.eligible){
+  if(!context.eligibility.eligible && !(currentUiState.snapshot && typeof currentUiState.snapshot === 'object')){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
     setPaperTradeUiState(context.ticker, {state:'submit_error', previewOpen:false, snapshot:null, message:reason});
     renderReviewWorkspace();
@@ -38289,6 +41266,25 @@ async function submitPaperTradeFromReview(ticker){
     }
   });
   diaryService.saveTradeRecordForTicker(context.ticker, entry);
+  const liveRecord = getTickerRecord(context.ticker) || context.record;
+  if(liveRecord && typeof liveRecord === 'object'){
+    writeSubmittedPaperTradeState(liveRecord, {
+      displayedPlan:context.displayedPlan,
+      submittedAt:result.submittedAt || new Date().toISOString(),
+      triggerState:'triggered',
+      planValidationState:'valid',
+      status:'valid',
+      tradeability:'tradable',
+      riskStatus:'fits_risk'
+    }, {
+      source:'paper_trade_submit',
+      reason:'preserve_submitted_paper_trade_plan',
+      writtenBy:'submitPaperTradeFromReview'
+    });
+    ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
+    reevaluateTickerProgress(liveRecord);
+    commitTickerState();
+  }
   renderTradeDiary();
   renderPatternAnalytics();
   setPaperTradeUiState(context.ticker, {
@@ -38380,6 +41376,12 @@ function bindReviewWorkspaceActions(record){
   click('resetReviewBtn', resetReview);
   click('removeTickerActiveBtn', () => removeTicker(record.ticker));
   click('expireLifecycleBtn', expireSelectedTickerLifecycle);
+  ['entryPrice','stopPrice','targetPrice'].forEach(id => {
+    const field = $(id);
+    if(!field || field.dataset.reviewCalcBound === 'true') return;
+    field.addEventListener('input', calculate);
+    field.dataset.reviewCalcBound = 'true';
+  });
   box.querySelectorAll('[data-act="capital-sim-50"]').forEach(button => {
     button.onclick = () => {
       setReviewCapitalSimulation(record.ticker, 0.50);
@@ -40243,17 +43245,38 @@ function renderReviewWorkspace(options = {}){
     && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(ticker || '')
     ? uiState.activeReviewSourceProjectionSnapshot
     : null;
-  const reviewProjectionSource = String(
-    uiState.activeReviewProjectionSource
-    || (sourceProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
-  ).trim().toLowerCase();
-  const presentationProjectionSnapshot = reviewProjectionSource === 'scanner_score_snapshot'
+  let reviewProjectionSource = normalizeReviewProjectionSource(
+    String(
+      uiState.activeReviewProjectionSource
+      || (sourceProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+    ).trim().toLowerCase(),
+    sourceProjectionSnapshot
+  );
+  if(uiState.activeReviewProjectionSource !== reviewProjectionSource){
+    uiState.activeReviewProjectionSource = reviewProjectionSource;
+  }
+  let presentationProjectionSnapshot = reviewProjectionSource === 'scanner_score_snapshot'
     ? null
     : sourceProjectionSnapshot;
+  const displayProjectionSnapshot = liveReviewDisplayProjectionSnapshot(
+    sourceProjectionSnapshot,
+    reviewProjectionSource,
+    liveRecord || {}
+  );
+  if(!hasPresentationAuthoritySnapshot(presentationProjectionSnapshot, ticker || '') && liveRecord && liveRecord.review && liveRecord.review.cardOpen){
+    const persistedProjectionSnapshot = persistedReviewProjectionSnapshot(liveRecord, 'startup_review_projection');
+    if(persistedProjectionSnapshot){
+      presentationProjectionSnapshot = persistedProjectionSnapshot;
+      reviewProjectionSource = restoredProjectionAuthoritySource(persistedProjectionSnapshot) || 'persisted_display_context';
+      uiState.activeReviewSourceProjectionSnapshot = persistedProjectionSnapshot;
+      uiState.activeReviewProjectionSource = reviewProjectionSource;
+    }
+  }
   const hasProjectionSnapshot = hasPresentationAuthoritySnapshot(presentationProjectionSnapshot, ticker || '');
-  const reviewSnapshotAuthority = (reviewProjectionSource === 'clicked_card_snapshot' && hasProjectionSnapshot)
-    || (reviewProjectionSource === 'track_projection_updated' && hasProjectionSnapshot);
-  const forceTrackProjectionBundle = reviewProjectionSource === 'track_projection_updated';
+  const reviewSnapshotAuthority = hasProjectionSnapshot
+    && isLiveReviewProjectionAuthoritySource(reviewProjectionSource)
+    && reviewProjectionCanDriveEntryDisplay(presentationProjectionSnapshot, reviewProjectionSource, liveRecord || {});
+  const forceTrackProjectionBundle = false;
   if(forceTrackProjectionBundle && !hasProjectionSnapshot){
     console.warn('[ReviewProjectionSnapshotMissing]', {
       ticker:normalizeTicker(ticker || ''),
@@ -40262,8 +43285,20 @@ function renderReviewWorkspace(options = {}){
     });
   }
   const cachedReviewBundle = liveRecord && liveRecord.resolvedStateBundleCache && typeof liveRecord.resolvedStateBundleCache === 'object'
+    && resolvedStateBundleCacheMatchesRecord(liveRecord, liveRecord.resolvedStateBundleCache, {
+      surface:'review',
+      source:'review',
+      reason:readOnlyReviewOpen ? 'review_open' : 'review_edit'
+    })
     && !forceTrackProjectionBundle
-    ? withLiveRecordFromCache(liveRecord, liveRecord.resolvedStateBundleCache)
+    ? withLiveRecordFromCache(liveRecord, liveRecord.resolvedStateBundleCache, {
+      source:'review',
+      sourceSurface:'review',
+      reason:readOnlyReviewOpen ? 'review_open' : 'review_edit',
+      presentationProjectionSnapshot:presentationProjectionSnapshot,
+      presentationProjectionSource:reviewProjectionSource,
+      allowTrackProjection:false
+    })
     : null;
   let refreshBundle = reviewSnapshotAuthority
     ? (
@@ -40281,7 +43316,14 @@ function renderReviewWorkspace(options = {}){
           ok:true,
           skipped:true,
           reason:'review_snapshot_authoritative_rebuild_no_cache',
-          ...buildResolvedStateBundleFromRecord(liveRecord, {source:'review', sourceSurface:'review', reason:'review_snapshot_authoritative'}),
+          ...buildResolvedStateBundleFromRecord(cloneData(liveRecord), {
+            source:'review',
+            sourceSurface:'review',
+            reason:'review_snapshot_authoritative',
+            presentationProjectionSnapshot:presentationProjectionSnapshot,
+            presentationProjectionSource:reviewProjectionSource,
+            allowTrackProjection:false
+          }),
           source:'review',
           reusedCachedContract:true,
           refreshSkippedReason:'snapshot_authoritative_rebuild_no_cache'
@@ -40290,6 +43332,9 @@ function renderReviewWorkspace(options = {}){
     : refreshTrackedTickerState(ticker, {
       source:'review',
       reason:readOnlyReviewOpen ? 'review_open' : 'review_edit',
+      presentationProjectionSnapshot:presentationProjectionSnapshot,
+      presentationProjectionSource:reviewProjectionSource,
+      allowTrackProjection:false,
       force:true,
       persist:false,
       emitTrace:true
@@ -40299,7 +43344,7 @@ function renderReviewWorkspace(options = {}){
     const live = getTickerRecord(ticker);
     if(live && live.resolvedStateBundleCache) delete live.resolvedStateBundleCache;
     if(live && live.resolvedStateBundle) delete live.resolvedStateBundle;
-    const applied = applyProjectionSnapshotToReviewBundle(refreshBundle, sourceProjectionSnapshot);
+    const applied = applyProjectionSnapshotToReviewBundle(refreshBundle, presentationProjectionSnapshot);
     refreshBundle = applied.bundle;
     if(applied.coerced && applied.sanitizedProjectionSnapshot){
       uiState.activeReviewSourceProjectionSnapshot = applied.sanitizedProjectionSnapshot;
@@ -40312,16 +43357,36 @@ function renderReviewWorkspace(options = {}){
   const missingBundleFields = requiredBundleFields.filter(field => !(refreshBundle && refreshBundle[field] != null));
   const bundleComplete = bundleValid && missingBundleFields.length === 0;
   const refreshedRecord = refreshBundle && refreshBundle.record ? refreshBundle.record : liveRecord;
-  const canonicalPlanSynced = readOnlyReviewOpen
-    ? false
-    : ensureCanonicalPlanForRecord(refreshedRecord, {allowScannerFallback:true, source:'review'});
+  const canonicalPlanSynced = false;
+  if(canonicalPlanSynced){
+    const refreshedLiveRecord = getTickerRecord(ticker) || refreshedRecord;
+    if(refreshedRecord && refreshedRecord.resolvedStateBundleCache) delete refreshedRecord.resolvedStateBundleCache;
+    if(refreshedRecord && refreshedRecord.resolvedStateBundle) delete refreshedRecord.resolvedStateBundle;
+    if(refreshedLiveRecord && refreshedLiveRecord.resolvedStateBundleCache) delete refreshedLiveRecord.resolvedStateBundleCache;
+    if(refreshedLiveRecord && refreshedLiveRecord.resolvedStateBundle) delete refreshedLiveRecord.resolvedStateBundle;
+    refreshBundle = refreshTrackedTickerState(ticker, {
+      source:'review',
+      reason:'canonical_plan_promoted',
+      presentationProjectionSnapshot:presentationProjectionSnapshot,
+      presentationProjectionSource:reviewProjectionSource,
+      allowTrackProjection:false,
+      force:true,
+      persist:false,
+      emitTrace:true
+    });
+  }
   if(options.recompute === true){
     maybeExpireTickerRecord(refreshedRecord);
     reevaluateTickerProgress(refreshedRecord);
   }
   if(canonicalPlanSynced) commitTickerState();
-  const record = normalizeTickerRecord(refreshedRecord);
-  const canonicalLiveRecord = getTickerRecord(ticker) || liveRecord || record;
+  const renderSourceRecord = refreshBundle && refreshBundle.record ? refreshBundle.record : refreshedRecord;
+  const canonicalLiveRecord = getTickerRecord(ticker) || renderSourceRecord || liveRecord || null;
+  const record = canonicalLiveRecord && typeof canonicalLiveRecord === 'object'
+    ? normalizeDetachedTickerRecord(canonicalLiveRecord)
+    : (renderSourceRecord && typeof renderSourceRecord === 'object'
+      ? normalizeDetachedTickerRecord(renderSourceRecord)
+      : normalizeTickerRecordReadOnly(renderSourceRecord));
   const canonicalLiveReview = canonicalLiveRecord && canonicalLiveRecord.review && typeof canonicalLiveRecord.review === 'object'
     ? canonicalLiveRecord.review
     : null;
@@ -40406,10 +43471,44 @@ function renderReviewWorkspace(options = {}){
     globalVerdict,
     refreshBundle && refreshBundle.lifecycleSnapshot
   );
+  const persistedDisplayStateHealth = !reviewSnapshotAuthority && isPersistedDisplayProjectionSource(reviewProjectionSource)
+    ? currentReviewStateHealthSnapshot(record)
+    : null;
+  const savedReviewVerdict = !reviewSnapshotAuthority && isPersistedDisplayProjectionSource(reviewProjectionSource)
+    ? normalizeOptionalGlobalVerdictKey(record.review && record.review.savedVerdict || '')
+    : '';
   const simplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
   const simplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(simplifiedState.visualBucket || 'monitor');
-  const effectiveSimplifiedCanonicalVerdict = projectionCanonicalVerdict || normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || 'watch');
-  const effectiveSimplifiedVisualBucket = projectionVisualBucket || normalizeVisualBucketForPairing(reviewEffectiveSimplifiedState.visualBucket || simplifiedState.visualBucket || 'monitor');
+  let normalizedSimplifiedVisualBucket = simplifiedVisualBucket;
+  if(simplifiedCanonicalVerdict === 'entry' && normalizedSimplifiedVisualBucket !== 'entry'){
+    normalizedSimplifiedVisualBucket = 'entry';
+  }else if(simplifiedCanonicalVerdict === 'near_entry' && normalizedSimplifiedVisualBucket === 'monitor'){
+    normalizedSimplifiedVisualBucket = 'near_entry';
+  }
+  let effectiveSimplifiedCanonicalVerdict = projectionCanonicalVerdict
+    || savedReviewVerdict
+    || normalizeOptionalGlobalVerdictKey(persistedDisplayStateHealth && persistedDisplayStateHealth.canonicalVerdict || '')
+    || normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || 'watch');
+  let effectiveSimplifiedVisualBucket = projectionVisualBucket
+    || (savedReviewVerdict ? normalizeVisualBucketForPairing(savedReviewVerdict) : '')
+    || normalizeVisualBucketForPairing(persistedDisplayStateHealth && persistedDisplayStateHealth.visualBucket || '')
+    || normalizeVisualBucketForPairing(reviewEffectiveSimplifiedState.visualBucket || simplifiedState.visualBucket || 'monitor');
+  if(effectiveSimplifiedCanonicalVerdict === 'entry' && effectiveSimplifiedVisualBucket !== 'entry'){
+    effectiveSimplifiedVisualBucket = 'entry';
+  }else if(effectiveSimplifiedCanonicalVerdict === 'near_entry' && effectiveSimplifiedVisualBucket === 'monitor'){
+    effectiveSimplifiedVisualBucket = 'near_entry';
+  }
+  const savedEntryProjectionDisplay = (
+    !reviewSnapshotAuthority
+    && normalizeGlobalVerdictKey(record.review && record.review.savedVerdict || '') === 'entry'
+    && normalizeReviewProjectionSource(reviewProjectionSource, presentationProjectionSnapshot) === 'track_projection_updated'
+  )
+    ? persistedReviewProjectionSnapshot(record, 'review_saved_entry_render')
+    : null;
+  if(savedEntryProjectionDisplay && effectiveSimplifiedCanonicalVerdict !== 'entry'){
+    effectiveSimplifiedCanonicalVerdict = 'entry';
+    effectiveSimplifiedVisualBucket = 'entry';
+  }
   const accepted50MaSupportTestDisplay = isAccepted50MaSupportTestDisplayState({
     record,
     simplifiedState:reviewEffectiveSimplifiedState,
@@ -40438,7 +43537,7 @@ function renderReviewWorkspace(options = {}){
     console.log('[REVIEW_SIMPLIFIED_STATE]', {
       ticker:record.ticker,
       canonicalVerdict:effectiveSimplifiedCanonicalVerdict,
-      visualBucket:simplifiedVisualBucket,
+      visualBucket:normalizedSimplifiedVisualBucket,
       tone:simplifiedTone,
       structureState:reviewEffectiveSimplifiedState.structureState || '',
       structureEligibility:reviewEffectiveSimplifiedState.structureEligibility || '',
@@ -40459,11 +43558,47 @@ function renderReviewWorkspace(options = {}){
   const warningState = (analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.warning_state)
     ? analysisState.normalizedAnalysis.warning_state
     : evaluateWarningState(record, analysisState.normalizedAnalysis);
+  const reviewCommittedPlanEntryFallback = hasCanonicalTradePlanStamp(record.plan)
+    && String(record.plan && record.plan.authoritySource || '').trim() === 'applyPlanCandidateToRecord'
+    && String(record.plan && record.plan.tradeability || '').trim().toLowerCase() !== 'too_expensive'
+    && String(record.plan && record.plan.capitalFit || '').trim().toLowerCase() !== 'too_expensive'
+    && normalizeGlobalVerdictKey(record.scan && (record.scan.resolvedVerdict || record.scan.verdict) || '') === 'entry';
+  const earlyResolvedContract = bundleValid
+    ? refreshBundle.resolvedContract
+    : {finalVerdict:'watch', final_verdict:'watch', final_verdict_rendered:'watch', primaryState:'developing', blockerReason:'Developing - waiting for confirmation.'};
+  const resolvedContractEntryVerdict = normalizeGlobalVerdictKey(
+    earlyResolvedContract && (
+      earlyResolvedContract.finalVerdict
+      || earlyResolvedContract.final_verdict
+      || earlyResolvedContract.final_verdict_rendered
+    ) || ''
+  ) === 'entry';
+  const reviewContractEntryFallback = reviewCommittedPlanEntryFallback || resolvedContractEntryVerdict || (
+    hasCanonicalTradePlanStamp(record.plan)
+      && normalizeGlobalVerdictKey(
+        refreshBundle
+        && refreshBundle.canonicalContract
+        && refreshBundle.canonicalContract.planVerdictContract
+        && refreshBundle.canonicalContract.planVerdictContract.canonicalVerdict
+        || ''
+      ) === 'entry'
+  );
+  const authoritativeEntryReviewPresentation = reviewProjectionCanDriveEntryDisplay(
+    displayProjectionSnapshot,
+    reviewProjectionSource,
+    record
+  ) || effectiveSimplifiedCanonicalVerdict === 'entry' || reviewContractEntryFallback;
   const effectivePlan = effectivePlanForRecord(record, {allowScannerFallback:true});
-  const baseDisplayedPlan = applySetupConfirmationPlanGate(
+  let baseDisplayedPlan = applySetupConfirmationPlanGate(
     record,
     deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency)
   );
+  if(authoritativeEntryReviewPresentation && baseDisplayedPlan.status !== 'valid'){
+    const fallbackDisplayedPlan = reviewFallbackDisplayedPlan(record, derivedStates);
+    if(fallbackDisplayedPlan && fallbackDisplayedPlan.status === 'valid'){
+      baseDisplayedPlan = fallbackDisplayedPlan;
+    }
+  }
   const capitalSimulationState = applyReviewCapitalSimulation(baseDisplayedPlan, record.ticker);
   const displayedPlan = capitalSimulationState.displayedPlan;
   const planCheckState = planCheckStateForRecord(record, {effectivePlan, displayedPlan});
@@ -40486,7 +43621,8 @@ function renderReviewWorkspace(options = {}){
   });
   const displayedReviewChecks = resolvedReviewChecksForDisplay(reviewChecks, reviewChecklistContext);
   const reviewSetupQuality = scoreAndStatusFromChecks(displayedReviewChecks, reviewChecklistContext);
-  const setupScore = setupScoreForRecord(record);
+  const reviewScoreRecord = canonicalLiveRecord || record;
+  const setupScore = setupScoreForRecord(reviewScoreRecord);
   const setupScoreDisplay = `Setup ${setupScore}/10`;
   const setupQualityLabel = setupQualityLabelForScore(setupScore);
   const setupQualitySummary = reviewSetupQualitySummary(displayedReviewChecks, reviewSetupQuality, reviewChecklistContext);
@@ -40506,7 +43642,9 @@ function renderReviewWorkspace(options = {}){
   const reviewOpenCanonicalVerdict = reviewOpenCanonicalContract && reviewOpenCanonicalContract.presentationLabel
     ? String(reviewOpenCanonicalContract.presentationLabel)
     : '';
-  const reviewHeaderVerdict = reviewHeaderVerdictForRecord(record);
+  const reviewHeaderVerdict = globalVerdictLabel(
+    normalizeGlobalVerdictKey(reviewEffectiveSimplifiedState.canonicalVerdict || simplifiedState.canonicalVerdict || 'watch')
+  );
   const displayStage = initialVerdictOverride || reviewOpenCanonicalVerdict || reviewHeaderVerdict;
   const scannerView = buildFinalSetupView(record);
   const scannerStatus = normalizeAnalysisVerdict(scannerView && scannerView.scannerResolution && scannerView.scannerResolution.status || scannerView && scannerView.displayStage || '');
@@ -40549,9 +43687,7 @@ function renderReviewWorkspace(options = {}){
     setupUiState,
     avoidSubtype
   });
-  const resolvedContract = bundleValid
-    ? refreshBundle.resolvedContract
-    : {finalVerdict:'watch', final_verdict:'watch', final_verdict_rendered:'watch', primaryState:'developing', blockerReason:'Developing - waiting for confirmation.'};
+  const resolvedContract = earlyResolvedContract;
   const safeResolvedContract = resolvedContract && typeof resolvedContract === 'object' ? resolvedContract : {};
   const simulatedExecutionVerdict = capitalSimulationState.simulation
     ? capitalSimulationVerdictImpact(displayStage, capitalSimulationState.simulation.capitalFit)
@@ -40581,9 +43717,57 @@ function renderReviewWorkspace(options = {}){
     simplifiedState && simplifiedState.canonicalVerdict
     || 'watch'
   );
+  const paperTradeActiveProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(record.ticker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const paperTradeActiveProjectionSource = normalizeReviewProjectionSource(
+    String(uiState.activeReviewProjectionSource || '').trim().toLowerCase(),
+    paperTradeActiveProjectionSnapshot
+  );
+  const paperTradeSavedReviewVerdict = normalizeGlobalVerdictKey(record.review && record.review.savedVerdict || '');
+  const paperTradeScanVerdict = normalizeGlobalVerdictKey(
+    record.scan && (record.scan.resolvedVerdict || record.scan.verdict)
+    || ''
+  );
+  const paperTradeProjectionVerdict = normalizeGlobalVerdictKey(
+    paperTradeActiveProjectionSnapshot && (
+      paperTradeActiveProjectionSnapshot.canonicalVerdict
+      || paperTradeActiveProjectionSnapshot.finalVerdict
+      || paperTradeActiveProjectionSnapshot.renderedVerdict
+    )
+  );
+  const paperTradeProjectionEntryAuthority = paperTradeActiveProjectionSource === 'track_projection_updated'
+    ? (paperTradeSavedReviewVerdict === 'entry' && paperTradeProjectionVerdict === 'entry')
+    : (
+      paperTradeActiveProjectionSource === 'clicked_card_snapshot'
+      && paperTradeScanVerdict === 'entry'
+      && paperTradeProjectionVerdict === 'entry'
+    );
+  const paperTradeContractEntryFallback = resolvedContractEntryVerdict || normalizeGlobalVerdictKey(
+    refreshBundle
+    && refreshBundle.canonicalContract
+    && refreshBundle.canonicalContract.planVerdictContract
+    && refreshBundle.canonicalContract.planVerdictContract.canonicalVerdict
+    || ''
+  ) === 'entry';
+  const paperTradeCommittedPlanEntryFallback = hasCanonicalTradePlanStamp(record.plan)
+    && String(record.plan && record.plan.authoritySource || '').trim() === 'applyPlanCandidateToRecord'
+    && String(record.plan && record.plan.tradeability || '').trim().toLowerCase() !== 'too_expensive'
+    && String(record.plan && record.plan.capitalFit || '').trim().toLowerCase() !== 'too_expensive'
+    && paperTradeScanVerdict === 'entry';
+  const paperTradeStampedEntryFallback = paperTradeActiveProjectionSource !== 'clicked_card_snapshot'
+    && paperTradeActiveProjectionSource !== 'track_projection_updated'
+    && hasCanonicalTradePlanStamp(record.plan)
+    && displayedPlan.status === 'valid'
+    && (paperTradeContractEntryFallback || paperTradeCommittedPlanEntryFallback)
+    && paperTradeScanVerdict === 'entry';
   const paperTradeAuthoritySimplifiedState = {
     ...simplifiedState,
-    canonicalVerdict:paperTradeAuthoritativeReviewVerdict || paperTradeLiveResolverVerdict || 'watch'
+    canonicalVerdict:(paperTradeProjectionEntryAuthority || paperTradeStampedEntryFallback)
+      ? 'entry'
+      : (paperTradeLiveResolverVerdict || paperTradeAuthoritativeReviewVerdict || 'watch')
   };
   const paperTradePlanAuthority = resolveCanonicalTradePlanAuthority({
     record,
@@ -40593,7 +43777,18 @@ function renderReviewWorkspace(options = {}){
     derivedStates,
     context:'review_render_paper_trade'
   });
-  const paperTradePlanActionable = paperTradePlanAuthority.actionable === true
+  const paperTradePlanActionable = (paperTradePlanAuthority.actionable === true
+    || paperTradeStampedEntryFallback
+    || (
+      paperTradeProjectionEntryAuthority
+      && paperTradePlanAuthority.planStatus === 'valid'
+      && paperTradePlanAuthority.riskFits === true
+      && paperTradePlanAuthority.capitalAffordable === true
+      && paperTradePlanAuthority.tradeabilityActionable === true
+      && paperTradePlanAuthority.terminalAvoid !== true
+      && paperTradePlanAuthority.structuralWeakness !== true
+      && paperTradePlanAuthority.planFieldsPresent === true
+    ))
     && paperTradePlanAuthority.planStatus === 'valid';
   const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
     paperTradePlanActionable ? 'entry' : 'watch'
@@ -40626,15 +43821,19 @@ function renderReviewWorkspace(options = {}){
     && mergedPaperTradeEligibilityState.eligible === true
     && gatewayReadyForPaperTrade === true;
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
-  if(!paperTradeEligible && paperTradeUi.previewOpen === true){
+  const hasPreviewSnapshot = paperTradeUi.previewOpen === true
+    && paperTradeUi.snapshot
+    && typeof paperTradeUi.snapshot === 'object';
+  if(!paperTradeEligible && paperTradeUi.previewOpen === true && !hasPreviewSnapshot){
     setPaperTradeUiState(record.ticker, {previewOpen:false, snapshot:null});
     paperTradeUi.previewOpen = false;
     paperTradeUi.snapshot = null;
   }
   const paperTradeSubmitting = paperTradeUi.state === 'submitting';
-  const paperTradeButtonDisabled = !paperTradeEligible || paperTradeSubmitting;
+  const paperTradePreviouslySubmitted = hasSubmittedPaperTradeEvidenceForRecord(record) === true;
+  const paperTradeButtonDisabled = ((!paperTradeEligible && !hasPreviewSnapshot) || paperTradeSubmitting);
   const paperTradeButtonLabel = paperTradeSubmitting ? 'Submitting...' : 'Paper Trade';
-  const paperTradePanelOpen = paperTradeEligible && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
+  const paperTradePanelOpen = (paperTradeEligible || hasPreviewSnapshot) && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
   const paperTradePreviewVisible = paperTradePanelOpen;
   const paperTradePrimaryReason = mergedPaperTradeEligibilityState.reasons[0] || '';
   const paperTradeDisabledReason = trading212PaperSupported !== true
@@ -40643,6 +43842,8 @@ function renderReviewWorkspace(options = {}){
     ? 'Checking paper trading gateway...'
     : (trading212PaperEnabled !== true
     ? trading212PaperAvailabilityMessage
+    : (paperTradePreviouslySubmitted
+      ? 'Paper trade submitted for this setup.'
     : (!paperTradeEligible
       ? (
       paperTradePlanAuthority.reasonCode === 'capital_not_affordable'
@@ -40653,7 +43854,7 @@ function renderReviewWorkspace(options = {}){
         ? 'Not actionable - setup is not Entry-ready'
         : 'Trade plan not valid'))
     )
-    : '')));
+    : ''))));
   const paperTradeHasRuntimeStatus = !!paperTradeUi.message
     || paperTradeUi.state === 'submitting'
     || paperTradeUi.state === 'submit_success'
@@ -40665,7 +43866,9 @@ function renderReviewWorkspace(options = {}){
         ? 'Submitting paper trade...'
         : (paperTradeUi.state === 'submit_success' ? 'Paper trade submitted.' : 'Paper trade update required.'))
     )
-    : '';
+    : (paperTradePreviouslySubmitted
+      ? 'Paper trade submitted.'
+      : '');
   const paperTradeStatusClass = paperTradeUi.state === 'submit_error'
     ? 'warntext'
     : (paperTradeUi.state === 'submit_success' ? 'ok' : 'tiny');
@@ -40683,8 +43886,15 @@ function renderReviewWorkspace(options = {}){
   const targetReviewText = targetReviewStateLabel(executionState.targetReviewState);
   const targetActionText = executionState.targetActionRecommendation || 'Hold / monitor';
   const targetGuidance = dynamicExitGuidance(executionState.exitMode);
+  const reviewPlanSeed = authoritativeEntryReviewPresentation && displayedPlan.status === 'valid'
+    ? {
+      entry:displayedPlan.entry,
+      stop:displayedPlan.stop,
+      firstTarget:displayedPlan.target != null ? displayedPlan.target : displayedPlan.firstTarget
+    }
+    : effectivePlan;
   const targetAlertText = record.plan.targetAlert && record.plan.targetAlert.enabled
-    ? `On @ ${Number.isFinite(executionState.targetAlertLevel) ? fmtPrice(Number(executionState.targetAlertLevel)) : 'n/a'}`
+    ? `On @ ${Number.isFinite(executionState.targetAlertLevel) ? fmtPrice(Number(executionState.targetAlertLevel)) : 'n/a'}` 
     : 'Off';
   const positionCostText = Number.isFinite(displayedPlan.capitalFit.position_cost)
     ? `${Number(displayedPlan.capitalFit.position_cost.toFixed(2))}${displayedPlan.capitalFit.quote_currency ? ` ${displayedPlan.capitalFit.quote_currency}` : ''}`
@@ -40708,7 +43918,7 @@ function renderReviewWorkspace(options = {}){
   const activePaperTradeSnapshot = (paperTradePreviewVisible && paperTradeUi.snapshot && typeof paperTradeUi.snapshot === 'object')
     ? paperTradeUi.snapshot
     : null;
-  const paperTradePreviewModel = paperTradeEligible
+  const paperTradePreviewModel = (paperTradeEligible || activePaperTradeSnapshot)
     ? (
       activePaperTradeSnapshot
         ? paperTradePreviewModelFromSnapshot(activePaperTradeSnapshot, {
@@ -40856,11 +44066,14 @@ function renderReviewWorkspace(options = {}){
       || presentationProjectionSnapshot.renderedBucket
     ) || ''
   );
+  const preserveClickedProjectionSource = reviewProjectionSource === 'clicked_card_snapshot';
   const effectiveReviewProjectionSourceBase = reviewSnapshotAuthority && !isReviewOpenRender
-    ? (hasPresentationProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve')
+    ? (preserveClickedProjectionSource
+      ? 'clicked_card_snapshot'
+      : (hasPresentationProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve'))
     : reviewProjectionSource;
   if(reviewSnapshotAuthority && !isReviewOpenRender){
-    uiState.activeReviewProjectionSource = hasPresentationProjectionSnapshot ? 'track_projection_updated' : 'direct_resolve';
+    uiState.activeReviewProjectionSource = effectiveReviewProjectionSourceBase;
   }
   const visualBucketSource = simplifiedVisualBucket;
   const sourceOfTruthVisualBucket = simplifiedVisualBucket;
@@ -40870,7 +44083,7 @@ function renderReviewWorkspace(options = {}){
   const canonicalAvoidActive = resolvedReviewFinalVerdictKey === 'avoid';
   const finalReviewVisualBucket = reviewDisplayBucket;
   const effectiveReviewProjectionSource = reviewSnapshotAuthority
-    ? 'track_projection_updated'
+    ? effectiveReviewProjectionSourceBase
     : 'simplified_state_pipeline';
   uiState.lastReviewProjectionInvalidationKey = '';
   const reviewVisualTone = accepted50MaSupportTestDisplay && finalReviewVisualBucket === 'monitor'
@@ -41112,18 +44325,16 @@ function renderReviewWorkspace(options = {}){
     displayedPlan,
     planRealism
   });
-  const authoritativeEntryReviewPresentation = reviewProjectionCanDriveEntryDisplay(
-    presentationProjectionSnapshot,
-    reviewProjectionSource,
-    record
-  ) || effectiveSimplifiedCanonicalVerdict === 'entry';
   const reviewNextActionLabel = authoritativeEntryReviewPresentation
     ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
     : resolvedReviewDisplay.nextActionLabel;
   const reviewBadgeLabel = effectiveReviewBadge.text;
   const planUI = resolvedReviewDisplay.planUI;
   const entryReadyRecord = effectiveSimplifiedCanonicalVerdict === 'entry';
-  const effectivePlanUi = (authoritativeEntryReviewPresentation || entryReadyRecord)
+  const authoritativeEntryDisplay = authoritativeEntryReviewPresentation
+    || entryReadyRecord
+    || reviewSemanticStatus.planActionable === true;
+  const effectivePlanUi = authoritativeEntryDisplay
     ? {
       ...planUI,
       showPlan:true,
@@ -41132,10 +44343,12 @@ function renderReviewWorkspace(options = {}){
       showPositionSize:true
     }
     : planUI;
-  const tradeStatusText = authoritativeEntryReviewPresentation
+  const tradeStatusText = authoritativeEntryDisplay
     ? {
-      line1:'Entry Ready',
-      line2:projectionActionGuidance || 'Execute only if the trigger remains valid.'
+      line1:'Entry Ready - plan is actionable.',
+      line2:(authoritativeEntryReviewPresentation
+        ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
+        : (reviewSemanticStatus.nextAction || 'Execute only if the trigger remains valid.'))
     }
     : resolvedReviewDisplay.tradeStatus;
   const modifierMarkup = '';
@@ -41180,7 +44393,19 @@ function renderReviewWorkspace(options = {}){
   const analysisPanelClass = `reviewanalysispanel ${reviewPanelToneClass}`.trim();
   const companyLine = [record.meta.companyName || 'Unknown company', record.meta.exchange || ''].filter(Boolean).join(' | ');
   const marketLine = [record.meta.marketStatus || state.marketStatus].filter(Boolean).join(' | ');
-  const rawRrDisplay = preferredReviewRrDisplay(record, displayedPlan, resolvedReviewDisplay.rrDisplay);
+  const authoritativeReviewPlanForDisplay = authoritativeEntryDisplay
+    ? deriveCurrentPlanState(
+      record.plan && record.plan.entry,
+      record.plan && record.plan.stop,
+      record.plan && record.plan.firstTarget,
+      record.marketData && record.marketData.currency
+    )
+    : displayedPlan;
+  const rawRrDisplay = preferredReviewRrDisplay(
+    record,
+    authoritativeReviewPlanForDisplay,
+    resolvedReviewDisplay.rrDisplay
+  );
   const credibleRrDisplay = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   const planRealismSummary = resolvedReviewDisplay.planSummary;
   const dedupedPlanRealismSummary = planRealismSummary;
@@ -41498,6 +44723,55 @@ function renderReviewWorkspace(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalFitLabel
   });
+  const canonicalReviewPresentation = buildCanonicalReviewPresentationModel(record, {
+    derivedStates,
+    globalVerdict,
+    lifecycleSnapshot:refreshBundle && refreshBundle.lifecycleSnapshot,
+    simplifiedState:reviewEffectiveSimplifiedState,
+    displayedPlan,
+    qualityAdjustments,
+    warningState,
+    planUiState,
+    setupUiState,
+    planRealism,
+    resolvedContract,
+    visualState,
+    reviewSemanticStatus,
+    resolvedReviewDisplay,
+    capitalComfort
+  });
+  const renderPresentationVisualBucket = normalizeVisualBucketForPairing(
+    canonicalReviewPresentation && canonicalReviewPresentation.visualBucket
+      ? canonicalReviewPresentation.visualBucket
+      : finalReviewVisualBucket
+  );
+  const renderPresentationVisualState = renderPresentationVisualBucket === 'near_entry'
+    ? 'near_entry'
+    : (renderPresentationVisualBucket === 'entry'
+      ? 'entry'
+      : (renderPresentationVisualBucket === 'avoid'
+        ? 'avoid'
+        : (renderPresentationVisualBucket === 'diminishing' ? 'diminishing' : 'monitor')));
+  const renderPresentationTone = String(
+    canonicalReviewPresentation && canonicalReviewPresentation.tone
+      ? canonicalReviewPresentation.tone
+      : reviewVisualTone
+  ).trim().toLowerCase() || 'monitor';
+  const renderPresentationBadgeClass = String(
+    canonicalReviewPresentation && canonicalReviewPresentation.badgeClass
+      ? canonicalReviewPresentation.badgeClass
+      : (effectiveReviewBadge.className || reviewBadgeClassForBucket(renderPresentationVisualBucket))
+  ).trim();
+  const renderPresentationBadgeLabel = String(
+    canonicalReviewPresentation && canonicalReviewPresentation.badgeLabel
+      ? canonicalReviewPresentation.badgeLabel
+      : (reviewBadgeLabel || globalVerdictLabel(resolvedReviewFinalVerdictKey || 'watch') || 'Watch')
+  ).trim();
+  const renderPresentationNextActionLabel = String(
+    canonicalReviewPresentation && canonicalReviewPresentation.nextActionLabel
+      ? canonicalReviewPresentation.nextActionLabel
+      : reviewNextActionLabel
+  ).trim();
   const technicalContextLine = resolvedReviewDisplay.technicalContextLine;
   if(typeof console !== 'undefined' && console.log){
     console.log('[REVIEW_RENDER_COMMIT]', {
@@ -41535,16 +44809,16 @@ function renderReviewWorkspace(options = {}){
     if(token) box.classList.add(token);
   });
   box.style.cssText = reviewShellStyleAttr;
-  box.dataset.visualTone = reviewOuterBorderTone || visualState.visual_tone || '';
-  box.dataset.visualState = finalReviewVisualState || visualState.state || '';
-  box.dataset.reviewPresentationState = effectiveReviewPresentationState || '';
+  box.dataset.visualTone = renderPresentationTone || reviewOuterBorderTone || visualState.visual_tone || '';
+  box.dataset.visualState = renderPresentationVisualState || finalReviewVisualState || visualState.state || '';
+  box.dataset.reviewPresentationState = renderPresentationVisualState || effectiveReviewPresentationState || '';
   box.dataset.reviewVisualSource = reviewVisualStateSource;
   box.dataset.renderedReviewTicker = normalizeTicker(record.ticker || '');
   box.dataset.renderedReviewRequestToken = String(currentRenderedReviewRequestToken() || '');
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate({persist:false});
   });
-  box.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(finalReviewVisualState || visualState.state || '')}">
+  box.innerHTML = `<div class="reviewworkspace reviewworkspace--ready" data-tone-source="${escapeHtml(visualState.debugToneSource)}" data-visual-tone="${escapeHtml(renderPresentationTone || reviewOuterBorderTone || visualState.visual_tone || '')}" data-visual-state="${escapeHtml(renderPresentationVisualState || finalReviewVisualState || visualState.state || '')}">
     <div class="panelbox review-section review-section--snapshot" data-tour="verdict-card">
       <div class="reviewsectionhead"><strong>Decision Summary</strong></div>
       <div class="reviewhero reviewhero-compact">
@@ -41556,7 +44830,7 @@ function renderReviewWorkspace(options = {}){
           </div>
           <div class="review-summary-right">
             <div class="inline-status review-summary-badges">
-              <span class="badge ${effectiveReviewBadge.className}">${escapeHtml(reviewBadgeLabel)}</span>
+              <span class="badge ${renderPresentationBadgeClass}">${escapeHtml(renderPresentationBadgeLabel)}</span>
               <span class="score visual-score">${escapeHtml(setupScoreDisplay)}</span>
             </div>
           </div>
@@ -41564,7 +44838,7 @@ function renderReviewWorkspace(options = {}){
         ${snapshotWarningsMarkup ? `<div class="inline-status review-warning-row">${snapshotWarningsMarkup}</div>` : ''}
         ${downgradeSummary ? `<div class="tiny review-downgrade-badge"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}
         <div class="review-decision-primary decision-summary">${escapeHtml(snapshotVerdictLine)}</div>
-        <div class="tiny review-next-action-inline" id="reviewNextActionInline">Action guidance: ${escapeHtml(reviewNextActionLabel)}</div>
+        <div class="tiny review-next-action-inline" id="reviewNextActionInline">Action guidance: ${escapeHtml(renderPresentationNextActionLabel)}</div>
       </div>
       <div class="reviewchartpanel reviewchartpanel--compact" data-tour="chart-upload">
         ${chartGuidance}
@@ -41578,14 +44852,14 @@ function renderReviewWorkspace(options = {}){
         ${chartManualActionsMarkup}
       </div>
     </div>
-    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-tour="trade-plan" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(finalReviewVisualState)}" data-review-visual-tone="${escapeHtml(reviewVisualTone)}">
+    <div class="panelbox review-section review-section--trade plannerbox ${escapeHtml(reviewPanelToneClass)}" id="plannerBox" data-tour="trade-plan" data-review-panel-tone="${escapeHtml(reviewPanelToneClass)}" data-review-presentation-state="${escapeHtml(renderPresentationVisualState || finalReviewVisualState)}" data-review-visual-tone="${escapeHtml(renderPresentationTone || reviewVisualTone)}">
       <div class="reviewsectionhead"><strong id="plannerSection">Trade Plan</strong></div>
       <div class="summary review-hidden" id="plannerPlanSummary">Entry: Not given | Stop: Not given | First Target: Not given | Planned R:R: N/A</div>
       <input id="selectedTicker" value="${escapeHtml(record.ticker)}" readonly hidden />
       <div class="plan-grid plan-grid-inputs ${effectivePlanUi.showPlan ? '' : 'review-hidden'}" id="tradePlanInputs">
-        <div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.entry || '')}" /></div>
-        <div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.stop || '')}" /></div>
-        <div><label>${escapeHtml(executionState.exitMode === 'dynamic_exit' ? 'Target Review Level' : 'Planned First Target')}</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(effectivePlan.firstTarget || '')}" /></div>
+        <div><label>Planned Entry</label><input id="entryPrice" type="number" step="0.01" value="${escapeHtml(reviewPlanSeed.entry || '')}" /></div>
+        <div><label>Planned Stop</label><input id="stopPrice" type="number" step="0.01" value="${escapeHtml(reviewPlanSeed.stop || '')}" /></div>
+        <div><label>${escapeHtml(executionState.exitMode === 'dynamic_exit' ? 'Target Review Level' : 'Planned First Target')}</label><input id="targetPrice" type="number" step="0.01" value="${escapeHtml(reviewPlanSeed.firstTarget || '')}" /></div>
       </div>
       <div class="reviewstats plan-grid plan-grid-stats reviewstats--compact">
         <div class="stat stat--trade-status"><div>Trade Status</div><div class="big" id="tradeStatusBox">${renderTradeStatusMarkup(tradeStatusText)}</div></div>
@@ -41661,7 +44935,7 @@ function renderReviewWorkspace(options = {}){
         <button class="secondary" id="saveReviewBtn">Save Review</button>
       </div>
       <div class="review-action-row review-action-row--watchlist" data-advanced-debug-trigger="review-watchlist"><button class="secondary" id="addWatchlistActiveBtn" ${watchlistEligibility.canAdd ? '' : 'disabled'}>${watchlistEligibility.inWatchlist ? 'Already In Watchlist' : 'Add to Watchlist'}</button></div>
-      <div class="tiny review-next-action-primary" id="reviewNextActionPrimary">Can I trade this now? ${escapeHtml(reviewNextActionLabel)}</div>
+      <div class="tiny review-next-action-primary" id="reviewNextActionPrimary">Can I trade this now? ${escapeHtml(renderPresentationNextActionLabel)}</div>
       <div class="tiny ${escapeHtml(tradeGatewayHealth.className)}" id="paperTradeGatewayHealth">Paper Gateway: ${escapeHtml(tradeGatewayHealth.label)}${tradeGatewayHealth.detail ? ` | ${escapeHtml(tradeGatewayHealth.detail)}` : ''}</div>
       ${paperTradeDisabledReason ? `<div class="tiny warntext" id="paperTradeDisabledReason">${escapeHtml(paperTradeDisabledReason)}</div>` : ''}
       ${paperTradeDebugLabel}
@@ -41681,16 +44955,68 @@ function renderReviewWorkspace(options = {}){
   refreshReview({
     skipWatchlistLifecycle:options.skipWatchlistLifecycle === true,
     readOnlyReviewOpen:readOnlyReviewOpen,
-    persistDraft:readOnlyReviewOpen ? false : options.persistDraft,
+    persistDraft:false,
     reviewRenderSeq:reviewSeq
   });
   if(!readOnlyReviewOpen){
     renderReviewLifecycleSummary(record.ticker);
-    calculate({persist:false});
+    calculate({persist:false, skipStateSync:true});
+  }
+  applyCanonicalReviewPresentationModelToDom(canonicalReviewPresentation);
+  const liveCanonicalReviewPresentation = buildCanonicalReviewPresentationModel(record, {
+    source:'renderReviewWorkspace:dom_sync'
+  });
+  applyCanonicalReviewPresentationModelToDom(liveCanonicalReviewPresentation);
+  if(liveCanonicalReviewPresentation){
+    box.dataset.visualTone = String(
+      liveCanonicalReviewPresentation.tone
+      || box.dataset.visualTone
+      || ''
+    ).trim().toLowerCase();
+    box.dataset.visualState = normalizeVisualBucketForPairing(
+      liveCanonicalReviewPresentation.visualBucket
+      || box.dataset.visualState
+      || 'monitor'
+    );
+    box.dataset.reviewPresentationState = box.dataset.visualState;
+  }
+  if(!reviewSnapshotAuthority && isPersistedDisplayProjectionSource(reviewProjectionSource)){
+    const persistedDisplayHealth = currentReviewStateHealthSnapshot(record);
+    const persistedDisplayVerdict = normalizeOptionalGlobalVerdictKey(
+      persistedDisplayHealth && persistedDisplayHealth.canonicalVerdict
+      || ''
+    );
+    if(persistedDisplayVerdict){
+      const persistedDisplayBucket = normalizeVisualBucketForPairing(
+        persistedDisplayHealth && persistedDisplayHealth.visualBucket
+        || persistedDisplayVerdict
+      );
+      const badgeNode = document.querySelector('#reviewWorkspace .review-summary-badges .badge')
+        || document.querySelector('#reviewWorkspace .badge.state-pill');
+      if(badgeNode){
+        badgeNode.className = `badge ${reviewBadgeClassForBucket(persistedDisplayBucket)}`.trim();
+        badgeNode.textContent = String(globalVerdictLabel(persistedDisplayVerdict) || 'Watch');
+      }
+    }
+  }
+  if(paperTradePlanActionable === true && $('tradeStatusBox')){
+    $('tradeStatusBox').innerHTML = renderTradeStatusMarkup({
+      line1:'Entry Ready - plan is actionable.',
+      line2:'Execute only if the trigger remains valid.'
+    });
   }
   updateReviewAiSummaryOverflowHint();
   window.requestAnimationFrame(() => updateReviewAiSummaryOverflowHint());
   if(typeof window !== 'undefined'){
+    window.requestAnimationFrame(() => {
+      const paperTradeButton = $('paperTradeBtn');
+      if(paperTradeButton && paperTradeButton.disabled !== true && $('tradeStatusBox')){
+        $('tradeStatusBox').innerHTML = renderTradeStatusMarkup({
+          line1:'Entry Ready - plan is actionable.',
+          line2:'Execute only if the trigger remains valid.'
+        });
+      }
+    });
     window.requestAnimationFrame(() => logReviewChartOverflowGuard(record.ticker));
   }
   finishReviewRenderLog();
@@ -41708,6 +45034,81 @@ function renderReviewWorkspace(options = {}){
 
 function renderCards(){
   renderReviewWorkspace();
+}
+
+function syncReviewDomToCanonicalAuthority(record){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item) return;
+  const health = currentReviewStateHealthSnapshot(item);
+  if(!health || typeof health !== 'object') return;
+  const verdictKey = normalizeGlobalVerdictKey(health.canonicalVerdict || 'watch');
+  const badgeNode = document.querySelector('#reviewWorkspace .review-summary-badges .badge');
+  const tradePlanInputs = $('tradePlanInputs');
+  const capitalFitMetric = $('capitalFitMetric');
+  const positionSizeStat = $('positionSizeStat');
+  const fxBasisBox = $('fxBasisBox');
+  const rrValueNode = $('rrValue');
+  const entryInputValue = $('entryPrice') ? String($('entryPrice').value || '') : '';
+  const stopInputValue = $('stopPrice') ? String($('stopPrice').value || '') : '';
+  const targetInputValue = $('targetPrice') ? String($('targetPrice').value || '') : '';
+  const canonicalEntryValue = item.plan && item.plan.entry != null ? String(item.plan.entry) : '';
+  const canonicalStopValue = item.plan && item.plan.stop != null ? String(item.plan.stop) : '';
+  const canonicalTargetValue = item.plan && item.plan.firstTarget != null ? String(item.plan.firstTarget) : '';
+  const livePlannerInputsDiverged = entryInputValue !== canonicalEntryValue
+    || stopInputValue !== canonicalStopValue
+    || targetInputValue !== canonicalTargetValue;
+  const livePlannerDisplayedPlan = applySetupConfirmationPlanGate(
+    item,
+    deriveCurrentPlanState(entryInputValue, stopInputValue, targetInputValue, item.marketData && item.marketData.currency)
+  );
+  const livePlannerNeedsReplan = livePlannerInputsDiverged && String(livePlannerDisplayedPlan.status || '').trim().toLowerCase() !== 'valid';
+  if(badgeNode){
+    const bucket = normalizeVisualBucketForPairing(health.visualBucket || verdictKey || 'monitor');
+    const className = ({
+      entry:'badge--entry ready',
+      near_entry:'badge--near-entry near',
+      monitor:'badge--monitor watch',
+      diminishing:'badge--diminishing',
+      avoid:'badge--avoid avoid'
+    })[bucket] || 'badge--monitor watch';
+    badgeNode.className = `badge ${className}`.trim();
+    badgeNode.textContent = globalVerdictLabel(verdictKey || 'watch');
+  }
+  if(verdictKey === 'entry'){
+    if(livePlannerNeedsReplan){
+      if(rrValueNode) rrValueNode.textContent = 'No actionable plan yet.';
+      return;
+    }
+    if($('tradeStatusBox')){
+      $('tradeStatusBox').innerHTML = renderTradeStatusMarkup({
+        line1:'Entry Ready',
+        line2:'Execute only if the trigger remains valid.'
+      });
+    }
+    if(tradePlanInputs) tradePlanInputs.classList.remove('review-hidden');
+    if(capitalFitMetric) capitalFitMetric.classList.remove('review-hidden');
+    if(positionSizeStat) positionSizeStat.classList.remove('review-hidden');
+    if(fxBasisBox) fxBasisBox.classList.remove('review-hidden');
+    if(rrValueNode){
+      const displayedPlan = deriveCurrentPlanState(
+        item.plan && item.plan.entry,
+        item.plan && item.plan.stop,
+        item.plan && item.plan.firstTarget,
+        item.marketData && item.marketData.currency
+      );
+      rrValueNode.textContent = preferredReviewRrDisplay(item, displayedPlan, rrValueNode.textContent || 'No actionable plan yet.');
+    }
+    return;
+  }
+  if(verdictKey === 'near_entry' && String(health.planStatus || '').trim().toLowerCase() === 'valid'){
+    if($('tradeStatusBox')){
+      $('tradeStatusBox').innerHTML = renderTradeStatusMarkup({
+        line1:'Near Entry - plan is defined, but confirmation is still required.',
+        line2:'Wait for confirmation before entry.'
+      });
+    }
+    if(tradePlanInputs) tradePlanInputs.classList.remove('review-hidden');
+  }
 }
 
 function readImageDataUrlDimensions(dataUrl){
@@ -41978,7 +45379,12 @@ function loadCard(ticker, options = {}){
   logDebug('DEBUG_RENDER', 'RENDER_FROM_TICKER_RECORD', 'setupReview', ticker);
   setActiveReviewTicker(record.ticker);
   if(options.touchLifecycle === true){
-    refreshLifecycleStage(record, 'reviewed', REVIEW_EXPIRY_TRADING_DAYS, 'Ticker opened in Setup Review.', 'review');
+    writeLifecycleState(record, {
+      stage:'reviewed',
+      tradingDays:REVIEW_EXPIRY_TRADING_DAYS,
+      reason:'Ticker opened in Setup Review.',
+      source:'review'
+    }, {mode:'refresh'});
     commitTickerState();
   }
   renderReviewWorkspace({
@@ -42056,10 +45462,20 @@ function refreshReview(options = {}){
       if(setupQualityEvidence){
         setupQualityEvidence.textContent = 'Weighted by resolver state, current structure, bounce, plan validity, and priceability. Raw checklist evidence is kept internally only.';
       }
-      syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true, reviewRenderSeq:reviewSeq});
+      const liveRecord = ticker ? (getTickerRecord(ticker) || upsertTickerRecord(ticker)) : null;
+      if(liveRecord){
+        const reviewPresentation = buildCanonicalReviewPresentationModel(liveRecord);
+        applyCanonicalReviewPresentationModelToDom(reviewPresentation);
+      }
+      syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true, reviewRenderSeq:reviewSeq, canonicalDomOnly:true});
     });
   }else{
-    syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true, reviewRenderSeq:reviewSeq});
+    const liveRecord = ticker ? (getTickerRecord(ticker) || upsertTickerRecord(ticker)) : null;
+    if(liveRecord){
+      const reviewPresentation = buildCanonicalReviewPresentationModel(liveRecord);
+      applyCanonicalReviewPresentationModelToDom(reviewPresentation);
+    }
+    syncPlanDisplayMeta({readOnlyReviewOpen:options.readOnlyReviewOpen === true, reviewRenderSeq:reviewSeq, canonicalDomOnly:true});
   }
   if(options.persistDraft !== false){
     scheduleReviewDraftAutosave({reason:'refresh_review'});
@@ -42116,19 +45532,53 @@ function persistActiveReviewDraft(options = {}){
   };
   record.review.draft = manualReview;
   if(isManualSave){
-    record.review.manualReview = manualReview;
-    record.review.lastReviewedAt = manualReview.savedAt;
-    record.review.savedSummary = manualReview.summary;
-    if(String(result.status || '').trim()){
-      record.review.savedVerdict = normalizeImportedStatus(result.status, {preserveEmpty:true});
-    }
-    if(Number.isFinite(numericOrNull(result.score))){
-      record.review.savedScore = Number(result.score);
-    }
-    stampTickerJourneyAuthority(record, 'review_save', {
-      updatedAt:manualReview.savedAt,
-      reason:String(options.source || 'review_save')
+    const normalizedSavedVerdict = String(result.status || '').trim()
+      ? normalizeImportedStatus(result.status, {preserveEmpty:true})
+      : '';
+    const persistSavedReviewAuthority = typeof writeSavedReviewAuthority === 'function'
+      ? writeSavedReviewAuthority
+      : function fallbackWriteSavedReviewAuthority(targetRecord, payload = {}){
+        if(!targetRecord || typeof targetRecord !== 'object') return targetRecord;
+        targetRecord.review = targetRecord.review && typeof targetRecord.review === 'object' ? targetRecord.review : {};
+        if(Object.prototype.hasOwnProperty.call(payload, 'manualReview')){
+          targetRecord.review.manualReview = payload.manualReview && typeof payload.manualReview === 'object'
+            ? {...payload.manualReview}
+            : null;
+        }
+        if(Object.prototype.hasOwnProperty.call(payload, 'lastReviewedAt')){
+          targetRecord.review.lastReviewedAt = payload.lastReviewedAt || '';
+        }
+        if(Object.prototype.hasOwnProperty.call(payload, 'savedSummary')){
+          targetRecord.review.savedSummary = payload.savedSummary || '';
+        }
+        if(Object.prototype.hasOwnProperty.call(payload, 'savedVerdict')){
+          targetRecord.review.savedVerdict = payload.savedVerdict || '';
+        }
+        if(Object.prototype.hasOwnProperty.call(payload, 'savedScore')){
+          targetRecord.review.savedScore = Number.isFinite(numericOrNull(payload.savedScore))
+            ? Number(payload.savedScore)
+            : null;
+        }
+        return targetRecord;
+      };
+    persistSavedReviewAuthority(record, {
+      manualReview,
+      lastReviewedAt:manualReview.savedAt,
+      savedSummary:manualReview.summary,
+      savedVerdict:normalizedSavedVerdict,
+      savedScore:Number.isFinite(numericOrNull(result.score)) ? Number(result.score) : record.review.savedScore
     });
+    if(activeReviewTicker() === ticker){
+      uiState.activeReviewSourceProjectionSnapshot = null;
+      uiState.activeReviewProjectionSource = 'non_watchlist_direct_resolve';
+      uiState.activeReviewVerdictOverride = '';
+    }
+    if(typeof stampTickerJourneyAuthority === 'function'){
+      stampTickerJourneyAuthority(record, 'review_save', {
+        updatedAt:manualReview.savedAt,
+        reason:String(options.source || 'review_save')
+      });
+    }
   }
   updateTickerInputFromState();
   if(isManualSave){
@@ -42210,6 +45660,7 @@ function saveReview(){
 
 function resetReview(){
   uiState.activeReviewTicker = '';
+  clearPersistedReviewSessionState();
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
   ['selectedTicker','planStateBox','planQualityBox','planSourceBox','exitModeBox','targetReviewStateBox','targetAlertBox','rrRealismBox','credibleRrBox','optimisticTargetBox','targetAssessmentBox','realisticTargetBox','extendedTargetBox','targetStretchBox','targetCapReasonBox','entryPrice','stopPrice','targetPrice'].forEach(id => { if($(id)) $(id).value = ''; });
@@ -42256,11 +45707,9 @@ function syncPlanDisplayMeta(options = {}){
   }
   const liveRecord = getTickerRecord(ticker) || upsertTickerRecord(ticker);
   const readOnlyReviewOpen = options.readOnlyReviewOpen === true;
-  const canonicalPlanSynced = readOnlyReviewOpen
-    ? false
-    : ensureCanonicalPlanForRecord(liveRecord, {allowScannerFallback:true, source:'review'});
+  const canonicalPlanSynced = false;
   if(canonicalPlanSynced) commitTickerState();
-  const record = normalizeTickerRecord(liveRecord);
+  const record = liveRecord && typeof liveRecord === 'object' ? liveRecord : {};
   const metaSimplifiedState = resolveSimplifiedStateForSurface(record, 'review', {log:false});
   const metaGlobalVerdict = resolveGlobalVerdict(record);
   const effectiveMetaSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(
@@ -42279,7 +45728,13 @@ function syncPlanDisplayMeta(options = {}){
   );
   const derivedStates = analysisDerivedStatesFromRecord(record);
   const qualityAdjustments = evaluateSetupQualityAdjustments(record, {displayedPlan, derivedStates});
-  const planCheckState = planCheckStateForRecord(record, {
+  const canonicalEntryValue = record && record.plan && record.plan.entry != null ? String(record.plan.entry) : '';
+  const canonicalStopValue = record && record.plan && record.plan.stop != null ? String(record.plan.stop) : '';
+  const canonicalTargetValue = record && record.plan && record.plan.firstTarget != null ? String(record.plan.firstTarget) : '';
+  const plannerInputsDivergedFromCanonical = String(entryValue || '') !== canonicalEntryValue
+    || String(stopValue || '') !== canonicalStopValue
+    || String(targetValue || '') !== canonicalTargetValue;
+  const computedPlanCheckState = planCheckStateForRecord(record, {
     effectivePlan:{
       entry:entryValue,
       stop:stopValue,
@@ -42287,11 +45742,16 @@ function syncPlanDisplayMeta(options = {}){
     },
     displayedPlan
   });
+  const planCheckState = plannerInputsDivergedFromCanonical && displayedPlan.status !== 'valid'
+    ? 'needs_replan'
+    : computedPlanCheckState;
   const executionState = deriveExecutionPlanState(record, {
     exitMode:record.plan.exitMode,
     targetLevel:targetValue
   });
-  const displayStage = displayStageForRecord(record);
+  const displayStage = plannerInputsDivergedFromCanonical && displayedPlan.status !== 'valid'
+    ? 'Watch'
+    : displayStageForRecord(record);
   const liveEffectivePlan = {
     entry:entryValue,
     stop:stopValue,
@@ -42432,6 +45892,9 @@ function syncPlanDisplayMeta(options = {}){
       ? `On @ ${Number.isFinite(executionState.targetAlertLevel) ? fmtPrice(Number(executionState.targetAlertLevel)) : 'n/a'}`
       : 'Off';
   }
+  if(options.canonicalDomOnly === true){
+    return;
+  }
   const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
     && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
     && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(record.ticker || '')
@@ -42446,8 +45909,26 @@ function syncPlanDisplayMeta(options = {}){
     activeProjectionSource,
     record
   );
+  const committedPlanEntryDisplayOverride = hasCanonicalTradePlanStamp(record.plan)
+    && String(record.plan && record.plan.authoritySource || '').trim() === 'applyPlanCandidateToRecord'
+    && normalizeGlobalVerdictKey(record.scan && (record.scan.resolvedVerdict || record.scan.verdict) || '') === 'entry';
+  const resolvedContractEntryDisplayOverride = normalizeGlobalVerdictKey(
+    visualState.finalVerdict
+    || visualState.final_verdict
+    || visualState.final_verdict_rendered
+    || metaGlobalVerdict.final_verdict
+    || metaGlobalVerdict.finalVerdict
+    || ''
+  ) === 'entry';
   const entryReadyRecord = normalizeGlobalVerdictKey(effectiveMetaSimplifiedState.canonicalVerdict || '') === 'entry';
-  const authoritativeEntryDisplayOverride = entryReadyRecord || projectionEntryDisplayOverride;
+  const livePlannerNeedsReplan = plannerInputsDivergedFromCanonical && displayedPlan.status !== 'valid';
+  const authoritativeEntryDisplayOverride = !livePlannerNeedsReplan && (
+    entryReadyRecord
+    || projectionEntryDisplayOverride
+    || committedPlanEntryDisplayOverride
+    || resolvedContractEntryDisplayOverride
+    || reviewSemanticStatus.planActionable === true
+  );
   const authoritativeReviewNextActionLabel = authoritativeEntryDisplayOverride
     ? String(
       activeProjectionSnapshot && activeProjectionSnapshot.actionGuidance
@@ -42484,13 +45965,26 @@ function syncPlanDisplayMeta(options = {}){
   if($('reviewNextActionPrimary')) $('reviewNextActionPrimary').textContent = `Can I trade this now? ${authoritativeReviewNextActionLabel}`;
   if($('reviewTechnicalContextLine')) $('reviewTechnicalContextLine').textContent = resolvedReviewDisplay.technicalContextLine;
   if($('rrValue')){
-    const authoritativeRrDisplay = authoritativeEntryDisplayOverride
-      ? preferredReviewRrDisplay(record, displayedPlan, resolvedReviewDisplay.rrDisplay)
-      : resolvedReviewDisplay.rrDisplay;
-    $('rrValue').textContent = authoritativeRrDisplay || 'No actionable plan yet.';
-    $('rrValue').className = `big ${effectivePlanUi.showRR ? rrDisplayClass(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
-    if(entryReadyRecord && /no actionable plan yet/i.test(String($('rrValue').textContent || ''))){
-      $('rrValue').textContent = preferredReviewRrDisplay(record, displayedPlan, 'No actionable plan yet.');
+    if(livePlannerNeedsReplan){
+      $('rrValue').textContent = 'No actionable plan yet.';
+      $('rrValue').className = 'big';
+    }else{
+      const authoritativeReviewPlanForDisplay = authoritativeEntryDisplayOverride
+        ? deriveCurrentPlanState(
+          record.plan && record.plan.entry,
+          record.plan && record.plan.stop,
+          record.plan && record.plan.firstTarget,
+          record.marketData && record.marketData.currency
+        )
+        : displayedPlan;
+      const authoritativeRrDisplay = authoritativeEntryDisplayOverride
+        ? preferredReviewRrDisplay(record, authoritativeReviewPlanForDisplay, resolvedReviewDisplay.rrDisplay)
+        : resolvedReviewDisplay.rrDisplay;
+      $('rrValue').textContent = authoritativeRrDisplay || 'No actionable plan yet.';
+      $('rrValue').className = `big ${effectivePlanUi.showRR ? rrDisplayClass(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
+      if(entryReadyRecord && /no actionable plan yet/i.test(String($('rrValue').textContent || ''))){
+        $('rrValue').textContent = preferredReviewRrDisplay(record, displayedPlan, 'No actionable plan yet.');
+      }
     }
   }
   if($('planRealismSummary')){
@@ -42513,7 +46007,12 @@ function refreshSelectedTickerLifecycle(){
         ? 'watchlist'
         : ((displayStage && displayStage !== 'Avoid') ? 'shortlisted' : 'reviewed')));
   const days = stage === 'planned' ? PLAN_EXPIRY_TRADING_DAYS : (stage === 'reviewed' ? REVIEW_EXPIRY_TRADING_DAYS : WATCHLIST_EXPIRY_TRADING_DAYS);
-  refreshLifecycleStage(record, stage, days, 'Lifecycle refreshed manually.', 'system');
+  writeLifecycleState(record, {
+    stage,
+    tradingDays:days,
+    reason:'Lifecycle refreshed manually.',
+    source:'system'
+  }, {mode:'refresh'});
   commitTickerState();
   renderReviewLifecycleSummary(ticker);
   renderWatchlist();
@@ -42525,7 +46024,7 @@ function expireSelectedTickerLifecycle(){
   if(!ticker) return;
   const record = getTickerRecord(ticker);
   if(!record) return;
-  setLifecycleStage(record, {
+  writeLifecycleState(record, {
     stage:'expired',
     status:'stale',
     lockReason:'manual_expired',
@@ -42549,7 +46048,12 @@ function reactivateSelectedTickerLifecycle(){
   const stage = hasAuthoritativeLifecyclePlan(record) ? 'planned' : ((record.review.manualReview || record.review.cardOpen) ? 'reviewed' : (record.watchlist.inWatchlist ? 'watchlist' : 'shortlisted'));
   const days = stage === 'planned' ? PLAN_EXPIRY_TRADING_DAYS : (stage === 'reviewed' ? REVIEW_EXPIRY_TRADING_DAYS : WATCHLIST_EXPIRY_TRADING_DAYS);
   record.lifecycle.lockReason = '';
-  refreshLifecycleStage(record, stage, days, 'Lifecycle reactivated manually.', 'system');
+  writeLifecycleState(record, {
+    stage,
+    tradingDays:days,
+    reason:'Lifecycle reactivated manually.',
+    source:'system'
+  }, {mode:'refresh'});
   commitTickerState();
   renderReviewLifecycleSummary(ticker);
   renderWatchlist();
@@ -42560,19 +46064,52 @@ function calculate(options = {}){
   const persist = options.persist !== false;
   if(persist){
     saveState();
-  }else{
+  }else if(options.skipStateSync !== true){
     syncStateFromDom();
   }
   const ticker = activeReviewTicker();
   const entry = numericOrNull($('entryPrice').value);
   const stop = numericOrNull($('stopPrice').value);
   const target = numericOrNull($('targetPrice').value);
-  const activeRecord = ticker ? normalizeTickerRecord(getTickerRecord(ticker) || upsertTickerRecord(ticker)) : null;
-  const displayedPlan = applySetupConfirmationPlanGate(
+  const entryInputValue = $('entryPrice') ? String($('entryPrice').value || '') : '';
+  const stopInputValue = $('stopPrice') ? String($('stopPrice').value || '') : '';
+  const targetInputValue = $('targetPrice') ? String($('targetPrice').value || '') : '';
+  const activeRecord = ticker ? (getTickerRecord(ticker) || upsertTickerRecord(ticker)) : null;
+  const plannerActiveProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
+    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
+    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(ticker || '')
+      ? uiState.activeReviewSourceProjectionSnapshot
+      : null;
+  const plannerReviewProjectionSource = normalizeReviewProjectionSource(
+    String(
+      uiState.activeReviewProjectionSource
+      || (plannerActiveProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
+    ).trim().toLowerCase(),
+    plannerActiveProjectionSnapshot
+  );
+  const plannerProjectionEntryDisplayOverride = reviewProjectionCanDriveEntryDisplay(
+    plannerActiveProjectionSnapshot,
+    plannerReviewProjectionSource,
+    activeRecord || {}
+  );
+  let displayedPlan = applySetupConfirmationPlanGate(
     activeRecord || {},
-    deriveCurrentPlanState($('entryPrice').value, $('stopPrice').value, $('targetPrice').value, activeRecord && activeRecord.marketData ? activeRecord.marketData.currency : '')
+    deriveCurrentPlanState(entryInputValue, stopInputValue, targetInputValue, activeRecord && activeRecord.marketData ? activeRecord.marketData.currency : '')
   );
   const plannerDerivedStates = analysisDerivedStatesFromRecord(activeRecord || {});
+  const canonicalEntryValue = activeRecord && activeRecord.plan && activeRecord.plan.entry != null ? String(activeRecord.plan.entry) : '';
+  const canonicalStopValue = activeRecord && activeRecord.plan && activeRecord.plan.stop != null ? String(activeRecord.plan.stop) : '';
+  const canonicalTargetValue = activeRecord && activeRecord.plan && activeRecord.plan.firstTarget != null ? String(activeRecord.plan.firstTarget) : '';
+  const plannerInputsDivergedFromCanonical = entryInputValue !== canonicalEntryValue
+    || stopInputValue !== canonicalStopValue
+    || targetInputValue !== canonicalTargetValue;
+  const plannerNeedsReplanState = plannerInputsDivergedFromCanonical && displayedPlan.status !== 'valid';
+  if(plannerProjectionEntryDisplayOverride && displayedPlan.status !== 'valid' && !plannerInputsDivergedFromCanonical){
+    const fallbackDisplayedPlan = reviewFallbackDisplayedPlan(activeRecord || {}, plannerDerivedStates);
+    if(fallbackDisplayedPlan && fallbackDisplayedPlan.status === 'valid'){
+      displayedPlan = fallbackDisplayedPlan;
+    }
+  }
   const qualityAdjustments = evaluateSetupQualityAdjustments(activeRecord || {}, {
     displayedPlan,
     derivedStates:plannerDerivedStates
@@ -42584,29 +46121,37 @@ function calculate(options = {}){
   renderPlannerPlanSummary($('entryPrice').value, $('stopPrice').value, $('targetPrice').value, executionState.exitMode);
   if(ticker && persist){
     const record = upsertTickerRecord(ticker);
-    applyPlanCandidateToRecord(record, {entry, stop, firstTarget:target}, {
-      source:'planner',
-      lastPlannedAt:new Date().toISOString()
-    });
-    if(record.watchlist && record.watchlist.inWatchlist){
-      runWatchlistLifecycleEvaluation({
-        source:'plan_update',
-        tickers:[ticker],
-        persist:false,
-        render:false,
-        force:true
+    const preserveSubmittedPlan = hasSubmittedPaperTradeCanonicalPlan(record) === true;
+    if(!preserveSubmittedPlan){
+      applyPlanCandidateToRecord(record, {entry, stop, firstTarget:target}, {
+        source:'planner',
+        lastPlannedAt:new Date().toISOString()
       });
+      if(record.watchlist && record.watchlist.inWatchlist){
+        runWatchlistLifecycleEvaluation({
+          source:'plan_update',
+          tickers:[ticker],
+          persist:false,
+          render:false,
+          force:true
+        });
+      }
     }
     commitTickerState();
-    if(record.watchlist && record.watchlist.inWatchlist){
+    if(record.watchlist && record.watchlist.inWatchlist && !preserveSubmittedPlan){
       requestWatchlistRender({includeFocusQueue:true});
     }
     renderReviewLifecycleSummary(ticker);
     scheduleReviewDraftAutosave({reason:'calculate', source:'review_autosave_calculate'});
   }
   syncPlanDisplayMeta();
-  const displayStage = activeRecord ? displayStageForRecord(activeRecord) : 'Watch';
-  const plannerPlanUiState = getPlanUiState(activeRecord || {}, {displayedPlan});
+  const displayStage = plannerNeedsReplanState
+    ? 'Watch'
+    : (activeRecord ? displayStageForRecord(activeRecord) : 'Watch');
+  const plannerPlanUiState = getPlanUiState(activeRecord || {}, {
+    displayedPlan,
+    planCheckState:plannerNeedsReplanState ? 'needs_replan' : undefined
+  });
   const plannerSetupUiState = getSetupUiState(activeRecord || {}, {displayStage, planUiState:plannerPlanUiState});
   const planRealism = evaluatePlanRealism(activeRecord || {}, {
     displayedPlan,
@@ -42730,63 +46275,32 @@ function calculate(options = {}){
     affordability:displayedPlan.affordability,
     comfortLabel:capitalComfort.label
   });
-  const activeProjectionSnapshot = uiState.activeReviewSourceProjectionSnapshot
-    && typeof uiState.activeReviewSourceProjectionSnapshot === 'object'
-    && normalizeTicker(uiState.activeReviewSourceProjectionSnapshot.ticker || '') === normalizeTicker(activeRecord && activeRecord.ticker || '')
-      ? uiState.activeReviewSourceProjectionSnapshot
-      : null;
-  const activeProjectionSource = String(
-    uiState.activeReviewProjectionSource
-    || (activeProjectionSnapshot ? 'clicked_card_snapshot' : 'non_watchlist_direct_resolve')
-  ).trim().toLowerCase();
-  const projectionEntryDisplayOverride = reviewProjectionCanDriveEntryDisplay(
-    activeProjectionSnapshot,
-    activeProjectionSource,
-    activeRecord || record
-  );
-  const entryReadyRecord = normalizeGlobalVerdictKey(effectiveMetaSimplifiedState.canonicalVerdict || '') === 'entry';
-  const authoritativeEntryDisplayOverride = entryReadyRecord || projectionEntryDisplayOverride;
-  const authoritativeReviewNextActionLabel = authoritativeEntryDisplayOverride
-    ? String(
-      activeProjectionSnapshot && activeProjectionSnapshot.actionGuidance
-      || activeProjectionSnapshot && activeProjectionSnapshot.actionLabel
-      || activeProjectionSnapshot && activeProjectionSnapshot.actionShortLabel
-      || 'Execute only if the trigger remains valid.'
-    ).trim()
-    : resolvedReviewDisplay.nextActionLabel;
-  const tradeStatusText = authoritativeEntryDisplayOverride
-    ? {
-      line1:'Entry Ready',
-      line2:authoritativeReviewNextActionLabel || 'Execute only if the trigger remains valid.'
-    }
-    : resolvedReviewDisplay.tradeStatus;
-  const effectivePlanUi = authoritativeEntryDisplayOverride
-    ? {
-      ...planUI,
-      showPlan:true,
-      showRR:true,
-      showCapital:true,
-      showPositionSize:true
-    }
-    : planUI;
-  const authoritativeRrDisplay = authoritativeEntryDisplayOverride
-    ? preferredReviewRrDisplay(activeRecord || record, displayedPlan, resolvedReviewDisplay.rrDisplay)
-    : resolvedReviewDisplay.rrDisplay;
-  if($('tradeStatusBox')) $('tradeStatusBox').innerHTML = renderTradeStatusMarkup(tradeStatusText);
-  if($('tradePlanInputs')) $('tradePlanInputs').classList.toggle('review-hidden', !effectivePlanUi.showPlan);
-  if($('capitalFitMetric')){
-    $('capitalFitMetric').className = `stat stat--capital-fit ${capitalFitVisual.className}${effectivePlanUi.showCapital ? '' : ' review-hidden'}`.trim();
-  }
-  if($('positionSizeStat')) $('positionSizeStat').classList.toggle('review-hidden', !effectivePlanUi.showPositionSize);
-  if($('positionCostStat')) $('positionCostStat').classList.toggle('review-hidden', !resolvedReviewDisplay.positionCostVisible);
-  if($('fxBasisBox')) $('fxBasisBox').classList.toggle('review-hidden', !effectivePlanUi.showCapital);
+  const reviewPresentation = buildCanonicalReviewPresentationModel(activeRecord || {}, {
+    uiDraftState:{
+      entry:entryInputValue,
+      stop:stopInputValue,
+      target:targetInputValue,
+      firstTarget:targetInputValue
+    },
+    displayedPlan,
+    derivedStates:plannerDerivedStates,
+    simplifiedState:effectiveMetaSimplifiedState,
+    globalVerdict,
+    planRealism,
+    qualityAdjustments,
+    planUiState:plannerPlanUiState,
+    setupUiState:plannerSetupUiState,
+    resolvedContract,
+    visualState:plannerVisualState,
+    reviewSemanticStatus:plannerSemanticStatus,
+    resolvedReviewDisplay,
+    capitalComfort
+  });
+  const effectivePlanUi = reviewPresentation.planUI;
+  applyCanonicalReviewPresentationModelToDom(reviewPresentation);
   if($('capitalFitBox')) $('capitalFitBox').textContent = capitalFitMetricText(capitalComfort.label);
   if($('fxBasisBox')) $('fxBasisBox').textContent = capitalComfort.note || 'No FX conversion note.';
   if($('capitalCheckBox')) $('capitalCheckBox').textContent = capitalComfort.note || 'Clear';
-  if($('positionCostBox')) $('positionCostBox').textContent = resolvedReviewDisplay.positionCostText;
-  if($('reviewNextActionInline')) $('reviewNextActionInline').textContent = `Action guidance: ${authoritativeReviewNextActionLabel}`;
-  if($('reviewNextActionPrimary')) $('reviewNextActionPrimary').textContent = `Can I trade this now? ${authoritativeReviewNextActionLabel}`;
-  if($('reviewTechnicalContextLine')) $('reviewTechnicalContextLine').textContent = resolvedReviewDisplay.technicalContextLine;
   if($('targetReviewStateBox')) $('targetReviewStateBox').value = targetReviewStateLabel(executionState.targetReviewState);
   if($('targetAlertBox')){
     $('targetAlertBox').value = executionState.exitMode === 'dynamic_exit'
@@ -42797,14 +46311,9 @@ function calculate(options = {}){
   if($('credibleRrBox')) $('credibleRrBox').value = Number.isFinite(planRealism.credible_rr) ? `${planRealism.credible_rr.toFixed(2)}R` : 'N/A';
   if($('optimisticTargetBox')) $('optimisticTargetBox').value = planRealism.optimistic_target_flag ? 'Yes' : 'No';
   if($('targetAssessmentBox')) $('targetAssessmentBox').value = planRealism.credible_target_assessment || 'N/A';
-  if($('planRealismSummary')){
-    $('planRealismSummary').textContent = resolvedReviewDisplay.planSummary;
-  }
   if(!effectivePlanUi.showPlan){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = authoritativeRrDisplay || 'No actionable plan yet.';
-    $('rrValue').className = 'big';
     if($('plannerBox')){
       const plannerBox = $('plannerBox');
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
@@ -42815,8 +46324,6 @@ function calculate(options = {}){
   if(displayedPlan.status === 'missing'){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = 'No actionable plan yet.';
-    $('rrValue').className = 'big';
     if($('plannerBox')){
       const plannerBox = $('plannerBox');
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
@@ -42827,8 +46334,6 @@ function calculate(options = {}){
   if(displayedPlan.status === 'invalid'){
     $('riskPerShare').textContent = '-';
     $('positionSize').textContent = '-';
-    $('rrValue').textContent = 'No actionable plan yet.';
-    $('rrValue').className = 'big';
     if($('plannerBox')){
       const plannerBox = $('plannerBox');
       const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
@@ -42838,11 +46343,6 @@ function calculate(options = {}){
   }
   $('riskPerShare').textContent = Number.isFinite(displayedPlan.riskFit.risk_per_share) ? displayedPlan.riskFit.risk_per_share.toFixed(2) : '-';
   $('positionSize').textContent = displayedPlan.riskFit.position_size > 0 ? `${displayedPlan.riskFit.position_size} shares` : '0 shares';
-  $('rrValue').textContent = authoritativeRrDisplay || '-';
-  $('rrValue').className = `big ${effectivePlanUi.showRR ? rrDisplayClass(displayedPlan.rewardRisk.rrRatio) : ''}`.trim();
-  if(entryReadyRecord && /no actionable plan yet/i.test(String($('rrValue').textContent || ''))){
-    $('rrValue').textContent = preferredReviewRrDisplay(activeRecord || record, displayedPlan, 'No actionable plan yet.');
-  }
   if($('plannerBox')){
     const plannerBox = $('plannerBox');
     const reviewPanelTone = plannerBox && plannerBox.dataset ? String(plannerBox.dataset.reviewPanelTone || '').trim() : '';
@@ -42875,6 +46375,7 @@ async function copyText(text){
 
 function resetAllData(){
   safeStorageRemove(key);
+  safeStorageRemove(reviewSessionKey);
   safeStorageRemove(marketCacheKey);
   marketDataCache.clear();
   Object.assign(state, createDefaultState());
@@ -42904,7 +46405,10 @@ function setResetStatus(message, className = 'ok'){
 
 function renderAppFromState(options = {}){
   const resetReviewSelection = options.resetReviewSelection !== false;
-  if(resetReviewSelection) uiState.activeReviewTicker = '';
+  if(resetReviewSelection){
+    uiState.activeReviewTicker = '';
+    clearPersistedReviewSessionState();
+  }
   renderStats();
   updateTickerInputFromState();
   renderTickerSuggestions([]);
@@ -42932,6 +46436,7 @@ function clearTransientSessionState(options = {}){
   const clearPersistedShortlistState = options.clearPersistedShortlistState !== false;
   const preserveSavedReviewCards = options.preserveSavedReviewCards === true;
   uiState.activeReviewTicker = '';
+  clearPersistedReviewSessionState();
   uiState.activeReviewAddsToScannerUniverse = true;
   uiState.activeReviewVerdictOverride = '';
   uiState.loadingTicker = '';
@@ -44017,6 +47522,11 @@ function primaryVerdictBadge(verdict){
 
 function normalizeGlobalVerdictKey(verdict){
   return normalizeGlobalVerdictKeyImpl(verdict);
+}
+
+function normalizeOptionalGlobalVerdictKey(verdict){
+  const rawValue = String(verdict || '').trim();
+  return rawValue ? normalizeGlobalVerdictKeyImpl(rawValue) : '';
 }
 
 function normalizeVerdict(verdict){
@@ -45311,7 +48821,7 @@ function resolveGlobalVerdict(record, deps = {}){
   const applyPlanGate = deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate;
   const derivedStates = analysisDerivedStates(item);
   const effectivePlan = effectivePlanResolver(item, {allowScannerFallback:true});
-  const displayedPlan = applyPlanGate(
+  let displayedPlan = applyPlanGate(
     item,
     deriveDisplayedPlan(
       effectivePlan.entry,
@@ -45579,17 +49089,24 @@ function applyGlobalVerdictGates(record, options = {}){
         && String(item.plan.capitalNote || '') === nextCapitalNote
         && String(item.plan.affordability || '') === nextAffordability;
       if(unchanged) return;
-      applyPlanCandidateToRecord(item, {
-        entry:nextEntry,
-        stop:nextStop,
-        firstTarget:nextFirstTarget
-      }, {
-        source:'scanner_estimate',
-        reason:'scanner_estimate_reference_refresh',
-        writtenBy:'applyGlobalVerdictGates',
-        updatedAt:new Date().toISOString(),
-        lastPlannedAt:String(item.scan && item.scan.updatedAt || item.plan && item.plan.lastPlannedAt || new Date().toISOString())
-      });
+      if(typeof applyPlanCandidateToRecord === 'function'){
+        applyPlanCandidateToRecord(item, {
+          entry:nextEntry,
+          stop:nextStop,
+          firstTarget:nextFirstTarget
+        }, {
+          source:'scanner_estimate',
+          reason:'scanner_estimate_reference_refresh',
+          writtenBy:'applyGlobalVerdictGates',
+          updatedAt:new Date().toISOString(),
+          lastPlannedAt:String(item.scan && item.scan.updatedAt || item.plan && item.plan.lastPlannedAt || new Date().toISOString())
+        });
+      }else{
+        item.plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+        item.plan.entry = nextEntry;
+        item.plan.stop = nextStop;
+        item.plan.firstTarget = nextFirstTarget;
+      }
       changed = true;
     };
     if(scannerEstimateAuthority && scannerEstimateAuthority.mode === 'recover' && scannerEstimateDisplayedPlan){
@@ -46047,6 +49564,7 @@ function validateCurrentPlan(record, options = {}){
   );
   const trigger = options.triggerState || evaluateEntryTrigger(rawRecord, {displayedPlan, derivedStates:options.derivedStates});
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(rawRecord);
+  const submittedCanonicalPlan = hasSubmittedPaperTradeCanonicalPlan(rawRecord) === true;
   const structureState = String(derivedStates.structureState || '').toLowerCase();
   const trendState = String(derivedStates.trendState || '').toLowerCase();
   const currentPrice = numericOrNull(rawRecord.marketData && rawRecord.marketData.price);
@@ -46129,7 +49647,9 @@ function validateCurrentPlan(record, options = {}){
     missed:false,
     invalidated:false,
     capitalConstraint:capitalConstraintCodeForPlan(displayedPlan),
-    reasonCode:staleMove ? 'plan_premature_or_stale' : 'valid'
+    reasonCode:staleMove
+      ? 'plan_premature_or_stale'
+      : (submittedCanonicalPlan ? 'submitted_paper_trade_current_setup_still_valid' : 'valid')
   };
 }
 

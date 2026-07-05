@@ -50,6 +50,226 @@ function normalizeVerdictKey(value){
   return safe;
 }
 
+function buildCanonicalContractSnapshot(record, runtimeContext = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const context = runtimeContext && typeof runtimeContext === 'object' ? runtimeContext : {};
+  const marketData = item.marketData && typeof item.marketData === 'object' ? item.marketData : {};
+  const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const setup = item.setup && typeof item.setup === 'object' ? item.setup : {};
+  const lifecycle = item.lifecycle && typeof item.lifecycle === 'object' ? item.lifecycle : {};
+  const manualReview = review.manualReview && typeof review.manualReview === 'object'
+    ? review.manualReview
+    : null;
+  const canonicalVerdict = normalizeVerdictKey(
+    context.reviewCanonicalVerdict
+    || context.sharedPresentationCanonicalVerdict
+    || context.trackPresentationCanonicalVerdict
+    || context.scannerCanonicalVerdict
+    || review.savedVerdict
+    || scan.resolvedVerdict
+    || scan.verdict
+    || 'watch'
+  ) || 'watch';
+  const canonicalVisualBucket = normalizeVerdictKey(
+    context.reviewVisualBucket
+    || context.sharedPresentationVisualBucket
+    || context.trackPresentationVisualBucket
+    || context.scannerVisualBucket
+    || (canonicalVerdict === 'entry'
+      ? 'entry'
+      : (canonicalVerdict === 'near_entry'
+        ? 'near_entry'
+        : (canonicalVerdict === 'avoid' ? 'avoid' : 'monitor')))
+  ) || 'monitor';
+  const stampedPlan = !!(
+    String(plan.authorityVersion || '').trim() === 'trade_plan_v1'
+    && String(plan.authoritySource || '').trim()
+  );
+  const firstTarget = normalizeNumber(plan.firstTarget != null ? plan.firstTarget : plan.target);
+  const authoritativeInputs = {
+    ticker:String(item.ticker || '').trim().toUpperCase(),
+    marketData:{
+      price:normalizeNumber(marketData.price),
+      ma20:normalizeNumber(marketData.ma20 != null ? marketData.ma20 : marketData.sma20),
+      ma50:normalizeNumber(marketData.ma50 != null ? marketData.ma50 : marketData.sma50),
+      ma200:normalizeNumber(marketData.ma200 != null ? marketData.ma200 : marketData.sma200),
+      volume:normalizeNumber(marketData.volume),
+      avgVolume:normalizeNumber(marketData.avgVolume),
+      perf1w:normalizeNumber(marketData.perf1w),
+      perf1m:normalizeNumber(marketData.perf1m),
+      asOf:String(marketData.asOf || '').trim()
+    },
+    scanner:{
+      resolvedVerdict:String(scan.resolvedVerdict || scan.verdict || '').trim(),
+      score:normalizeNumber(scan.score),
+      analysisProjection:scan.analysisProjection && typeof scan.analysisProjection === 'object'
+        ? cloneJsonValue(scan.analysisProjection)
+        : null,
+      flags:scan.flags && typeof scan.flags === 'object' ? cloneJsonValue(scan.flags) : null
+    },
+    reviewAuthority:{
+      savedVerdict:String(review.savedVerdict || '').trim(),
+      savedScore:normalizeNumber(review.savedScore),
+      manualReview:manualReview ? cloneJsonValue(manualReview) : null
+    },
+    planAuthority:{
+      entry:stampedPlan ? normalizeNumber(plan.entry) : null,
+      stop:stampedPlan ? normalizeNumber(plan.stop) : null,
+      firstTarget:stampedPlan ? firstTarget : null,
+      source:stampedPlan ? String(plan.source || '').trim().toLowerCase() : '',
+      authoritySource:stampedPlan ? String(plan.authoritySource || '').trim().toLowerCase() : '',
+      authorityVersion:stampedPlan ? String(plan.authorityVersion || '').trim() : '',
+      submittedPaperTradeAt:String(plan.submittedPaperTradeAt || '').trim()
+    },
+    lifecycleAuthority:{
+      stage:String(lifecycle.stage || '').trim().toLowerCase(),
+      status:String(lifecycle.status || '').trim().toLowerCase(),
+      lockReason:String(lifecycle.lockReason || '').trim(),
+      expiresAt:String(lifecycle.expiresAt || '').trim()
+    },
+    paperTradeAuthority:{
+      submittedTrades:[]
+    }
+  };
+  const planStatus = String(plan.status || '').trim().toLowerCase() || 'missing';
+  return {
+    schemaVersion:'plan-verdict-contract-v1',
+    ticker:authoritativeInputs.ticker,
+    authoritativeInputs,
+    canonicalVerdict,
+    canonicalVisualBucket,
+    derivedStates:{
+      setupScore:normalizeNumber(review.savedScore != null ? review.savedScore : (setup.score != null ? setup.score : scan.score)),
+      planReady:[normalizeNumber(plan.entry), normalizeNumber(plan.stop), firstTarget].every(Number.isFinite),
+      planStatus,
+      tradeability:String(plan.tradeability || '').trim().toLowerCase(),
+      riskStatus:String(plan.riskStatus || plan.risk_status || '').trim().toLowerCase(),
+      inWatchlist:!!(item.watchlist && item.watchlist.inWatchlist),
+      hasSavedReviewAuthority:!!String(review.savedVerdict || '').trim(),
+      structureState:String(setup.structureState || '').trim().toLowerCase(),
+      structureEligibility:String(setup.structureEligibility || '').trim().toLowerCase(),
+      setupLocationState:String(setup.setupLocationState || '').trim().toLowerCase(),
+      priceabilityState:String(setup.priceabilityState || '').trim().toLowerCase(),
+      bounceState:String(setup.bounceState || '').trim().toLowerCase(),
+      lifecycleState:String(lifecycle.state || canonicalVerdict).trim().toLowerCase()
+    },
+    planAuthority:{
+      entry:normalizeNumber(plan.entry),
+      stop:normalizeNumber(plan.stop),
+      firstTarget,
+      source:String(plan.source || '').trim().toLowerCase(),
+      stamped:stampedPlan,
+      status:planStatus,
+      tradeability:String(plan.tradeability || '').trim().toLowerCase(),
+      riskStatus:String(plan.riskStatus || plan.risk_status || '').trim().toLowerCase()
+    },
+    lifecycleAuthority:{
+      stage:String(lifecycle.stage || '').trim().toLowerCase(),
+      status:String(lifecycle.status || '').trim().toLowerCase(),
+      state:String(lifecycle.state || canonicalVerdict).trim().toLowerCase(),
+      label:String(lifecycle.label || '').trim(),
+      lockReason:String(lifecycle.lockReason || '').trim(),
+      expiresAt:String(lifecycle.expiresAt || '').trim()
+    },
+    paperTradeAuthority:{
+      submittedTrades:[],
+      submittedPaperTradeAt:String(plan.submittedPaperTradeAt || '').trim(),
+      currentPlanSnapshot:planStatus !== 'missing'
+        ? {
+          entry:normalizeNumber(plan.entry),
+          stop:normalizeNumber(plan.stop),
+          target:normalizeNumber(plan.target),
+          firstTarget,
+          status:planStatus
+        }
+        : null
+    },
+    contractFingerprint:String(context.contractFingerprint || ''),
+    diagnostics:{
+      source:String(context.snapshotSource || 'replay_snapshot').trim().toLowerCase(),
+      surface:String(context.snapshotSurface || 'replay').trim().toLowerCase(),
+      reason:String(context.snapshotReason || 'replay_snapshot').trim()
+    }
+  };
+}
+
+function buildRenderModelSnapshot(contract, runtimeContext = {}){
+  const safeContract = contract && typeof contract === 'object' ? contract : {};
+  const context = runtimeContext && typeof runtimeContext === 'object' ? runtimeContext : {};
+  const verdict = normalizeVerdictKey(safeContract.canonicalVerdict || 'watch') || 'watch';
+  const visualBucket = normalizeVerdictKey(safeContract.canonicalVisualBucket || '') || (verdict === 'entry'
+    ? 'entry'
+    : (verdict === 'near_entry' ? 'near_entry' : (verdict === 'avoid' ? 'avoid' : 'monitor')));
+  const label = verdict === 'entry'
+    ? 'Entry'
+    : (verdict === 'near_entry' ? 'Near Entry' : (verdict === 'avoid' ? 'Avoid' : 'Watch'));
+  const headline = verdict === 'entry' ? 'Entry Ready' : label;
+  const nextAction = verdict === 'entry'
+    ? 'Execute only if the trigger remains valid.'
+    : (verdict === 'avoid'
+      ? 'Avoid until structure rebuilds and risk can be defined cleanly.'
+      : 'Wait for stronger confirmation before considering entry.');
+  const primaryReason = verdict === 'entry'
+    ? 'Buyers are in control and the setup is ready to act on.'
+    : (verdict === 'near_entry'
+      ? 'The setup is close, but confirmation still needs to improve.'
+      : (verdict === 'avoid'
+        ? 'A blocking issue is active, so the setup is not tradable.'
+        : 'Confirmation is still developing, so the setup stays on watch.'));
+  const planStatus = String(safeContract.planAuthority && safeContract.planAuthority.status || safeContract.derivedStates && safeContract.derivedStates.planStatus || 'missing').trim().toLowerCase();
+  const setupScore = normalizeNumber(safeContract.derivedStates && safeContract.derivedStates.setupScore);
+  return {
+    review:{
+      ticker:String(safeContract.ticker || ''),
+      canonicalVerdict:verdict,
+      visualBucket,
+      tone:visualBucket,
+      badgeLabel:label,
+      headline,
+      nextAction,
+      primaryReason,
+      planVisible:verdict === 'entry',
+      planStatus,
+      setupScore,
+      actionable:verdict === 'entry' && !!(safeContract.planAuthority && safeContract.planAuthority.stamped),
+      draftState:context.reviewDraftState ? cloneJsonValue(context.reviewDraftState) : null,
+      contractFingerprint:String(safeContract.contractFingerprint || '')
+    },
+    track:{
+      ticker:String(safeContract.ticker || ''),
+      canonicalVerdict:verdict,
+      visualBucket,
+      visibleBucket:visualBucket,
+      tone:visualBucket,
+      badgeLabel:label,
+      headline,
+      statusText:headline,
+      nextAction,
+      actionLabel:nextAction,
+      primaryReason,
+      mainBlocker:primaryReason,
+      planVisible:verdict === 'entry',
+      planStatus,
+      planSummary:verdict === 'entry' ? 'Trade plan available.' : 'No actionable trade plan yet.',
+      setupScore,
+      inWatchlist:safeContract.derivedStates && safeContract.derivedStates.inWatchlist === true,
+      contractFingerprint:String(safeContract.contractFingerprint || '')
+    },
+    trackLongPress:{
+      ticker:String(safeContract.ticker || ''),
+      canonicalVerdict:verdict,
+      header:headline,
+      actionable:verdict === 'entry',
+      nextAction,
+      primaryReason,
+      visualBucket,
+      contractFingerprint:String(safeContract.contractFingerprint || '')
+    }
+  };
+}
+
 function buildVisibleCopySnapshot(appState = {}){
   const scan = appState.scan || {};
   const review = appState.review || {};
@@ -123,6 +343,25 @@ function buildReplaySnapshotFromRecord(record, runtimeContext = {}){
   const reviewAnalysisState = review.analysisState && typeof review.analysisState === 'object'
     ? review.analysisState
     : {};
+  const reviewProjectionSource = String(context.reviewProjectionSource || '').trim().toLowerCase();
+  const projectionVerdict = String(
+    context.reviewProjectionSnapshot
+    && (
+      context.reviewProjectionSnapshot.canonicalVerdict
+      || context.reviewProjectionSnapshot.finalVerdict
+      || context.reviewProjectionSnapshot.renderedVerdict
+      || ''
+    )
+  ).trim().toLowerCase();
+  const currentCanonicalVerdict = String(
+    context.reviewCanonicalVerdict
+    || context.sharedPresentationCanonicalVerdict
+    || context.trackPresentationCanonicalVerdict
+    || context.scannerCanonicalVerdict
+    || ''
+  ).trim().toLowerCase();
+  const liveReviewProjectionAuthority = ['clicked_card_snapshot', 'track_projection_updated'].includes(reviewProjectionSource)
+    && (!projectionVerdict || !currentCanonicalVerdict || projectionVerdict === currentCanonicalVerdict);
   const scan = item.scan && typeof item.scan === 'object' ? item.scan : {};
   const meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
   const setup = item.setup && typeof item.setup === 'object' ? item.setup : {};
@@ -130,8 +369,20 @@ function buildReplaySnapshotFromRecord(record, runtimeContext = {}){
   const manualReview = review.manualReview && typeof review.manualReview === 'object'
     ? review.manualReview
     : null;
+  const canonicalContract = cloneJsonValue(
+    context.canonicalContract && typeof context.canonicalContract === 'object'
+      ? context.canonicalContract
+      : buildCanonicalContractSnapshot(item, context)
+  );
+  const renderModels = cloneJsonValue(
+    context.renderModels && typeof context.renderModels === 'object'
+      ? context.renderModels
+      : buildRenderModelSnapshot(canonicalContract, context)
+  );
   return {
     ticker:String(item.ticker || ''),
+    canonicalContract,
+    renderModels,
     trustedComparisonFields:{
       ticker:String(item.ticker || ''),
       companyName:String(meta.companyName || ''),
@@ -178,7 +429,18 @@ function buildReplaySnapshotFromRecord(record, runtimeContext = {}){
       warnings:Array.isArray(marketData.warnings) ? cloneJsonValue(marketData.warnings) : [],
       history:mapHistoryRows(marketData.history)
     },
-    setup:pickObject(setup, ['marketCaution', 'volumeRequired', 'bounceState', 'structureState', 'trendState']),
+    setup:pickObject(setup, [
+      'marketCaution',
+      'volumeRequired',
+      'bounceState',
+      'structureState',
+      'structureEligibility',
+      'stabilisationState',
+      'priceabilityState',
+      'setupLocationState',
+      'pullbackZone',
+      'trendState'
+    ]),
     plan:cloneJsonValue(plan),
     scan:{
       analysisProjection:scan.analysisProjection && typeof scan.analysisProjection === 'object'
@@ -201,8 +463,8 @@ function buildReplaySnapshotFromRecord(record, runtimeContext = {}){
         ? cloneJsonValue(review.normalizedAnalysis)
         : null,
       manualReview:manualReview ? cloneJsonValue(manualReview) : null,
-      projectionSource:String(context.reviewProjectionSource || ''),
-      projectionSnapshot:context.reviewProjectionSnapshot && typeof context.reviewProjectionSnapshot === 'object'
+      projectionSource:reviewProjectionSource,
+      projectionSnapshot:liveReviewProjectionAuthority && context.reviewProjectionSnapshot && typeof context.reviewProjectionSnapshot === 'object'
         ? cloneJsonValue(context.reviewProjectionSnapshot)
         : null,
       analysisState:{
@@ -462,6 +724,12 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         ? tradeGatewayHealthModel()
         : null;
     }catch(_error){}
+    let appReplaySnapshot = null;
+    try{
+      appReplaySnapshot = typeof buildReplaySnapshotForTicker === 'function'
+        ? buildReplaySnapshotForTicker(record)
+        : null;
+    }catch(_error){}
     const paperTradeBtn = document.getElementById('paperTradeBtn');
     const staleFieldTargets = [
       'savedVerdict',
@@ -485,7 +753,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       watchlistPresentation,
       paperTradeContext
     };
-    return cloneValue({
+    const capturedState = cloneValue({
       ticker,
       authoritativeRecord:cloneValue(record),
       recordFlags:{
@@ -608,6 +876,16 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         journey:authoritativeRecord && authoritativeRecord.authority && typeof authoritativeRecord.authority === 'object'
           ? cloneValue(authoritativeRecord.authority)
           : null,
+        canonicalContract:cloneValue(
+          reviewStateHealth && reviewStateHealth.contract
+          || trackSnapshot && trackSnapshot.contract
+          || null
+        ),
+        renderModels:cloneValue(
+          reviewStateHealth && reviewStateHealth.renderModels
+          || trackSnapshot && trackSnapshot.renderModels
+          || null
+        ),
         scanner:scanSimplified ? {
           canonicalVerdict:String(scanSimplified.canonicalVerdict || ''),
           visualBucket:String(scanSimplified.visualBucket || ''),
@@ -623,13 +901,22 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         review:reviewVisible ? {
           canonicalVerdict:String(reviewStateHealth && reviewStateHealth.canonicalVerdict || ''),
           visualBucket:String(reviewStateHealth && reviewStateHealth.visualBucket || ''),
-          actionState:safeText(document.getElementById('reviewNextActionInline') && document.getElementById('reviewNextActionInline').textContent),
+          actionState:String(reviewStateHealth && (reviewStateHealth.actionState || reviewStateHealth.actionLabel) || ''),
           tradePlanStatus:String(reviewStateHealth && reviewStateHealth.planStatus || '')
         } : null,
         sharedPresentation:watchlistPresentation && watchlistPresentation.sharedPresentation ? cloneValue(watchlistPresentation.sharedPresentation) : null,
         trackPresentation:trackSnapshot && trackSnapshot.sharedPresentation ? cloneValue(trackSnapshot.sharedPresentation) : null,
         watchlist:watchlistPresentation ? cloneValue(watchlistPresentation) : null,
         paperTrade:paperTradeContext ? cloneValue({
+          canonicalVerdict:String(
+            paperTradeContext.resolvedContract && (
+              paperTradeContext.resolvedContract.finalVerdict
+              || paperTradeContext.resolvedContract.final_verdict
+              || paperTradeContext.resolvedContract.primaryState
+            )
+            || paperTradeContext.finalVerdict
+            || ''
+          ),
           finalVerdict:paperTradeContext.finalVerdict,
           actionState:(paperTradeContext.eligibility && paperTradeContext.eligibility.eligible === true)
             || (/^entry$/i.test(String(paperTradeContext.finalVerdict || '')) && paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status === 'valid')
@@ -638,7 +925,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
           tradePlanStatus:paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status
         }) : null,
         history:diaryEntries.length ? cloneValue({
-          canonicalVerdict:diaryEntries[diaryEntries.length - 1].verdict || diaryEntries[diaryEntries.length - 1].chartVerdict || '',
+          canonicalVerdict:'',
           lifecycleStatus:diaryEntries[diaryEntries.length - 1].status
             || diaryEntries[diaryEntries.length - 1].executionMeta && diaryEntries[diaryEntries.length - 1].executionMeta.status
             || '',
@@ -649,7 +936,8 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
             || diaryEntries[diaryEntries.length - 1].updatedAt
             || diaryEntries[diaryEntries.length - 1].date
             || ''
-        }) : null
+        }) : null,
+        replayBuilder:cloneValue(appReplaySnapshot)
       },
       staleFieldCandidates:searchNamedFields(staleFieldScanRoots, staleFieldTargets),
       startup:{
@@ -673,9 +961,37 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         reviewProjectionSnapshot:cloneValue(effectiveProjectionSnapshot)
       }
     });
+    return capturedState;
   }, {ticker, consoleEvents, authoritativeRecord});
-  appState.snapshot = buildReplaySnapshotFromRecord(appState.authoritativeRecord, appState.reviewProjectionContext);
+  appState.snapshot = buildReplaySnapshotFromRecord(appState.authoritativeRecord, {
+    ...appState.reviewProjectionContext,
+    canonicalContract:appState.authority && appState.authority.canonicalContract,
+    renderModels:appState.authority && appState.authority.renderModels,
+    reviewCanonicalVerdict:appState.review && appState.review.stateHealth && appState.review.stateHealth.canonicalVerdict,
+    reviewVisualBucket:appState.review && appState.review.stateHealth && appState.review.stateHealth.visualBucket,
+    sharedPresentationCanonicalVerdict:appState.authority && appState.authority.sharedPresentation && (
+      appState.authority.sharedPresentation.canonicalVerdict
+      || appState.authority.sharedPresentation.finalVerdict
+    ),
+    sharedPresentationVisualBucket:appState.authority && appState.authority.sharedPresentation && (
+      appState.authority.sharedPresentation.sourceOfTruthVisualBucket
+      || appState.authority.sharedPresentation.visualBucket
+      || appState.authority.sharedPresentation.renderedBucket
+    ),
+    trackPresentationCanonicalVerdict:appState.authority && appState.authority.trackPresentation && (
+      appState.authority.trackPresentation.canonicalVerdict
+      || appState.authority.trackPresentation.finalVerdict
+    ),
+    trackPresentationVisualBucket:appState.authority && appState.authority.trackPresentation && (
+      appState.authority.trackPresentation.sourceOfTruthVisualBucket
+      || appState.authority.trackPresentation.visualBucket
+      || appState.authority.trackPresentation.renderedBucket
+    ),
+    scannerCanonicalVerdict:appState.authority && appState.authority.scanner && appState.authority.scanner.canonicalVerdict
+  });
   appState.snapshotContract = {
+    hasCanonicalContract:!!(appState.snapshot && appState.snapshot.canonicalContract),
+    hasRenderModels:!!(appState.snapshot && appState.snapshot.renderModels && appState.snapshot.renderModels.review && appState.snapshot.renderModels.track),
     hasAnalysisProjection:!!(appState.snapshot && appState.snapshot.scan && appState.snapshot.scan.analysisProjection),
     hasPlan:!!(appState.snapshot && appState.snapshot.plan),
     hasNormalizedReviewAnalysis:!!(appState.snapshot && appState.snapshot.review && appState.snapshot.review.analysisState && appState.snapshot.review.analysisState.normalized),

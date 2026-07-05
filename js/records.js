@@ -40,6 +40,12 @@
   function scoreSourceForRecordContext(context){
     const safe = context && typeof context === 'object' ? context : {};
     if(safe.preservedReviewedScore) return 'review.savedScore(preserved)';
+    if(safe.preservedAuthoritativeScanScore) return 'scan.score(authoritative)';
+    if(
+      Number.isFinite(safe.recomputedScore)
+      && Number.isFinite(safe.penaltyAdjustedScore)
+      && safe.penaltyAdjustedScore < safe.recomputedScore
+    ) return 'recomputed.penaltyAdjusted';
     if(Number.isFinite(safe.recomputedScore)) return 'recomputed.chartQuality';
     if(Number.isFinite(safe.previousStoredScore)) return 'setup.score(previous)';
     if(Number.isFinite(safe.reviewedScore)) return 'review.savedScore';
@@ -48,6 +54,9 @@
 
   function scoreChangeReasonForRecordContext(context){
     const safe = context && typeof context === 'object' ? context : {};
+    if(safe.preservedAuthoritativeScanScore){
+      return 'Authoritative scanner score preserved for cross-surface parity.';
+    }
     if(safe.preservedReviewedScore && safe.fallbackApplied){
       return 'Reviewed score preserved because recomputation inputs were incomplete.';
     }
@@ -62,7 +71,7 @@
       && Number.isFinite(safe.penaltyAdjustedScore)
       && safe.penaltyAdjustedScore < safe.recomputedScore
     ){
-      return 'Chart-quality score preserved; tradeability penalties kept out of setup score.';
+      return 'Penalty-adjusted recomputed score accepted for display parity.';
     }
     if(Number.isFinite(safe.recomputedScore)){
       return 'Recomputed score accepted.';
@@ -345,7 +354,7 @@
     return state.tickerRecords[symbol];
   }
 
-  function normalizeTickerRecord(record, deps){
+  function normalizeTickerRecordInternal(record, deps, options = {}){
     const {
       normalizeTicker,
       createBaseTickerRecord,
@@ -374,6 +383,7 @@
       deriveActionStateForRecord,
       state
     } = deps || {};
+    const readOnly = options && options.readOnly === true;
 
     const normalized = record && typeof record === 'object' ? record : {};
     const base = createBaseTickerRecord(normalizeTicker(normalized.ticker));
@@ -430,11 +440,21 @@
       scan: { ...base.scan, ...(normalized.scan || {}) },
       review: { ...base.review, ...(normalized.review || {}) },
       plan: { ...base.plan, ...(normalized.plan || {}) },
+      setup: { ...base.setup, ...(normalized.setup || {}) },
       watchlist: { ...base.watchlist, ...(normalized.watchlist || {}) },
       diary: { ...base.diary, ...(normalized.diary || {}) },
       lifecycle: { ...base.lifecycle, ...(normalized.lifecycle || {}) },
       authority: { ...base.authority, ...(normalized.authority || {}) },
-      meta: { ...base.meta, ...(normalized.meta || {}) }
+      meta: { ...base.meta, ...(normalized.meta || {}) },
+      entryPromotionAudit: { ...base.entryPromotionAudit, ...(normalized.entryPromotionAudit || {}) }
+    };
+    merged.plan.targetAlert = {
+      ...((base.plan && base.plan.targetAlert) || {}),
+      ...(((normalized.plan && normalized.plan.targetAlert) || {}))
+    };
+    merged.watchlist.debug = {
+      ...((base.watchlist && base.watchlist.debug) || {}),
+      ...(((normalized.watchlist && normalized.watchlist.debug) || {}))
     };
     const previousReview = normalized.review && typeof normalized.review === 'object' ? normalized.review : {};
     const previousCommittedTrace = previousReview.chartVerificationCommittedTrace && typeof previousReview.chartVerificationCommittedTrace === 'object'
@@ -609,7 +629,7 @@
     merged.plan.missedState = String(merged.plan.missedState || '');
     merged.plan.invalidatedState = String(merged.plan.invalidatedState || '');
     const mergedPlanFieldsPresent = hasAnyPlanFields(merged);
-    if(mergedPlanFieldsPresent && !hasCanonicalTradePlanStamp(merged.plan)){
+    if(!readOnly && mergedPlanFieldsPresent && !hasCanonicalTradePlanStamp(merged.plan)){
       clearNonCanonicalPlanFields(merged.plan);
       merged.plan.authoritySource = 'rejected_unstamped_plan';
       merged.plan.authorityVersion = canonicalTradePlanAuthorityVersion;
@@ -793,18 +813,32 @@
       merged.review.savedScore
       ?? (merged.review.manualReview && merged.review.manualReview.score)
     );
+    const scanAuthoritativeScore = numericOrNull(merged.scan && merged.scan.score);
+    const scanProjectionPresent = !!(
+      merged.scan
+      && merged.scan.analysisProjection
+      && typeof merged.scan.analysisProjection === 'object'
+      && Object.keys(merged.scan.analysisProjection).length
+    );
     const recomputeComplete = hasCompleteScoreInputs(setupDerivedStates, baseSetupScore);
     const fallbackApplied = !recomputeComplete || !Number.isFinite(recomputedChartScore);
     const preserveReviewedScore = Number.isFinite(reviewedScore) && fallbackApplied;
+    const preserveAuthoritativeScanScore = Number.isFinite(scanAuthoritativeScore)
+      && scanProjectionPresent
+      && !Number.isFinite(reviewedScore)
+      && fallbackApplied;
     const selectedScore = preserveReviewedScore
       ? reviewedScore
-      : (Number.isFinite(recomputedPenaltyAdjustedScore)
-        ? recomputedPenaltyAdjustedScore
-        : (Number.isFinite(recomputedChartScore)
-          ? recomputedChartScore
-          : (Number.isFinite(previousStoredScore) ? previousStoredScore : (Number.isFinite(reviewedScore) ? reviewedScore : 0))));
+      : (preserveAuthoritativeScanScore
+        ? Math.max(0, Math.min(10, Math.round(scanAuthoritativeScore)))
+        : (Number.isFinite(recomputedPenaltyAdjustedScore)
+          ? recomputedPenaltyAdjustedScore
+          : (Number.isFinite(recomputedChartScore)
+            ? recomputedChartScore
+            : (Number.isFinite(previousStoredScore) ? previousStoredScore : (Number.isFinite(reviewedScore) ? reviewedScore : 0)))));
     const setupScoreContext = {
       preservedReviewedScore:preserveReviewedScore,
+      preservedAuthoritativeScanScore:preserveAuthoritativeScanScore,
       recomputedScore:recomputedChartScore,
       previousStoredScore,
       reviewedScore,
@@ -876,9 +910,23 @@
     return merged;
   }
 
+  function normalizeTickerRecord(record, deps){
+    return normalizeTickerRecordInternal(record, deps, { readOnly:false });
+  }
+
+  function normalizeTickerRecordForPersistence(record, deps){
+    return normalizeTickerRecord(record, deps);
+  }
+
+  function normalizeTickerRecordReadOnly(record, deps){
+    return normalizeTickerRecordInternal(record, deps, { readOnly:true });
+  }
+
   global.AppRecords = {
     createBaseTickerRecord,
     normalizeTickerRecord,
+    normalizeTickerRecordForPersistence,
+    normalizeTickerRecordReadOnly,
     getTickerRecord,
     upsertTickerRecord
   };

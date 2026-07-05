@@ -129,10 +129,28 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
           summary: normalize(record.scan.summary),
           lastError: normalize(record.scan.lastError)
         } : null,
-        rawShortlistVerdict: normalize(replay && replay.rawShortlistVerdict),
-        resolverCanonicalVerdict: normalize(replay && replay.reviewCanonicalVerdict).toLowerCase(),
-        resolverVisualBucket: normalize(replay && replay.reviewVisualBucket).toLowerCase(),
-        resolverSetupScore: replay && Number.isFinite(Number(replay.setupScore)) ? Number(replay.setupScore) : null,
+        rawShortlistVerdict: normalize(replay && (replay.rawShortlistSignal && replay.rawShortlistSignal.verdict || replay.rawShortlistVerdict)),
+        replayCanonicalContract: replay && replay.canonicalContract ? {
+          canonicalVerdict: normalize(replay.canonicalContract.canonicalVerdict).toLowerCase(),
+          canonicalVisualBucket: normalize(replay.canonicalContract.canonicalVisualBucket).toLowerCase(),
+          setupScore:Number.isFinite(Number(replay.canonicalContract.derivedStates && replay.canonicalContract.derivedStates.setupScore))
+            ? Number(replay.canonicalContract.derivedStates.setupScore)
+            : null,
+          planStatus:normalize(replay.canonicalContract.planAuthority && replay.canonicalContract.planAuthority.status).toLowerCase()
+        } : null,
+        resolverCanonicalVerdict: normalize(
+          replay && replay.canonicalContract && replay.canonicalContract.canonicalVerdict
+          || replay && replay.reviewCanonicalVerdict
+        ).toLowerCase(),
+        resolverVisualBucket: normalize(
+          replay && replay.canonicalContract && replay.canonicalContract.canonicalVisualBucket
+          || replay && replay.reviewVisualBucket
+        ).toLowerCase(),
+        resolverSetupScore: replay && Number.isFinite(Number(
+          replay.canonicalContract && replay.canonicalContract.derivedStates && replay.canonicalContract.derivedStates.setupScore
+        ))
+          ? Number(replay.canonicalContract.derivedStates.setupScore)
+          : (replay && Number.isFinite(Number(replay.setupScore)) ? Number(replay.setupScore) : null),
         scanSimplifiedState: scanSimplified ? {
           canonicalVerdict: normalize(scanSimplified.canonicalVerdict).toLowerCase(),
           visualBucket: normalize(scanSimplified.visualBucket).toLowerCase(),
@@ -195,10 +213,14 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
           text: normalize(card.textContent)
         } : null,
         replayOutput: replay ? {
-          rawShortlistVerdict: normalize(replay.rawShortlistVerdict),
-          reviewCanonicalVerdict: normalize(replay.reviewCanonicalVerdict).toLowerCase(),
-          reviewVisualBucket: normalize(replay.reviewVisualBucket).toLowerCase(),
-          setupScore: replay.setupScore
+          rawShortlistVerdict: normalize(replay.rawShortlistSignal && replay.rawShortlistSignal.verdict || replay.rawShortlistVerdict),
+          reviewCanonicalVerdict: normalize(replay.canonicalContract && replay.canonicalContract.canonicalVerdict || replay.reviewCanonicalVerdict).toLowerCase(),
+          reviewVisualBucket: normalize(replay.canonicalContract && replay.canonicalContract.canonicalVisualBucket || replay.reviewVisualBucket).toLowerCase(),
+          setupScore: replay && Number.isFinite(Number(
+            replay.canonicalContract && replay.canonicalContract.derivedStates && replay.canonicalContract.derivedStates.setupScore
+          ))
+            ? Number(replay.canonicalContract.derivedStates.setupScore)
+            : replay.setupScore
         } : null,
         globalVerdict: globalVerdict ? {
           finalVerdict: normalize(globalVerdict.final_verdict || globalVerdict.finalVerdict).toLowerCase(),

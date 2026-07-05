@@ -591,12 +591,12 @@
         : fallbackDerivedStates(item);
       const derivedStates = reconcileDerivedPriceabilityState(rawDerivedStates, planState);
       const validation = global.SimplifiedPlanState.validateCurrentPlan(item, planState, {derivedStates, deps});
-        const resolverDeps = {
-          ...deps,
-          preserveReviewCanonicalForSoftReadiness:false,
-          analysisDerivedStatesFromRecord:() => derivedStates,
-          effectivePlanForRecord:() => effectivePlan,
-          deriveCurrentPlanState:() => planState,
+      const resolverDeps = {
+        ...deps,
+        preserveReviewCanonicalForSoftReadiness:surface === 'review',
+        analysisDerivedStatesFromRecord:() => derivedStates,
+        effectivePlanForRecord:() => effectivePlan,
+        deriveCurrentPlanState:() => planState,
         applySetupConfirmationPlanGate:deps.applySetupConfirmationPlanGate || ((unusedRecord, displayedPlan) => displayedPlan),
         baseVerdictFromResolvedContract:deps.baseVerdictFromResolvedContract || baseVerdictFromResolvedContract,
         resolvePreLifecycleStateContract:deps.resolvePreLifecycleStateContract
@@ -639,6 +639,15 @@
         blockerReason:(resolvedState && (resolvedState.main_blocker || resolvedState.reason)) || (basePresentationContract && basePresentationContract.blockerReason) || '',
         reasonSummary:(resolvedState && (resolvedState.reason || resolvedState.main_blocker)) || (basePresentationContract && basePresentationContract.reasonSummary) || ''
       };
+      const presentationResolvedState = {
+        ...(resolvedState && typeof resolvedState === 'object' ? resolvedState : {}),
+        canonical_final_verdict:(resolvedState && resolvedState.canonical_final_verdict) || presentationContract.canonical_final_verdict || presentationContract.final_verdict,
+        canonical_visual_bucket:(resolvedState && resolvedState.canonical_visual_bucket) || presentationContract.canonical_visual_bucket || presentationContract.final_verdict,
+        canonical_priceability_state:(resolvedState && resolvedState.canonical_priceability_state) || presentationContract.canonical_priceability_state || '',
+        canonical_soft_readiness_alignment_applied:resolvedState && resolvedState.canonical_soft_readiness_alignment_applied === true
+          ? true
+          : presentationContract.canonical_soft_readiness_alignment_applied === true
+      };
       const visualState = global.ResolverPresentation.resolveVisualState(
         item,
         surface,
@@ -661,7 +670,7 @@
         surface,
         record:item,
         planState,
-        resolvedState,
+        resolvedState:presentationResolvedState,
         visualState
       });
       const persistedSharedPresentation = persistedSharedPresentationForRecord(item);

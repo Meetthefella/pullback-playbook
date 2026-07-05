@@ -91,6 +91,11 @@ test('canonical Entry presentation remains authoritative across review, trade pl
     record.plan.riskStatus = 'fits_risk';
     record.plan.tradeability = 'tradable';
     record.plan.triggerState = 'confirmed';
+    record.plan.authoritySource = 'playwright_seed';
+    record.plan.authorityVersion = 'trade_plan_v1';
+    record.plan.authorityReason = 'canonical_seed_fixture';
+    record.plan.writtenBy = 'entry-presentation-contract.spec';
+    record.plan.writtenAt = '2026-06-29T09:00:00.000Z';
     record.scan.analysisProjection = {
       price:seed.price,
       sma20:seed.ma20,
@@ -264,14 +269,16 @@ test('canonical Entry presentation remains authoritative across review, trade pl
       hardBlocker:''
     });
 
-    uiState.activeReviewSourceProjectionSnapshot = {
+    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
       ticker:seed.ticker,
       canonicalVerdict:'entry',
       finalVerdict:'entry',
       sourceOfTruthVisualBucket:'entry',
       visualBucket:'entry',
       tone:'entry'
-    };
+    }, record, {
+      authority:{version:1, source:'manual'}
+    });
     uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     setActiveReviewTicker(seed.ticker);
     renderReviewWorkspace({source:'entry_contract_test'});
@@ -436,6 +443,11 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
     record.plan.riskStatus = 'fits_risk';
     record.plan.tradeability = 'tradable';
     record.plan.triggerState = 'confirmed';
+    record.plan.authoritySource = 'playwright_seed';
+    record.plan.authorityVersion = 'trade_plan_v1';
+    record.plan.authorityReason = 'canonical_seed_fixture';
+    record.plan.writtenBy = 'entry-presentation-contract.spec';
+    record.plan.writtenAt = '2026-06-29T09:00:00.000Z';
     record.scan.analysisProjection = {
       price:75,
       sma20:73.2,
@@ -497,14 +509,16 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Trading 212 demo gateway is ready through backend configuration.';
-    uiState.activeReviewSourceProjectionSnapshot = {
+    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
       ticker:'BKND',
       canonicalVerdict:'entry',
       finalVerdict:'entry',
       sourceOfTruthVisualBucket:'entry',
       visualBucket:'entry',
       tone:'entry'
-    };
+    }, record, {
+      authority:{version:1, source:'manual'}
+    });
     uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     setActiveReviewTicker('BKND');
     renderReviewWorkspace({source:'backend_gateway_entry_contract_test'});

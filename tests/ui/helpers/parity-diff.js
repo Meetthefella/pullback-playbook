@@ -29,24 +29,87 @@ function diagnoseParity(appState, replayResult){
   const track = appState.track || {};
   const scan = appState.scan || {};
   const replay = replayResult || {};
+  const appContract = appState.authority && appState.authority.canonicalContract && typeof appState.authority.canonicalContract === 'object'
+    ? appState.authority.canonicalContract
+    : null;
+  const appReplayBuilder = appState.authority && appState.authority.replayBuilder && typeof appState.authority.replayBuilder === 'object'
+    ? appState.authority.replayBuilder
+    : null;
+  const replayContract = replay.canonicalContract && typeof replay.canonicalContract === 'object'
+    ? replay.canonicalContract
+    : null;
+  const appRenderModels = appState.authority && appState.authority.renderModels && typeof appState.authority.renderModels === 'object'
+    ? appState.authority.renderModels
+    : null;
+  const appReviewRenderModel = appRenderModels && appRenderModels.review && typeof appRenderModels.review === 'object'
+    ? appRenderModels.review
+    : null;
+  const appTrackRenderModel = appRenderModels && appRenderModels.track && typeof appRenderModels.track === 'object'
+    ? appRenderModels.track
+    : null;
   const scanVisibleCanonical = normalizeVisibleVerdict(scan.visibleCard && scan.visibleCard.badgeLabel);
   const scanVisibleBucket = normalizeVisibleBucketFromVerdict(scan.visibleCard && scan.visibleCard.badgeLabel);
   const scanCanonicalAppValue = scanVisibleCanonical || (scan.simplifiedState && scan.simplifiedState.canonicalVerdict);
   const scanBucketAppValue = scanVisibleBucket || (scan.simplifiedState && scan.simplifiedState.visualBucket);
 
+  if(appContract && replayContract && !same(appContract, replayContract)){
+    return {
+      hasMismatch:true,
+      firstDifferingField:'canonicalContract',
+      appValue:appContract,
+      replayValue:replayContract,
+      firstFunction:'buildPlanVerdictContract()',
+      likelySourceFile:'app.js / scripts/replay-resolver-snapshot.js',
+      confidence:'high',
+      verdict:'contract parity mismatch',
+      recommendedFix:'Compare live canonical contract serialization against replay snapshot contract before inspecting presentation or resolver adapters.',
+      regressionAssertion:'Assert replay canonicalContract exactly matches the live app canonical contract for the same frozen snapshot.'
+    };
+  }
+
+  if(appReplayBuilder && !same(appReplayBuilder.reviewCanonicalVerdict, replay.reviewCanonicalVerdict)){
+    return {
+      hasMismatch:true,
+      firstDifferingField:'appReplayBuilder.reviewCanonicalVerdict',
+      appValue:appReplayBuilder.reviewCanonicalVerdict,
+      replayValue:replay.reviewCanonicalVerdict,
+      firstFunction:'buildReplaySnapshotForTicker()',
+      likelySourceFile:'app.js / scripts/replay-resolver-snapshot.js',
+      confidence:'high',
+      verdict:'browser replay builder mismatch',
+      recommendedFix:'Compare app-side buildReplaySnapshotForTicker output against CLI replay output before changing presentation-layer parity checks.',
+      regressionAssertion:'Assert browser buildReplaySnapshotForTicker().reviewCanonicalVerdict matches CLI replay reviewCanonicalVerdict for the same frozen snapshot.'
+    };
+  }
+
+  if(appReplayBuilder && !same(appReplayBuilder.reviewVisualBucket, replay.reviewVisualBucket)){
+    return {
+      hasMismatch:true,
+      firstDifferingField:'appReplayBuilder.reviewVisualBucket',
+      appValue:appReplayBuilder.reviewVisualBucket,
+      replayValue:replay.reviewVisualBucket,
+      firstFunction:'buildReplaySnapshotForTicker()',
+      likelySourceFile:'app.js / scripts/replay-resolver-snapshot.js',
+      confidence:'high',
+      verdict:'browser replay builder mismatch',
+      recommendedFix:'Compare app-side buildReplaySnapshotForTicker output against CLI replay output before changing presentation-layer parity checks.',
+      regressionAssertion:'Assert browser buildReplaySnapshotForTicker().reviewVisualBucket matches CLI replay reviewVisualBucket for the same frozen snapshot.'
+    };
+  }
+
   const comparisons = [
     {
       field:'reviewCanonicalVerdict',
-      app:review.stateHealth && review.stateHealth.canonicalVerdict,
+      app:(appReviewRenderModel && appReviewRenderModel.canonicalVerdict) || (review.stateHealth && review.stateHealth.canonicalVerdict),
       replay:replay.reviewCanonicalVerdict,
-      source:'resolver-core / resolveSimplifiedStateForSurface()',
+      source:'buildReviewRenderModel()',
       file:'app.js'
     },
     {
       field:'reviewVisualBucket',
-      app:review.stateHealth && review.stateHealth.visualBucket,
+      app:(appReviewRenderModel && appReviewRenderModel.visualBucket) || (review.stateHealth && review.stateHealth.visualBucket),
       replay:replay.reviewVisualBucket,
-      source:'resolver-presentation / resolveSimplifiedStateForSurface()',
+      source:'buildReviewRenderModel()',
       file:'app.js'
     },
     {
@@ -72,9 +135,9 @@ function diagnoseParity(appState, replayResult){
     },
     {
       field:'trackCanonicalVerdict',
-      app:track.simplifiedState && track.simplifiedState.canonicalVerdict,
+      app:(appTrackRenderModel && appTrackRenderModel.canonicalVerdict) || (track.simplifiedState && track.simplifiedState.canonicalVerdict),
       replay:replay.reviewCanonicalVerdict,
-      source:'track presentation / buildSharedReviewTrackPresentation()',
+      source:'buildTrackRenderModel()',
       file:'app.js'
     }
   ];
@@ -143,11 +206,11 @@ function diagnoseParity(appState, replayResult){
       firstDifferingField:'trackBadgeLabel',
       appValue:trackBadge,
       replayValue:trackVerdict,
-      firstFunction:'buildSharedReviewTrackPresentation()',
+      firstFunction:'buildTrackRenderModel()',
       likelySourceFile:'app.js',
       confidence:'medium',
       verdict:'app presentation is wrong',
-      recommendedFix:'Audit Track visible-model derivation and persisted presentation handoff, not the resolver core.',
+      recommendedFix:'Audit canonical Track render-model derivation and persisted presentation handoff, not the resolver core.',
       regressionAssertion:'Assert Track badge/section label remains aligned with canonical watchlist verdict.'
     };
   }

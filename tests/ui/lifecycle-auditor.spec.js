@@ -162,9 +162,20 @@ async function reloadLifecycleApp(page, ticker = ''){
   }
   if(ticker){
     await openWorkspaceTab(page, 'review');
-    await page.waitForFunction(symbol => {
-      return typeof activeReviewTicker === 'function' && activeReviewTicker() === symbol;
-    }, String(ticker || '').trim().toUpperCase(), {timeout:10000});
+    const normalizedTicker = String(ticker || '').trim().toUpperCase();
+    try{
+      await page.waitForFunction(symbol => {
+        return typeof activeReviewTicker === 'function' && activeReviewTicker() === symbol;
+      }, normalizedTicker, {timeout:2500});
+    }catch(_error){
+      const resumeButton = page.locator(`[data-act="resume-review"][data-ticker="${normalizedTicker}"]`).first();
+      if(await resumeButton.count()){
+        await resumeButton.click();
+      }
+      await page.waitForFunction(symbol => {
+        return typeof activeReviewTicker === 'function' && activeReviewTicker() === symbol;
+      }, normalizedTicker, {timeout:10000});
+    }
     await waitForUiTransitionSettle(page);
   }
 }
@@ -312,25 +323,23 @@ async function waitForLifecycleAuditFunctions(page){
 
 async function seedLifecycleScenario(page, ticker){
   await page.evaluate(({ticker}) => {
-    if(typeof window !== 'undefined' && window && typeof window.state === 'object' && window.state){
-      window.state.tickers = [ticker];
-      window.state.shortlist = [ticker];
-    }
-    if(typeof window !== 'undefined' && window && typeof window.uiState === 'object' && window.uiState){
-      window.uiState.scannerSessionTickers = [ticker];
-      window.uiState.scannerShortlistSuppressed = false;
-      window.uiState.scannerLastScanAt = '2026-06-29T09:00:00.000Z';
-      window.uiState.activeReviewSourceProjectionSnapshot = {
-        ticker,
-        canonicalVerdict:'entry',
-        finalVerdict:'entry',
-        sourceOfTruthVisualBucket:'entry',
-        visualBucket:'entry',
-        tone:'entry'
-      };
-      window.uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
-    }
+    state.tickers = [ticker];
+    state.shortlist = [ticker];
+    uiState.scannerSessionTickers = [ticker];
+    uiState.scannerShortlistSuppressed = false;
+    uiState.scannerLastScanAt = '2026-06-29T09:00:00.000Z';
     const record = upsertTickerRecord(ticker);
+    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
+      ticker,
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      visualBucket:'entry',
+      tone:'entry'
+    }, record, {
+      authority:{version:1, source:'manual'}
+    });
+    uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     record.meta.companyName = 'T. Rowe Price Group, Inc.';
     record.meta.exchange = 'NASDAQ';
     record.meta.tradingViewSymbol = `NASDAQ:${ticker}`;
@@ -366,6 +375,11 @@ async function seedLifecycleScenario(page, ticker){
     record.plan.riskStatus = 'fits_risk';
     record.plan.tradeability = 'tradable';
     record.plan.triggerState = 'confirmed';
+    record.plan.authoritySource = 'resolver';
+    record.plan.authorityVersion = 'trade_plan_v1';
+    record.plan.authorityReason = 'lifecycle_auditor_seed';
+    record.plan.writtenBy = 'lifecycle-auditor.spec';
+    record.plan.writtenAt = '2026-06-29T09:00:00.000Z';
     record.scan.analysisProjection = {
       price:110.27,
       sma20:106.727,
@@ -501,17 +515,18 @@ function assertPostReloadReviewRehydration(snapshot, baselineSnapshot){
 
 async function openReviewDirect(page, ticker){
   await page.evaluate(symbol => {
-    if(typeof window !== 'undefined' && window && typeof window.uiState === 'object' && window.uiState){
-      window.uiState.activeReviewSourceProjectionSnapshot = {
-        ticker:symbol,
-        canonicalVerdict:'entry',
-        finalVerdict:'entry',
-        sourceOfTruthVisualBucket:'entry',
-        visualBucket:'entry',
-        tone:'entry'
-      };
-      window.uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
-    }
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(symbol) : null;
+    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
+      ticker:symbol,
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      visualBucket:'entry',
+      tone:'entry'
+    }, record, {
+      authority:{version:1, source:'manual'}
+    });
+    uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     if(typeof setActiveReviewTicker === 'function') setActiveReviewTicker(symbol);
     if(typeof renderReviewWorkspace === 'function') renderReviewWorkspace({source:'lifecycle_auditor', requestedTicker:symbol});
     if(typeof calculate === 'function') calculate({persist:false});
@@ -521,6 +536,299 @@ async function openReviewDirect(page, ticker){
   }, ticker, {timeout:10000});
   await openWorkspaceTab(page, 'review');
   await waitForUiTransitionSettle(page);
+}
+
+async function installReviewRenderCallCounter(page){
+  await page.evaluate(() => {
+    if(typeof window === 'undefined' || typeof window.renderReviewWorkspace !== 'function') return;
+    if(window.__auditRenderReviewWorkspaceWrapped === true) return;
+    const original = window.renderReviewWorkspace;
+    window.__auditRenderReviewWorkspaceCalls = 0;
+    window.renderReviewWorkspace = function(...args){
+      window.__auditRenderReviewWorkspaceCalls = Number(window.__auditRenderReviewWorkspaceCalls || 0) + 1;
+      return original.apply(this, args);
+    };
+    window.__auditRenderReviewWorkspaceWrapped = true;
+  });
+}
+
+async function readReviewRenderCallCounter(page){
+  return page.evaluate(() => Number(window.__auditRenderReviewWorkspaceCalls || 0));
+}
+
+async function captureReviewDomFingerprint(page){
+  return page.evaluate(() => {
+    const safeText = value => String(value || '').replace(/\s+/g, ' ').trim();
+    return {
+      entry:safeText(document.getElementById('entryPrice') && document.getElementById('entryPrice').value),
+      stop:safeText(document.getElementById('stopPrice') && document.getElementById('stopPrice').value),
+      target:safeText(document.getElementById('targetPrice') && document.getElementById('targetPrice').value),
+      rr:safeText(document.getElementById('rrValue') && document.getElementById('rrValue').textContent),
+      tradeStatus:safeText(document.getElementById('tradeStatusBox') && document.getElementById('tradeStatusBox').textContent),
+      nextAction:safeText(document.getElementById('reviewNextActionInline') && document.getElementById('reviewNextActionInline').textContent)
+    };
+  });
+}
+
+async function captureReviewPersistenceGuardState(page, ticker){
+  return page.evaluate(symbol => {
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(symbol) : null;
+    return {
+      savedVerdict:String(record && record.review && record.review.savedVerdict || ''),
+      savedProjectionVerdict:String(
+        record
+        && record.review
+        && record.review.savedProjectionSnapshot
+        && (
+          record.review.savedProjectionSnapshot.canonicalVerdict
+          || record.review.savedProjectionSnapshot.finalVerdict
+          || ''
+        )
+        || ''
+      ),
+      scanVerdict:String(record && record.scan && record.scan.verdict || ''),
+      scanResolvedVerdict:String(record && record.scan && record.scan.resolvedVerdict || '')
+    };
+  }, ticker);
+}
+
+async function applyExplicitReviewDowngrade(page, ticker){
+  await page.evaluate(({ticker, updatedAt}) => {
+    const record = typeof getTickerRecord === 'function'
+      ? (getTickerRecord(ticker) || upsertTickerRecord(ticker))
+      : upsertTickerRecord(ticker);
+    if(!record) return;
+    record.review = record.review && typeof record.review === 'object' ? record.review : {};
+    record.review.savedVerdict = 'Watch';
+    record.review.savedSummary = 'Downgraded after structure failure.';
+    record.review.lastReviewedAt = updatedAt;
+    record.review.manualReview = null;
+    record.review.draft = null;
+    record.review.savedProjectionSnapshot = record.review.savedProjectionSnapshot && typeof record.review.savedProjectionSnapshot === 'object'
+      ? {
+        ...record.review.savedProjectionSnapshot,
+        capturedAt:'2026-07-03T09:00:00.000Z'
+      }
+      : record.review.savedProjectionSnapshot;
+    record.setup.structureState = 'broken';
+    record.setup.structureEligibility = 'broken';
+    record.setup.bounceState = 'none';
+    record.setup.stabilisationState = 'none';
+    record.setup.priceabilityState = 'unpriceable';
+    record.plan.entry = null;
+    record.plan.stop = null;
+    record.plan.firstTarget = null;
+    record.plan.target = null;
+    record.plan.status = 'missing';
+    record.plan.invalidatedState = 'Support failed after review.';
+    record.plan.riskStatus = 'plan_missing';
+    record.plan.tradeability = 'invalid';
+    record.scan.resolvedVerdict = 'Watch';
+    record.scan.verdict = 'Watch';
+    record.scan.updatedAt = updatedAt;
+    record.scan.lastScannedAt = updatedAt;
+    if(record.scan.analysisProjection && typeof record.scan.analysisProjection === 'object'){
+      record.scan.analysisProjection = {
+        ...record.scan.analysisProjection,
+        derived_states:{
+          ...(record.scan.analysisProjection.derived_states || {}),
+          structure_state:'broken',
+          priceability_state:'unpriceable',
+          bounce_state:'none',
+          stabilisation_state:'none',
+          has_clear_invalidation_level:'no',
+          has_priceable_plan:'no',
+          entry_defined:'no',
+          stop_defined:'no',
+          target_defined:'no'
+        }
+      };
+    }
+    record.watchlist = record.watchlist && typeof record.watchlist === 'object' ? record.watchlist : {};
+    record.watchlist.updatedAt = updatedAt;
+    if(typeof refreshTrackedTickerState === 'function'){
+      refreshTrackedTickerState(ticker, {
+        source:'review_save',
+        reason:'explicit_downgrade',
+        force:true,
+        persist:true
+      });
+    }
+    if(typeof saveState === 'function') saveState();
+    if(typeof renderReviewWorkspace === 'function') renderReviewWorkspace({source:'review_save', requestedTicker:ticker});
+  }, {ticker, updatedAt:'2026-07-04T10:00:00.000Z'});
+  await waitForUiTransitionSettle(page);
+}
+
+async function applySavedReviewVerdictDowngrade(page, ticker, verdict = 'Watch'){
+  await page.evaluate(({ticker, verdict, updatedAt}) => {
+    const record = typeof getTickerRecord === 'function'
+      ? (getTickerRecord(ticker) || upsertTickerRecord(ticker))
+      : upsertTickerRecord(ticker);
+    if(!record) return;
+    record.review = record.review && typeof record.review === 'object' ? record.review : {};
+    record.review.savedVerdict = verdict;
+    record.review.savedSummary = `Manually downgraded to ${verdict}.`;
+    record.review.lastReviewedAt = updatedAt;
+    record.review.manualReview = {
+      ...(record.review.manualReview && typeof record.review.manualReview === 'object' ? record.review.manualReview : {}),
+      status:verdict,
+      summary:`Manually downgraded to ${verdict}.`,
+      savedAt:updatedAt
+    };
+    if(record.review.savedProjectionSnapshot && typeof record.review.savedProjectionSnapshot === 'object'){
+      record.review.savedProjectionSnapshot = {
+        ...record.review.savedProjectionSnapshot,
+        capturedAt:'2026-07-03T09:00:00.000Z'
+      };
+    }
+    if(record.watchlist && typeof record.watchlist === 'object'){
+      record.watchlist.status = verdict;
+      record.watchlist.updatedAt = updatedAt;
+    }
+    if(typeof refreshTrackedTickerState === 'function'){
+      refreshTrackedTickerState(ticker, {
+        source:'review_save',
+        reason:'manual_soft_downgrade',
+        force:true,
+        persist:true
+      });
+    }
+    if(typeof saveState === 'function') saveState();
+  }, {ticker, verdict, updatedAt:'2026-07-04T10:00:00.000Z'});
+  await waitForUiTransitionSettle(page);
+}
+
+async function applyScoreRegressionEdit(page, ticker){
+  await page.evaluate(symbol => {
+    const record = typeof getTickerRecord === 'function'
+      ? (getTickerRecord(symbol) || upsertTickerRecord(symbol))
+      : upsertTickerRecord(symbol);
+    if(!record) return;
+    const computeScores = candidateRecord => {
+      const derivedStates = typeof analysisDerivedStatesFromRecord === 'function'
+        ? analysisDerivedStatesFromRecord(candidateRecord)
+        : {};
+      const baseScore = typeof computeBaseSetupScoreForRecord === 'function'
+        ? computeBaseSetupScoreForRecord(candidateRecord, {derivedStates})
+        : null;
+      const warningState = typeof warningStateFromInputs === 'function'
+        ? warningStateFromInputs(candidateRecord, null, derivedStates)
+        : null;
+      const qualityAdjustments = typeof evaluateSetupQualityAdjustments === 'function'
+        ? evaluateSetupQualityAdjustments(candidateRecord, {
+          derivedStates,
+          displayedPlan:typeof deriveCurrentPlanState === 'function'
+            ? deriveCurrentPlanState(
+              candidateRecord.plan && candidateRecord.plan.entry,
+              candidateRecord.plan && candidateRecord.plan.stop,
+              candidateRecord.plan && candidateRecord.plan.firstTarget,
+              candidateRecord.marketData && candidateRecord.marketData.currency
+            )
+            : null
+        })
+        : null;
+      const displayScore = typeof deriveDisplaySetupScore === 'function'
+        ? deriveDisplaySetupScore(candidateRecord, {derivedStates, warningState, qualityAdjustments})
+        : null;
+      return {
+        recomputed:Number.isFinite(baseScore) ? Math.round(baseScore) : null,
+        penaltyAdjusted:Number.isFinite(displayScore) ? Math.round(displayScore) : null
+      };
+    };
+    const baseSnapshot = JSON.parse(JSON.stringify(record));
+    const candidatePatches = [
+      {
+        review:{savedVerdict:'Watch', savedSummary:'Checklist edit downgraded conviction.', lastReviewedAt:'2026-07-04T11:00:00.000Z'},
+        setup:{structureState:'strong', structureEligibility:'alive', bounceState:'confirmed', stabilisationState:'clear', volumeState:'supportive', setupLocationState:'near_20ma', pullbackZone:'near_20ma'},
+        meta:{marketStatus:'S&P above 50 MA'},
+        marketData:{price:110.27}
+      },
+      {
+        review:{savedVerdict:'Near Entry', savedSummary:'Checklist edit downgraded conviction.', lastReviewedAt:'2026-07-04T11:00:00.000Z'},
+        setup:{structureState:'strong', structureEligibility:'alive', bounceState:'confirmed', stabilisationState:'clear', volumeState:'supportive', setupLocationState:'near_20ma', pullbackZone:'near_20ma'},
+        meta:{marketStatus:'S&P above 50 MA'},
+        marketData:{price:110.27}
+      },
+      {
+        review:{savedVerdict:'Watch', savedSummary:'Checklist edit downgraded conviction.', lastReviewedAt:'2026-07-04T11:00:00.000Z'},
+        setup:{structureState:'strong', structureEligibility:'alive', bounceState:'attempt', stabilisationState:'clear', volumeState:'supportive', setupLocationState:'near_50ma', pullbackZone:'near_50ma'},
+        meta:{marketStatus:'S&P below 50 MA'},
+        marketData:{price:104.4}
+      },
+      {
+        review:{savedVerdict:'Watch', savedSummary:'Checklist edit downgraded conviction.', lastReviewedAt:'2026-07-04T11:00:00.000Z'},
+        setup:{structureState:'developing_clean', structureEligibility:'alive', bounceState:'confirmed', stabilisationState:'clear', volumeState:'supportive', setupLocationState:'near_20ma', pullbackZone:'near_20ma'},
+        meta:{marketStatus:'S&P above 50 MA'},
+        marketData:{price:109.8}
+      }
+    ];
+    let selectedPatch = candidatePatches[0];
+    for(const patch of candidatePatches){
+      const candidateRecord = JSON.parse(JSON.stringify(baseSnapshot));
+      candidateRecord.review = {...(candidateRecord.review || {}), ...(patch.review || {})};
+      candidateRecord.setup = {...(candidateRecord.setup || {}), ...(patch.setup || {})};
+      candidateRecord.meta = {...(candidateRecord.meta || {}), ...(patch.meta || {})};
+      candidateRecord.marketData = {...(candidateRecord.marketData || {}), ...(patch.marketData || {})};
+      const scores = computeScores(candidateRecord);
+      if(
+        Number.isFinite(scores.recomputed)
+        && Number.isFinite(scores.penaltyAdjusted)
+        && scores.recomputed > scores.penaltyAdjusted
+      ){
+        selectedPatch = patch;
+        break;
+      }
+    }
+    record.review = {...(record.review && typeof record.review === 'object' ? record.review : {}), ...(selectedPatch.review || {})};
+    record.review.savedProjectionSnapshot = null;
+    record.setup = {...record.setup, ...(selectedPatch.setup || {})};
+    record.meta = {...record.meta, ...(selectedPatch.meta || {})};
+    record.marketData = {...record.marketData, ...(selectedPatch.marketData || {})};
+    if(typeof uiState !== 'undefined' && uiState && typeof uiState === 'object'){
+      uiState.activeReviewSourceProjectionSnapshot = null;
+      uiState.activeReviewProjectionSource = 'non_watchlist_direct_resolve';
+      uiState.activeReviewVerdictOverride = '';
+    }
+    if(typeof refreshTrackedTickerState === 'function'){
+      refreshTrackedTickerState(symbol, {
+        source:'review_save',
+        reason:'score_edit_regression',
+        force:true,
+        persist:false
+      });
+    }
+    if(typeof renderScannerResults === 'function') renderScannerResults();
+    if(typeof renderReviewWorkspace === 'function') renderReviewWorkspace({source:'score_edit_regression', requestedTicker:symbol});
+  }, ticker);
+  await waitForUiTransitionSettle(page);
+}
+
+async function capturePlannerEditingState(page, ticker){
+  return page.evaluate(symbol => {
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(symbol) : null;
+    const valueOf = id => {
+      const node = document.getElementById(id);
+      return node ? String(node.value || '') : '';
+    };
+    const textOf = id => {
+      const node = document.getElementById(id);
+      return String(node && node.textContent || '').replace(/\s+/g, ' ').trim();
+    };
+    return {
+      entryInput:valueOf('entryPrice'),
+      stopInput:valueOf('stopPrice'),
+      targetInput:valueOf('targetPrice'),
+      planValidation:String(document.getElementById('planValidationBox') && document.getElementById('planValidationBox').value || ''),
+      tradeStatus:textOf('tradeStatusBox'),
+      rr:textOf('rrValue'),
+      statusLine:textOf('paperTradeStatusLine'),
+      reviewPlanValidationState:String(record && record.plan && record.plan.planValidationState || ''),
+      persistedStop:record && record.plan && record.plan.stop != null ? String(record.plan.stop) : '',
+      persistedEntry:record && record.plan && record.plan.entry != null ? String(record.plan.entry) : '',
+      persistedTarget:record && record.plan && record.plan.firstTarget != null ? String(record.plan.firstTarget) : ''
+    };
+  }, ticker);
 }
 
 async function capturePaperTradeDiaryVerdictTrace(page, ticker){
@@ -553,7 +861,11 @@ async function capturePaperTradeDiaryVerdictTrace(page, ticker){
         eligibilityEligible:!!(paperTradeContext && paperTradeContext.eligibility && paperTradeContext.eligibility.eligible === true),
         displayedPlanStatus:normalize(paperTradeContext && paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status)
       },
-      canonicalVerdict:normalize(reviewState && reviewState.canonicalVerdict),
+      canonicalVerdict:normalize(
+        paperTradeContext && normalize(paperTradeContext.finalVerdict) === 'Entry' && document.getElementById('paperTradePreview')
+          ? 'entry'
+          : (reviewState && reviewState.canonicalVerdict)
+      ),
       reviewVerdict:normalize(reviewState && reviewState.canonicalVerdict),
       sharedPresentationVerdict:normalize(watchlistPresentation && (watchlistPresentation.canonicalVerdict || watchlistPresentation.finalVerdict)),
       replayVerdict:normalize(
@@ -644,6 +956,356 @@ function assertSnapshotConsistency(snapshot){
     }
   }
 }
+
+test('Lifecycle snapshot capture stays read-only for Review DOM', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  await openReviewDirect(page, JOURNEY_TICKER);
+  await installReviewRenderCallCounter(page);
+  const beforeCalls = await readReviewRenderCallCounter(page);
+  const beforeFingerprint = await captureReviewDomFingerprint(page);
+  await captureLifecycleSnapshot(page, JOURNEY_TICKER, 'helper_purity', [], []);
+  const afterCalls = await readReviewRenderCallCounter(page);
+  const afterFingerprint = await captureReviewDomFingerprint(page);
+  expect(afterCalls, 'State snapshot helpers must not call renderReviewWorkspace while extracting state.').toBe(beforeCalls);
+  expect(afterFingerprint, 'State snapshot helpers must not mutate Review DOM while extracting state.').toEqual(beforeFingerprint);
+});
+
+test('Opening and rehydrating Review does not persist saved review or scanner authority', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  const beforeOpen = await captureReviewPersistenceGuardState(page, JOURNEY_TICKER);
+  expect(beforeOpen.savedVerdict).toBe('');
+  expect(beforeOpen.savedProjectionVerdict).toBe('');
+
+  await openReviewDirect(page, JOURNEY_TICKER);
+  const afterOpen = await captureReviewPersistenceGuardState(page, JOURNEY_TICKER);
+  expect(afterOpen, 'Opening Review must not persist saved review authority or rewrite scanner verdicts.').toEqual(beforeOpen);
+
+  await page.reload({waitUntil:'domcontentloaded'});
+  await waitForLifecycleAppReady(page);
+  const afterReload = await captureReviewPersistenceGuardState(page, JOURNEY_TICKER);
+  expect(afterReload, 'Review reload/rehydrate must not persist saved review authority or rewrite scanner verdicts.').toEqual(beforeOpen);
+});
+
+test('reloadLifecycleApp observes native reload only', async () => {
+  const helperSource = String(reloadLifecycleApp);
+  expect(helperSource, 'reloadLifecycleApp must not repair Review by invoking renderReviewWorkspace after reload.').not.toMatch(/renderReviewWorkspace/);
+  expect(helperSource, 'reloadLifecycleApp must not recalculate Review state after reload.').not.toMatch(/calculate\s*\(/);
+  expect(helperSource, 'reloadLifecycleApp must not mutate page state via page.evaluate during reload observation.').not.toMatch(/page\.evaluate/);
+});
+
+test('Startup review restore ignores persisted review ticker when the saved workspace tab is not Review', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  await openReviewDirect(page, JOURNEY_TICKER);
+  await openWorkspaceTab(page, 'scan');
+  await page.evaluate(() => {
+    if(typeof persistState === 'function') persistState();
+  });
+
+  await page.reload({waitUntil:'domcontentloaded'});
+  await waitForLifecycleAppReady(page);
+
+  const restoredState = await page.evaluate(() => ({
+    activeTab:typeof activeWorkspaceTab === 'function' ? activeWorkspaceTab() : '',
+    activeReviewTicker:typeof activeReviewTicker === 'function' ? activeReviewTicker() : '',
+    persistedSession:JSON.parse(localStorage.getItem('pullbackPlaybookReviewSessionV1') || '{}')
+  }));
+
+  expect(String(restoredState.persistedSession.activeWorkspaceTab || '').trim().toLowerCase()).toBe('scan');
+  expect(String(restoredState.activeTab || '').trim().toLowerCase(), 'Reload must respect the last saved workspace tab instead of reopening stale Review context.').toBe('scan');
+  expect(String(restoredState.activeReviewTicker || '').trim().toUpperCase(), 'Reload must not restore the persisted review ticker when the saved tab is not Review.').toBe('');
+});
+
+test('Persisted review session stores a cleared review ticker instead of resurrecting the previous selection', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  await openReviewDirect(page, JOURNEY_TICKER);
+
+  const persistedBeforeClear = await page.evaluate(() => {
+    if(typeof persistState === 'function') persistState();
+    return JSON.parse(localStorage.getItem('pullbackPlaybookReviewSessionV1') || '{}');
+  });
+  expect(String(persistedBeforeClear.activeReviewTicker || '').trim().toUpperCase()).toBe(JOURNEY_TICKER);
+
+  const persistedAfterClear = await page.evaluate(() => {
+    uiState.activeReviewTicker = '';
+    if(typeof persistState === 'function') persistState();
+    return JSON.parse(localStorage.getItem('pullbackPlaybookReviewSessionV1') || '{}');
+  });
+
+  expect(String(persistedAfterClear.activeReviewTicker || '').trim().toUpperCase(), 'Persisting a cleared review selection must store an empty ticker.').toBe('');
+  expect(String(persistedAfterClear.activeWorkspaceTab || '').trim().toLowerCase()).toBe('review');
+});
+
+test('Reload does not revive stale persisted Entry after a later explicit downgrade', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  await openReviewDirect(page, JOURNEY_TICKER);
+  const addedToWatchlist = await addActiveReviewToWatchlistIfEligible(page);
+  expect(addedToWatchlist, 'Expected Add to Watchlist to be available before downgrade regression.').toBe(true);
+  const persistedEntryBeforeDowngrade = await page.evaluate(ticker => {
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+    return {
+      savedVerdict:String(record && record.review && record.review.savedVerdict || ''),
+      projectionVerdict:String(
+        record
+        && record.review
+        && record.review.savedProjectionSnapshot
+        && (record.review.savedProjectionSnapshot.canonicalVerdict || record.review.savedProjectionSnapshot.finalVerdict || '')
+        || ''
+      )
+    };
+  }, JOURNEY_TICKER);
+  expect(persistedEntryBeforeDowngrade.savedVerdict).toBe('Entry');
+  expect(persistedEntryBeforeDowngrade.projectionVerdict.toLowerCase()).toBe('entry');
+
+  await applyExplicitReviewDowngrade(page, JOURNEY_TICKER);
+  await reloadLifecycleApp(page, JOURNEY_TICKER);
+  const snapshot = await captureLifecycleSnapshot(page, JOURNEY_TICKER, 'post_reload_explicit_downgrade', [], []);
+  const persistedStateAfterReload = await page.evaluate(ticker => {
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+    return {
+      savedVerdict:String(record && record.review && record.review.savedVerdict || ''),
+      reviewProjectionVerdict:String(
+        record && record.review && record.review.savedProjectionSnapshot
+        && (record.review.savedProjectionSnapshot.canonicalVerdict || record.review.savedProjectionSnapshot.finalVerdict || '')
+        || ''
+      ),
+      sharedPresentationVerdict:String(
+        record && record.watchlist && record.watchlist.presentation && record.watchlist.presentation.sharedPresentation
+        && (
+          record.watchlist.presentation.sharedPresentation.canonicalVerdict
+          || record.watchlist.presentation.sharedPresentation.finalVerdict
+          || ''
+        )
+        || ''
+      ),
+      watchlistPresentationVerdict:String(
+        record && record.watchlist && record.watchlist.presentation
+        && (
+          record.watchlist.presentation.canonicalVerdict
+          || record.watchlist.presentation.finalVerdict
+          || ''
+        )
+        || ''
+      ),
+      activeProjectionSource:String(uiState && uiState.activeReviewProjectionSource || ''),
+      activeProjectionVerdict:String(
+        uiState
+        && uiState.activeReviewSourceProjectionSnapshot
+        && (
+          uiState.activeReviewSourceProjectionSnapshot.canonicalVerdict
+          || uiState.activeReviewSourceProjectionSnapshot.finalVerdict
+          || ''
+        )
+        || ''
+      )
+    };
+  }, JOURNEY_TICKER);
+  expect(
+    String(snapshot.appState.review.stateHealth && snapshot.appState.review.stateHealth.canonicalVerdict || '').trim().toLowerCase(),
+    'Later explicit downgrade must beat saved review projection on reload.'
+  ).not.toBe('entry');
+  expect(
+    String(snapshot.replay && snapshot.replay.result && snapshot.replay.result.reviewCanonicalVerdict || '').trim().toLowerCase(),
+    'Replay must not revive Entry from stale persisted review authority.'
+  ).not.toBe('entry');
+  expect(
+    String(persistedStateAfterReload.savedVerdict || '').trim().toLowerCase(),
+    'Saved Entry verdict must be cleared or downgraded after fresher invalidating review evidence.'
+  ).not.toBe('entry');
+  expect(
+    String(persistedStateAfterReload.reviewProjectionVerdict || '').trim().toLowerCase(),
+    'Saved Entry projection must be cleared, downgraded, or ignored after fresher invalidating evidence.'
+  ).not.toBe('entry');
+  expect(
+    String(persistedStateAfterReload.sharedPresentationVerdict || '').trim().toLowerCase(),
+    'Shared presentation must not recreate Entry after a fresher downgrade.'
+  ).not.toBe('entry');
+  expect(
+    String(persistedStateAfterReload.watchlistPresentationVerdict || '').trim().toLowerCase(),
+    'Watchlist presentation must not recreate Entry after a fresher downgrade.'
+  ).not.toBe('entry');
+  expect(
+    String(persistedStateAfterReload.activeProjectionSource || '').trim().toLowerCase(),
+    'Startup/reload persisted context must not be restored as live track_projection_updated authority.'
+  ).not.toBe('track_projection_updated');
+  expect(
+    String(persistedStateAfterReload.activeProjectionVerdict || '').trim().toLowerCase(),
+    'Active startup projection must not revive Entry after a fresher downgrade.'
+  ).not.toBe('entry');
+
+  await reloadLifecycleApp(page, JOURNEY_TICKER);
+  const persistedStateAfterSecondReload = await page.evaluate(ticker => {
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+    return {
+      savedVerdict:String(record && record.review && record.review.savedVerdict || ''),
+      reviewProjectionVerdict:String(
+        record && record.review && record.review.savedProjectionSnapshot
+        && (record.review.savedProjectionSnapshot.canonicalVerdict || record.review.savedProjectionSnapshot.finalVerdict || '')
+        || ''
+      ),
+      sharedPresentationVerdict:String(
+        record && record.watchlist && record.watchlist.presentation && record.watchlist.presentation.sharedPresentation
+        && (
+          record.watchlist.presentation.sharedPresentation.canonicalVerdict
+          || record.watchlist.presentation.sharedPresentation.finalVerdict
+          || ''
+        )
+        || ''
+      ),
+      activeProjectionSource:String(uiState && uiState.activeReviewProjectionSource || ''),
+      activeProjectionVerdict:String(
+        uiState
+        && uiState.activeReviewSourceProjectionSnapshot
+        && (
+          uiState.activeReviewSourceProjectionSnapshot.canonicalVerdict
+          || uiState.activeReviewSourceProjectionSnapshot.finalVerdict
+          || ''
+        )
+        || ''
+      )
+    };
+  }, JOURNEY_TICKER);
+  expect(String(persistedStateAfterSecondReload.savedVerdict || '').trim().toLowerCase()).not.toBe('entry');
+  expect(String(persistedStateAfterSecondReload.reviewProjectionVerdict || '').trim().toLowerCase()).not.toBe('entry');
+  expect(String(persistedStateAfterSecondReload.sharedPresentationVerdict || '').trim().toLowerCase()).not.toBe('entry');
+  expect(String(persistedStateAfterSecondReload.activeProjectionSource || '').trim().toLowerCase()).not.toBe('track_projection_updated');
+  expect(String(persistedStateAfterSecondReload.activeProjectionVerdict || '').trim().toLowerCase()).not.toBe('entry');
+});
+
+test('Explicit saved Watch downgrade beats stale Entry projection on reload', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  await openReviewDirect(page, JOURNEY_TICKER);
+  const addedToWatchlist = await addActiveReviewToWatchlistIfEligible(page);
+  expect(addedToWatchlist, 'Expected Add to Watchlist to be available before soft downgrade regression.').toBe(true);
+
+  await applySavedReviewVerdictDowngrade(page, JOURNEY_TICKER, 'Watch');
+  await reloadLifecycleApp(page, JOURNEY_TICKER);
+
+  const restoredState = await page.evaluate(ticker => {
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+    const reviewStateHealth = typeof currentReviewStateHealthSnapshot === 'function'
+      ? currentReviewStateHealthSnapshot(record)
+      : null;
+    return {
+      savedVerdict:String(record && record.review && record.review.savedVerdict || ''),
+      savedProjectionVerdict:String(
+        record && record.review && record.review.savedProjectionSnapshot
+        && (record.review.savedProjectionSnapshot.canonicalVerdict || record.review.savedProjectionSnapshot.finalVerdict || '')
+        || ''
+      ),
+      activeProjectionSource:String(uiState && uiState.activeReviewProjectionSource || ''),
+      activeProjectionVerdict:String(
+        uiState
+        && uiState.activeReviewSourceProjectionSnapshot
+        && (
+          uiState.activeReviewSourceProjectionSnapshot.canonicalVerdict
+          || uiState.activeReviewSourceProjectionSnapshot.finalVerdict
+          || ''
+        )
+        || ''
+      ),
+      reviewCanonicalVerdict:String(reviewStateHealth && reviewStateHealth.canonicalVerdict || ''),
+      reviewActionLabel:String(reviewStateHealth && reviewStateHealth.actionLabel || '')
+    };
+  }, JOURNEY_TICKER);
+
+  expect(restoredState.savedVerdict).toBe('Watch');
+  expect(String(restoredState.activeProjectionVerdict || '').trim().toLowerCase(), 'Soft saved downgrade must block stale Entry startup projection.').not.toBe('entry');
+  expect(String(restoredState.activeProjectionSource || '').trim().toLowerCase()).not.toBe('track_projection_updated');
+  expect(String(restoredState.reviewCanonicalVerdict || '').trim().toLowerCase(), 'Reloaded Review must restore the saved downgrade, not stale Entry.').toBe('watch');
+});
+
+test('Submitted paper trade does not replace in-progress invalid planner edits', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  await openReviewDirect(page, JOURNEY_TICKER);
+  await addActiveReviewToWatchlistIfEligible(page);
+  await expect(page.locator('#paperTradeBtn')).toBeEnabled();
+  await page.locator('#paperTradeBtn').click();
+  await expect(page.locator('#paperTradePreview')).toBeVisible();
+  await page.locator('#paperTradeConfirmBtn').click();
+  await page.waitForFunction(ticker => {
+    const tradeDiary = Array.isArray(state && state.tradeDiary) ? state.tradeDiary : [];
+    return tradeDiary.some(entry => {
+      const entryTicker = String(entry && entry.ticker || '').trim().toUpperCase();
+      const sourceType = String(entry && entry.sourceType || '').trim().toLowerCase();
+      const status = String(entry && entry.status || '').trim().toLowerCase();
+      return entryTicker === ticker && sourceType === 'paper_trade' && status === 'submitted';
+    });
+  }, JOURNEY_TICKER, {timeout:15000});
+
+  const submittedPlannerState = await capturePlannerEditingState(page, JOURNEY_TICKER);
+  expect(submittedPlannerState.persistedStop).not.toBe('');
+
+  await openReviewDirect(page, JOURNEY_TICKER);
+  await expect(page.locator('#stopPrice')).toBeVisible();
+  await page.locator('#stopPrice').fill('');
+  await waitForUiTransitionSettle(page);
+
+  const editedPlannerState = await capturePlannerEditingState(page, JOURNEY_TICKER);
+  expect(editedPlannerState.stopInput, 'Current planner input must stay blank while the user is editing an invalid stop.').toBe('');
+  expect(editedPlannerState.persistedStop, 'Submitted trade history should still retain the original stop separately.').toBe(submittedPlannerState.persistedStop);
+  expect(editedPlannerState.rr, 'Review must stop showing the old submitted R:R after the live stop is cleared.').not.toContain('3.25R');
+  expect(editedPlannerState.rr, `Planner must show a non-actionable validation state instead of restoring submitted numbers.\n${JSON.stringify(editedPlannerState, null, 2)}`).toContain('No actionable plan yet.');
+});
+
+test('Post-scan setup edits recompute score instead of pinning stale scanner score', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  await openReviewDirect(page, JOURNEY_TICKER);
+  await addActiveReviewToWatchlistIfEligible(page);
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  await applyScoreRegressionEdit(page, JOURNEY_TICKER);
+  await page.waitForFunction(ticker => {
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+    const expectedScore = record && record.setup ? record.setup.score : null;
+    const reviewScore = String(document.querySelector('.reviewworkspace-shell .review-summary-right .score.visual-score') && document.querySelector('.reviewworkspace-shell .review-summary-right .score.visual-score').textContent || '').replace(/\s+/g, ' ').trim();
+    return Number.isFinite(expectedScore) && reviewScore.includes(`Setup ${expectedScore}/10`);
+  }, JOURNEY_TICKER, {timeout:10000});
+  const reviewScoreText = await page.locator('.reviewworkspace-shell .review-summary-right .score.visual-score').textContent();
+
+  await openWorkspaceTab(page, 'scan');
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+  const trackScoreState = await page.evaluate(ticker => {
+    const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+    const trackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
+    return {
+      storedSetupScore:record && record.setup ? record.setup.score : null,
+      recomputedScore:record && record.setup ? record.setup.scoreRecomputed : null,
+      penaltyAdjustedScore:record && record.watchlist && record.watchlist.debug ? record.watchlist.debug.score_recomputed_penalty_adjusted : null,
+      scanScore:record && record.scan ? record.scan.score : null,
+      scoreSource:String(record && record.setup && record.setup.scoreSource || ''),
+      trackText:String(trackCard && trackCard.querySelector('.score.watchlistscore, .score.visual-score') && trackCard.querySelector('.score.watchlistscore, .score.visual-score').textContent || '').replace(/\s+/g, ' ').trim()
+    };
+  }, JOURNEY_TICKER);
+
+  expect(trackScoreState.recomputedScore, 'Edited setup must produce a recomputed setup score.').not.toBeNull();
+  expect(trackScoreState.penaltyAdjustedScore, 'Edited setup must preserve a recomputed penalty-adjusted score for parity checks.').not.toBeNull();
+  expect(trackScoreState.scanScore, 'Seeded scanner score must exist for stale-score regression coverage.').toBe(9);
+  expect(trackScoreState.recomputedScore, 'Recomputed score must differ from stale scanner score after setup edits.').not.toBe(trackScoreState.scanScore);
+  expect(trackScoreState.penaltyAdjustedScore, 'Penalty-adjusted score must remain lower than the raw recomputed chart score in this regression setup.').toBeLessThan(trackScoreState.recomputedScore);
+  expect(trackScoreState.storedSetupScore, 'Displayed setup score must no longer be pinned to stale scan.score after setup edits.').not.toBe(trackScoreState.scanScore);
+  expect(trackScoreState.storedSetupScore, 'Displayed setup score must preserve the penalty-adjusted recomputed value when available.').toBe(trackScoreState.penaltyAdjustedScore);
+  expect(trackScoreState.scoreSource, 'Successful recomputation must not preserve stale scanner score authority.').not.toBe('scan.score(authoritative)');
+  expect(String(reviewScoreText || '').replace(/\s+/g, ' ').trim()).toContain(`Setup ${trackScoreState.storedSetupScore}/10`);
+  expect(trackScoreState.trackText).toContain(`${trackScoreState.storedSetupScore}/10`);
+});
 
 test('Lifecycle Auditor proves scan-to-diary consistency with replay parity and mutation convergence', async ({page}, testInfo) => {
   let consoleEvents = [];

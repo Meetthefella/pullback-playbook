@@ -76,6 +76,13 @@ async function seedScenario(page, scenario){
     record.plan.riskStatus = seed.riskStatus || '';
     record.plan.tradeability = seed.tradeability || '';
     record.plan.triggerState = seed.triggerState || '';
+    if(seed.planStamped !== false && seed.entry && seed.stop && seed.target){
+      record.plan.authoritySource = seed.planAuthoritySource || 'playwright_seed';
+      record.plan.authorityVersion = 'trade_plan_v1';
+      record.plan.authorityReason = seed.planAuthorityReason || 'canonical_seed_fixture';
+      record.plan.writtenBy = seed.planWrittenBy || 'track-state-presentation-contract.spec';
+      record.plan.writtenAt = seed.planWrittenAt || '2026-06-29T09:00:00.000Z';
+    }
     record.scan.analysisProjection = {
       price:seed.price,
       sma20:seed.ma20,
@@ -139,14 +146,16 @@ async function seedScenario(page, scenario){
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Paper gateway ready.';
 
-    uiState.activeReviewSourceProjectionSnapshot = {
+    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
       ticker:seed.ticker,
       canonicalVerdict:seed.canonicalVerdict,
       finalVerdict:seed.canonicalVerdict,
       sourceOfTruthVisualBucket:seed.visualBucket,
       visualBucket:seed.visualBucket,
       tone:seed.visualBucket
-    };
+    }, record, {
+      authority:{version:1, source:'manual'}
+    });
     uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     setActiveReviewTicker(seed.ticker);
     renderReviewWorkspace({source:'track_state_contract_test'});
@@ -191,7 +200,8 @@ function entryScenario(){
     tradeability:'tradable',
     triggerState:'confirmed',
     scannerResolvedRR:2.5,
-    currency:'USD'
+    currency:'USD',
+    planStamped:true
   };
 }
 
@@ -271,7 +281,8 @@ function nearEntryScenario(){
     riskStatus:'fits_risk',
     tradeability:'tradable',
     triggerState:'developing',
-    scannerResolvedRR:2.2
+    scannerResolvedRR:2.2,
+    planStamped:true
   };
 }
 

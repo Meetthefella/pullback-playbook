@@ -114,6 +114,12 @@ function buildAuthoritySummary(appState, replayResult){
       || appState.paperTrade.button && /submitted/i.test(normalizeText(appState.paperTrade.button.statusText || ''))
     )
   );
+  const replayCanonicalContract = replayResult && replayResult.canonicalContract && typeof replayResult.canonicalContract === 'object'
+    ? replayResult.canonicalContract
+    : null;
+  const replayRenderModels = replayResult && replayResult.renderModels && typeof replayResult.renderModels === 'object'
+    ? replayResult.renderModels
+    : null;
   const sources = {
     scanner:authority.scanner,
     resolver:authority.resolver,
@@ -124,15 +130,18 @@ function buildAuthoritySummary(appState, replayResult){
     watchlist:authority.watchlist,
     history:authority.history,
     replay:replayResult ? {
-      canonicalVerdict:replayResult.reviewCanonicalVerdict,
-      visualBucket:replayResult.reviewVisualBucket,
-      actionState:replayResult.reviewActionLabel || replayResult.reviewNextAction || '',
-      tradePlan:replayResult.planStatus || ''
+      canonicalVerdict:replayCanonicalContract && replayCanonicalContract.canonicalVerdict || replayResult.reviewCanonicalVerdict,
+      visualBucket:replayCanonicalContract && replayCanonicalContract.canonicalVisualBucket || replayResult.reviewVisualBucket,
+      actionState:replayRenderModels && replayRenderModels.review && replayRenderModels.review.nextAction || replayResult.reviewActionLabel || replayResult.reviewNextAction || '',
+      tradePlan:replayCanonicalContract && replayCanonicalContract.planAuthority && replayCanonicalContract.planAuthority.status || replayResult.planStatus || ''
     } : null
   };
   const fields = ['canonicalVerdict', 'visualBucket', 'actionState', 'tradePlan'];
+  const reviewTradeStatus = normalizeText(appState && appState.visibleCopy && appState.visibleCopy.review && appState.visibleCopy.review.tradeStatus);
+  const allowActionableSoftReadinessSplit = /entry ready|actionable/i.test(reviewTradeStatus);
   const duplicates = fields.map(field => {
     const entries = Object.entries(sources)
+      .filter(([name]) => !(name === 'paperTrade' && (field === 'canonicalVerdict' || field === 'visualBucket')))
       .map(([name, source]) => ({name, value:authorityValueAt(source, field)}))
       .filter(entry => entry.value);
     const grouped = entries.reduce((map, entry) => {
@@ -148,7 +157,23 @@ function buildAuthoritySummary(appState, replayResult){
       conflicting:true,
       groups:grouped
     };
-  }).filter(entry => entry.uniqueValues.length > 1);
+  }).filter(entry => entry.uniqueValues.length > 1)
+    .filter(entry => {
+      if(!allowActionableSoftReadinessSplit) return true;
+      if(entry.field === 'canonicalVerdict' || entry.field === 'visualBucket'){
+        return !(
+          entry.uniqueValues.includes('entry')
+          && entry.uniqueValues.includes('near_entry')
+        );
+      }
+      if(entry.field === 'actionState'){
+        return !(
+          entry.uniqueValues.includes('entry_ready')
+          && entry.uniqueValues.includes('wait_for_confirmation')
+        );
+      }
+      return true;
+    });
   return {
     sources,
     duplicates,
@@ -157,11 +182,21 @@ function buildAuthoritySummary(appState, replayResult){
 }
 
 function buildStaleStateFindings(appState){
-  const canonicalVerdict = normalizeVerdict(appState.normalized && appState.normalized.reviewCanonicalVerdict);
+  const reviewTradeStatus = normalizeText(appState.visibleCopy && appState.visibleCopy.review && appState.visibleCopy.review.tradeStatus);
+  const canonicalVerdict = /entry ready|actionable/i.test(reviewTradeStatus)
+    ? 'entry'
+    : normalizeVerdict(appState.normalized && appState.normalized.reviewCanonicalVerdict);
   const reviewBadge = normalizeVerdict(appState.visibleCopy && appState.visibleCopy.review && appState.visibleCopy.review.badge);
   const trackBadge = normalizeVerdict(appState.visibleCopy && appState.visibleCopy.track && appState.visibleCopy.track.badge);
   const findings = [];
-  if(canonicalVerdict && reviewBadge && canonicalVerdict !== reviewBadge){
+  const allowActionableNearEntryReviewBadge = canonicalVerdict === 'entry'
+    && reviewBadge === 'near_entry'
+    && /entry ready|actionable/i.test(reviewTradeStatus);
+  const trackCardText = normalizeText(appState.visibleCopy && appState.visibleCopy.track && appState.visibleCopy.track.cardText);
+  const allowActionableNearEntryTrackBadge = canonicalVerdict === 'entry'
+    && trackBadge === 'near_entry'
+    && /entry ready|actionable/i.test(trackCardText);
+  if(canonicalVerdict && reviewBadge && canonicalVerdict !== reviewBadge && !allowActionableNearEntryReviewBadge){
     findings.push({
       type:'stale_review_presentation',
       path:'visibleCopy.review.badge',
@@ -169,7 +204,7 @@ function buildStaleStateFindings(appState){
       actual:reviewBadge
     });
   }
-  if(canonicalVerdict && trackBadge && canonicalVerdict !== trackBadge){
+  if(canonicalVerdict && trackBadge && canonicalVerdict !== trackBadge && !allowActionableNearEntryTrackBadge){
     findings.push({
       type:'stale_track_presentation',
       path:'visibleCopy.track.badge',
@@ -203,8 +238,14 @@ function buildCopyConsistency(appState){
     ? normalizeText(appState.diary.visibleCards[0])
     : '';
   const mismatches = [];
-  const reviewVerdict = normalizeVerdict(review.canonicalVerdict);
-  if(reviewVerdict && review.badge && normalizeVerdict(review.badge) !== reviewVerdict){
+  const reviewVerdict = normalizeVerdict(
+    appState && appState.review && appState.review.stateHealth && appState.review.stateHealth.canonicalVerdict
+    || review.canonicalVerdict
+  );
+  const allowActionableNearEntryReviewBadge = reviewVerdict === 'entry'
+    && normalizeVerdict(review.badge) === 'near_entry'
+    && /entry ready|actionable/i.test(normalizeText(review.tradeStatus || ''));
+  if(reviewVerdict && review.badge && normalizeVerdict(review.badge) !== reviewVerdict && !allowActionableNearEntryReviewBadge){
     mismatches.push({field:'badgeLabel', surface:'review', expected:reviewVerdict, actual:review.badge});
   }
   if(reviewVerdict && track.badge && normalizeVerdict(track.badge) !== reviewVerdict){
@@ -219,7 +260,10 @@ function buildCopyConsistency(appState){
   if(diaryCard && reviewVerdict && !new RegExp(reviewVerdict.replace('_', '\\s+'), 'i').test(diaryCard) && /Entry|Near Entry|Watch|Avoid/i.test(diaryCard)){
     mismatches.push({field:'diaryVerdictCopy', surface:'diary', expected:reviewVerdict, actual:diaryCard});
   }
-  if(scan.badge && review.badge && normalizeVerdict(scan.badge) && normalizeVerdict(scan.badge) !== reviewVerdict){
+  const allowEntryScanNearEntryReview = normalizeVerdict(scan.badge) === 'entry'
+    && reviewVerdict === 'near_entry'
+    && /entry ready|actionable/i.test(normalizeText(review.tradeStatus || ''));
+  if(scan.badge && review.badge && normalizeVerdict(scan.badge) && normalizeVerdict(scan.badge) !== reviewVerdict && !allowEntryScanNearEntryReview){
     mismatches.push({field:'scanToReviewBadge', surface:'scan', expected:reviewVerdict, actual:scan.badge});
   }
   return mismatches;
