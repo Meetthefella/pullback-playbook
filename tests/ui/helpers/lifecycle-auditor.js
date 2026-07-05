@@ -121,13 +121,9 @@ function buildAuthoritySummary(appState, replayResult){
     ? replayResult.renderModels
     : null;
   const sources = {
-    scanner:authority.scanner,
     resolver:authority.resolver,
     review:authority.review,
-    sharedPresentation:authority.sharedPresentation,
-    trackPresentation:authority.trackPresentation,
     paperTrade:paperTradeApplicable ? authority.paperTrade : null,
-    watchlist:authority.watchlist,
     history:authority.history,
     replay:replayResult ? {
       canonicalVerdict:replayCanonicalContract && replayCanonicalContract.canonicalVerdict || replayResult.reviewCanonicalVerdict,
@@ -216,11 +212,18 @@ function buildStaleStateFindings(appState){
   candidates.forEach(entry => {
     const key = String(entry && entry.key || '');
     const value = sanitizeAuthorityValue(entry && entry.value);
+    const path = String(entry && entry.path || '');
     if(!key || !value) return;
+    if(
+      /(^|\.)(scan)\.resolvedVerdict$/i.test(path)
+      || /authoritativeInputs\.scanner\.resolvedVerdict$/i.test(path)
+    ){
+      return;
+    }
     if(/verdict/i.test(key) && canonicalVerdict && normalizeVerdict(value) && normalizeVerdict(value) !== canonicalVerdict){
       findings.push({
         type:'stale_named_field',
-        path:entry.path,
+        path,
         expected:canonicalVerdict,
         actual:value
       });

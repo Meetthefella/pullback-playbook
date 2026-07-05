@@ -4347,10 +4347,17 @@ function currentReviewStateHealthSnapshot(record){
       ) || ''
     ).trim().toLowerCase() || '')
     : '';
+  const authoritativeCanonicalVerdict = normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
+  let authoritativeVisualBucket = normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
+  if(authoritativeCanonicalVerdict === 'entry' && authoritativeVisualBucket !== 'entry'){
+    authoritativeVisualBucket = 'entry';
+  }else if(authoritativeCanonicalVerdict === 'near_entry' && authoritativeVisualBucket === 'monitor'){
+    authoritativeVisualBucket = 'near_entry';
+  }
   const simplifiedCanonicalVerdict = projectionCanonicalVerdict
-    || normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
+    || authoritativeCanonicalVerdict;
   let simplifiedVisualBucket = projectionVisualBucket
-    || normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
+    || authoritativeVisualBucket;
   if(simplifiedCanonicalVerdict === 'entry' && simplifiedVisualBucket !== 'entry'){
     simplifiedVisualBucket = 'entry';
   }else if(simplifiedCanonicalVerdict === 'near_entry' && simplifiedVisualBucket === 'monitor'){
@@ -4373,9 +4380,45 @@ function currentReviewStateHealthSnapshot(record){
       displayedPlan = fallbackDisplayedPlan;
     }
   }
+  const renderModels = buildCanonicalRenderModelsFromRecord(item, {
+    surface:'review',
+    source:'diagnostic_snapshot',
+    reason:'diagnostic_snapshot',
+    derivedStates,
+    effectivePlan,
+    displayedPlan,
+    globalVerdict,
+    lifecycleSnapshot,
+    setupScore:setupScoreForRecord(item)
+  }, item.review && item.review.draft ? item.review.draft : null);
+  const canonicalContract = renderModels && renderModels.contract && typeof renderModels.contract === 'object'
+    ? renderModels.contract
+    : null;
+  const explicitReviewAuthorityInput = !!(
+    item.review && item.review.manualReview
+    || normalizeOptionalGlobalVerdictKey(item.review && item.review.savedVerdict || '')
+  );
+  const contractCanonicalVerdict = normalizeOptionalGlobalVerdictKey(
+    canonicalContract && canonicalContract.canonicalVerdict || ''
+  );
+  const contractVisualBucket = String(
+    canonicalContract && canonicalContract.canonicalVisualBucket || ''
+  ).trim().toLowerCase();
+  const resolvedAuthorityCanonicalVerdict = normalizeGlobalVerdictKey(
+    (explicitReviewAuthorityInput && contractCanonicalVerdict)
+      || authoritativeCanonicalVerdict
+      || 'watch'
+  );
+  const resolvedAuthorityVisualBucket = normalizeVisualBucketForPairing(
+    (explicitReviewAuthorityInput && contractVisualBucket)
+      || authoritativeVisualBucket
+      || resolvedAuthorityCanonicalVerdict,
+    resolvedAuthorityCanonicalVerdict
+  );
   const authoritySimplifiedState = {
     ...effectiveSimplifiedState,
-    canonicalVerdict:simplifiedCanonicalVerdict
+    canonicalVerdict:resolvedAuthorityCanonicalVerdict,
+    visualBucket:resolvedAuthorityVisualBucket
   };
   const planCandidates = collectTradePlanAuthorityCandidates(item);
   const planAuthority = resolveCanonicalTradePlanAuthority({
@@ -4400,7 +4443,7 @@ function currentReviewStateHealthSnapshot(record){
             : (isResolverBlockedEstimatedPlanAuthority(planAuthority)
               ? 'Estimated plan maths are valid, but setup is not actionable.'
               : 'No actionable trade yet.')),
-        rawSourceValue:simplifiedCanonicalVerdict,
+        rawSourceValue:authoritativeCanonicalVerdict,
         sourcePath:'buildReviewSemanticStatus -> resolveCanonicalTradePlanAuthority',
         authorityRank:1,
         resolution:planAuthority.actionable ? 'accepted' : 'suppressed'
@@ -4434,20 +4477,6 @@ function currentReviewStateHealthSnapshot(record){
       }
     }
   };
-  const renderModels = buildCanonicalRenderModelsFromRecord(item, {
-    surface:'review',
-    source:'diagnostic_snapshot',
-    reason:'diagnostic_snapshot',
-    derivedStates,
-    effectivePlan,
-    displayedPlan,
-    globalVerdict,
-    lifecycleSnapshot,
-    setupScore:setupScoreForRecord(item)
-  }, item.review && item.review.draft ? item.review.draft : null);
-  const canonicalContract = renderModels && renderModels.contract && typeof renderModels.contract === 'object'
-    ? renderModels.contract
-    : null;
   const reviewRenderModel = renderModels && renderModels.reviewRenderModel && typeof renderModels.reviewRenderModel === 'object'
     ? renderModels.reviewRenderModel
     : null;
@@ -4459,12 +4488,8 @@ function currentReviewStateHealthSnapshot(record){
       || reviewRenderModel && reviewRenderModel.nextAction
       || ''
     ).trim();
-  const authoritativeCanonicalContract = reviewSnapshotAuthority && canonicalContract
-    ? {
-      ...safeDiagnosticClone(canonicalContract, {}),
-      canonicalVerdict:simplifiedCanonicalVerdict || canonicalContract.canonicalVerdict,
-      canonicalVisualBucket:simplifiedVisualBucket || canonicalContract.canonicalVisualBucket
-    }
+  const authoritativeCanonicalContract = canonicalContract
+    ? safeDiagnosticClone(canonicalContract, {})
     : canonicalContract;
   const authoritativeReviewRenderModel = reviewSnapshotAuthority && reviewRenderModel
     ? {
@@ -4515,14 +4540,12 @@ function currentReviewStateHealthSnapshot(record){
   const persistenceInputDivergence = canonicalPersistenceInputDivergence(item, authoritativeCanonicalContract);
   const canonicalHealthVerdict = normalizeGlobalVerdictKey(
     authoritativeCanonicalContract && authoritativeCanonicalContract.canonicalVerdict
-    || authoritativeReviewRenderModel && authoritativeReviewRenderModel.canonicalVerdict
-    || simplifiedCanonicalVerdict
+    || authoritativeCanonicalVerdict
     || 'watch'
   );
   const canonicalHealthVisualBucket = normalizeVisualBucketForPairing(
     authoritativeCanonicalContract && authoritativeCanonicalContract.canonicalVisualBucket
-    || authoritativeReviewRenderModel && authoritativeReviewRenderModel.visualBucket
-    || simplifiedVisualBucket
+    || authoritativeVisualBucket
     || canonicalHealthVerdict,
     canonicalHealthVerdict
   );
@@ -4612,8 +4635,8 @@ function currentReviewStateHealthSnapshot(record){
     resolvedRR:plannedRr != null ? plannedRr : (fallbackDisplayedPlanRr != null ? fallbackDisplayedPlanRr : simplifiedResolvedRr),
     resolverRR:simplifiedResolvedRr,
     plannedRR:plannedRr != null ? plannedRr : fallbackDisplayedPlanRr,
-    entryGatePass:planAuthority.actionable === true ? true : (authoritativeEntryPresentation ? true : (effectiveSimplifiedState.entryGatePass === true)),
-    nearEntryGatePass:authoritativeEntryPresentation || authoritativeNearEntryPresentation ? true : (effectiveSimplifiedState.nearEntryGatePass === true),
+    entryGatePass:planAuthority.actionable === true ? true : (effectiveSimplifiedState.entryGatePass === true),
+    nearEntryGatePass:effectiveSimplifiedState.nearEntryGatePass === true,
     primaryBlockerReason:authoritativeEntryPresentation
       ? ''
       : String(effectiveSimplifiedState.mainBlocker || ''),
@@ -21162,18 +21185,74 @@ function diagnosticWatchlistDebugSnapshot(record, options = {}){
 }
 
 function authoritativeScanSurfaceSnapshot(record){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const hasSharedAuthorityInputs = !!(
+    item.review && item.review.manualReview
+    || normalizeOptionalGlobalVerdictKey(item.review && item.review.savedVerdict || '')
+    || item.watchlist && item.watchlist.inWatchlist === true
+    || item.lifecycle && (
+      String(item.lifecycle.stage || '').trim()
+      || String(item.lifecycle.status || '').trim()
+      || String(item.lifecycle.state || '').trim()
+    )
+    || item.plan && String(item.plan.submittedPaperTradeAt || '').trim()
+  );
+  const cachedBundle = item && item.resolvedStateBundleCache && typeof item.resolvedStateBundleCache === 'object'
+    ? item.resolvedStateBundleCache
+    : null;
+  const cachedBundleContext = cachedBundle
+    ? {
+      surface:String(cachedBundle.sourceSurface || cachedBundle.source || 'track'),
+      source:String(cachedBundle.source || 'track'),
+      reason:String(cachedBundle.reason || cachedBundle.source || 'track')
+    }
+    : null;
+  const cachedBundleValid = !!(
+    cachedBundle
+    && cachedBundleContext
+    && resolvedStateBundleCacheMatchesRecord(item, cachedBundle, cachedBundleContext)
+  );
+  const cachedCanonicalVerdict = normalizeOptionalGlobalVerdictKey(
+    cachedBundleValid && cachedBundle && cachedBundle.canonicalContract && (
+      cachedBundle.canonicalContract.canonicalVerdictKey
+      || cachedBundle.canonicalContract.planVerdictContract && cachedBundle.canonicalContract.planVerdictContract.canonicalVerdict
+    ) || ''
+  );
+  const sharedBundle = !cachedCanonicalVerdict && hasSharedAuthorityInputs
+    ? buildResolvedStateBundleFromRecord(cloneData(item), {
+      source:'scan_surface_authority',
+      sourceSurface:'review',
+      reason:'scan_surface_authority'
+    })
+    : null;
+  const sharedBundleCanonicalVerdict = normalizeOptionalGlobalVerdictKey(
+    sharedBundle && sharedBundle.canonicalContract && (
+      sharedBundle.canonicalContract.canonicalVerdictKey
+      || sharedBundle.canonicalContract.planVerdictContract && sharedBundle.canonicalContract.planVerdictContract.canonicalVerdict
+    ) || ''
+  );
   const runtimeVerdictLabel = currentRuntimeVerdictForRecord(record);
-  const contract = buildCanonicalPlanVerdictContract(record, {
+  const contract = buildCanonicalPlanVerdictContract(item, {
     surface:'scan',
     source:'scan_surface_authority',
     reason:'scan_surface_authority'
   });
-  const canonicalVerdict = normalizeGlobalVerdictKey(runtimeVerdictLabel || '');
+  const canonicalVerdict = cachedCanonicalVerdict
+    || sharedBundleCanonicalVerdict
+    || normalizeGlobalVerdictKey(runtimeVerdictLabel || '');
   if(!canonicalVerdict) return null;
   const score = currentRuntimeScoreForRecord(record);
-  const summary = currentRuntimeSummaryForRecord(record);
+  const summary = String(
+    sharedBundle && sharedBundle.canonicalContract && sharedBundle.canonicalContract.reason
+    || sharedBundle && sharedBundle.globalVerdict && sharedBundle.globalVerdict.reason
+    || cachedBundleValid && cachedBundle && cachedBundle.canonicalContract && cachedBundle.canonicalContract.reason
+    || cachedBundleValid && cachedBundle && cachedBundle.globalVerdict && cachedBundle.globalVerdict.reason
+    || currentRuntimeSummaryForRecord(record)
+    || ''
+  ).trim();
   const visualBucket = normalizeVisualBucketForPairing(
-    (canonicalVerdict === 'watch'
+    (sharedBundle && sharedBundle.canonicalContract && sharedBundle.canonicalContract.bucket)
+    || (canonicalVerdict === 'watch'
       ? (contract && contract.canonicalVisualBucket)
       : '')
     || (canonicalVerdict === 'dead' ? 'avoid' : canonicalVerdict),

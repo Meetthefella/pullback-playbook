@@ -579,6 +579,11 @@
 
       const deps = mergeDeps(options);
       const item = record && typeof record === 'object' ? record : {};
+      const reviewState = item.review && typeof item.review === 'object' ? item.review : {};
+      const explicitReviewAuthorityInput = !!(
+        (reviewState.manualReview && typeof reviewState.manualReview === 'object')
+        || String(reviewState.savedVerdict || '').trim()
+      );
       const effectivePlan = typeof deps.effectivePlanForRecord === 'function'
         ? deps.effectivePlanForRecord(item, {allowScannerFallback:true})
         : fallbackEffectivePlan(item);
@@ -593,7 +598,10 @@
       const validation = global.SimplifiedPlanState.validateCurrentPlan(item, planState, {derivedStates, deps});
       const resolverDeps = {
         ...deps,
-        preserveReviewCanonicalForSoftReadiness:surface === 'review',
+        // Surface alone must not grant stronger authority. Only explicit
+        // review-authority inputs in the record may preserve review-side
+        // soft-readiness semantics.
+        preserveReviewCanonicalForSoftReadiness:surface === 'review' && explicitReviewAuthorityInput,
         analysisDerivedStatesFromRecord:() => derivedStates,
         effectivePlanForRecord:() => effectivePlan,
         deriveCurrentPlanState:() => planState,
@@ -614,10 +622,15 @@
       };
       const resolvedState = global.ResolverCore.resolveGlobalVerdict(item, resolverDeps);
       const basePresentationContract = resolverDeps.resolveFinalStateContract(item, {context:surface, derivedStates, displayedPlan:planState});
+      const preferExplicitReviewCanonical = surface === 'review'
+        && explicitReviewAuthorityInput
+        && resolvedState
+        && resolvedState.canonical_soft_readiness_alignment_applied === true;
       const canonicalPresentationVerdict = (resolvedState && (
-        resolvedState.canonical_final_verdict
+        (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')
         || resolvedState.final_verdict_rendered
         || resolvedState.final_verdict
+        || resolvedState.canonical_final_verdict
       )) || 'watch';
       const resolvedVerdictLabel = global.ResolverCore.globalVerdictLabel
         ? global.ResolverCore.globalVerdictLabel(canonicalPresentationVerdict)
@@ -626,14 +639,16 @@
         ...(basePresentationContract && typeof basePresentationContract === 'object' ? basePresentationContract : {}),
         finalVerdict:resolvedVerdictLabel,
         final_verdict:(resolvedState && (
-          resolvedState.canonical_final_verdict
+          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')
           || resolvedState.final_verdict_rendered
           || resolvedState.final_verdict
+          || resolvedState.canonical_final_verdict
         )) || 'watch',
         final_verdict_rendered:(resolvedState && (
-          resolvedState.canonical_final_verdict
+          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')
           || resolvedState.final_verdict_rendered
           || resolvedState.final_verdict
+          || resolvedState.canonical_final_verdict
         )) || 'watch',
         planStatusKey:(basePresentationContract && basePresentationContract.planStatusKey) || planState.status || 'missing',
         blockerReason:(resolvedState && (resolvedState.main_blocker || resolvedState.reason)) || (basePresentationContract && basePresentationContract.blockerReason) || '',
@@ -641,7 +656,12 @@
       };
       const presentationResolvedState = {
         ...(resolvedState && typeof resolvedState === 'object' ? resolvedState : {}),
-        canonical_final_verdict:(resolvedState && resolvedState.canonical_final_verdict) || presentationContract.canonical_final_verdict || presentationContract.final_verdict,
+        canonical_final_verdict:(resolvedState && (
+          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')
+          || resolvedState.final_verdict_rendered
+          || resolvedState.final_verdict
+          || resolvedState.canonical_final_verdict
+        )) || presentationContract.canonical_final_verdict || presentationContract.final_verdict,
         canonical_visual_bucket:(resolvedState && resolvedState.canonical_visual_bucket) || presentationContract.canonical_visual_bucket || presentationContract.final_verdict,
         canonical_priceability_state:(resolvedState && resolvedState.canonical_priceability_state) || presentationContract.canonical_priceability_state || '',
         canonical_soft_readiness_alignment_applied:resolvedState && resolvedState.canonical_soft_readiness_alignment_applied === true

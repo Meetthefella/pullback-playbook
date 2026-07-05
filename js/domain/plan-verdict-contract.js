@@ -115,6 +115,13 @@
     return 'monitor';
   }
 
+  function normalizeVisualBucket(value, canonicalVerdict = 'watch'){
+    const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+    if(['entry', 'near_entry', 'avoid', 'monitor', 'diminishing'].includes(safe)) return safe;
+    if(safe === 'watch') return visualBucketForVerdict(canonicalVerdict);
+    return visualBucketForVerdict(canonicalVerdict);
+  }
+
   function verdictLabel(value){
     const verdict = normalizeVerdict(value);
     if(verdict === 'entry') return 'Entry';
@@ -169,6 +176,14 @@
     const globalVerdict = safeObject(context.globalVerdict);
     const savedReviewVerdict = normalizeOptionalVerdict(inputs.reviewAuthority.savedVerdict);
     const manualReviewVerdict = normalizeOptionalVerdict(inputs.reviewAuthority.manualVerdict);
+    const explicitReviewAuthority = !!(
+      (inputs.reviewAuthority.manualReview && typeof inputs.reviewAuthority.manualReview === 'object')
+      || savedReviewVerdict
+    );
+    const preferReviewCanonicalSoftReadiness = explicitReviewAuthority && (
+      resolvedContract.canonical_soft_readiness_alignment_applied === true
+      || globalVerdict.canonical_soft_readiness_alignment_applied === true
+    );
     const explicitSavedDowngrade = savedReviewVerdict && savedReviewVerdict !== 'entry'
       ? savedReviewVerdict
       : (manualReviewVerdict && manualReviewVerdict !== 'entry'
@@ -177,14 +192,20 @@
     return normalizeVerdict(
       explicitSavedDowngrade
       ||
-      resolvedContract.canonical_final_verdict
+      (preferReviewCanonicalSoftReadiness
+        ? (
+          resolvedContract.canonical_final_verdict
+          || globalVerdict.canonical_final_verdict
+        )
+        : '')
       || resolvedContract.final_verdict_rendered
       || resolvedContract.final_verdict
       || resolvedContract.finalVerdict
-      || globalVerdict.canonical_final_verdict
+      || resolvedContract.canonical_final_verdict
       || globalVerdict.final_verdict_rendered
       || globalVerdict.final_verdict
       || globalVerdict.finalVerdict
+      || globalVerdict.canonical_final_verdict
       || savedReviewVerdict
       || manualReviewVerdict
       || inputs.scanner.resolvedVerdict
@@ -199,12 +220,13 @@
     if(['entry', 'near_entry', 'avoid'].includes(verdictBucket)){
       return verdictBucket;
     }
-    return visualBucketForVerdict(
+    return normalizeVisualBucket(
       resolvedContract.canonical_visual_bucket
       || visualState.visualBucket
       || visualState.presentationBucket
       || visualState.bucket
-      || verdictBucket
+      || verdictBucket,
+      canonicalVerdict
     );
   }
 
