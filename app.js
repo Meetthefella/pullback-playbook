@@ -4188,13 +4188,19 @@ function reviewProjectionCanDriveEntryDisplay(snapshot, projectionSource, record
   );
   if(verdict !== 'entry') return false;
   if(allowPersistedDisplayEntry) return true;
-  const baselineReviewState = withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(item, 'review', {
-    log:false,
+  const canonicalBundle = withReviewProjectionSuppressed(() => buildCanonicalRenderModelsFromRecord(item, {
+    surface:'review',
     source:'projection_authority_validation',
-    mutationSource:'projection_authority_validation'
+    reason:'projection_authority_validation'
   })) || {};
-  const baselineVerdict = normalizeGlobalVerdictKey(baselineReviewState.canonicalVerdict || '');
-  if(baselineVerdict !== 'entry') return false;
+  const baselineContractVerdict = normalizeGlobalVerdictKey(
+    canonicalBundle.contract && canonicalBundle.contract.canonicalVerdict || ''
+  );
+  const baselineReviewVerdict = normalizeGlobalVerdictKey(
+    canonicalBundle.reviewRenderModel && canonicalBundle.reviewRenderModel.canonicalVerdict || ''
+  );
+  if(baselineContractVerdict !== 'entry') return false;
+  if(baselineReviewVerdict && baselineReviewVerdict !== 'entry') return false;
   return true;
 }
 
