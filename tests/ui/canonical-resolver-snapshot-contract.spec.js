@@ -783,7 +783,7 @@ test('visible Paper Trade stays disabled when Entry presentation lacks actionabl
   expect(result.reason, 'disabled Paper Trade should keep the canonical authority blocker visible').toContain('resolver still blocks Entry');
 });
 
-test('clicked Review Entry presentation cannot make Paper Trade plan authority actionable', async ({page}) => {
+test('clicked Review Entry projection collapses to live non-entry authority before Paper Trade evaluation', async ({page}) => {
   await bootApp(page);
   await seedCanonicalWatchWithValidPlan(page);
 
@@ -857,7 +857,7 @@ test('clicked Review Entry presentation cannot make Paper Trade plan authority a
     }
   });
 
-  expect(result.tradeStatus, 'Review may still display the clicked Entry presentation').toContain('Entry Ready');
+  expect(result.tradeStatus, 'Review must collapse stale clicked Entry presentation back to live authority').toContain('Near Entry');
   expect(result.reviewAuthority && result.reviewAuthority.actionable, 'visible Paper Trade authority must use live resolver verdict, not clicked Entry').toBe(false);
   expect(result.reviewAuthority && result.reviewAuthority.reasonCode, 'projection Entry must not satisfy Paper Trade authority').toBe('verdict_not_entry');
   expect(result.buttonDisabled, 'visible Paper Trade button must remain disabled').toBe(true);
