@@ -9722,6 +9722,16 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       || ''
     )
     : '';
+  const projectionVisualBucket = projectionAuthority
+    ? normalizeBucket(
+      effectiveProjectionSnapshot.sourceOfTruthVisualBucket
+      || effectiveProjectionSnapshot.visualBucket
+      || effectiveProjectionSnapshot.renderedBucket
+      || projectionCanonicalVerdict
+      || '',
+      projectionCanonicalVerdict || 'watch'
+    )
+    : '';
   const projectionActionGuidance = projectionAuthority
     ? String(
       effectiveProjectionSnapshot.actionGuidance
@@ -9849,16 +9859,25 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       || ['broken','failed'].includes(structureState)
     )
   );
+  const contractCanonicalVerdict = normalizeVerdictKey(
+    trackRenderModel && trackRenderModel.canonicalVerdict
+    || canonicalVerdict
+    || 'watch'
+  );
+  const contractVisualBucket = normalizeBucket(
+    trackRenderModel && (trackRenderModel.visibleBucket || trackRenderModel.visualBucket)
+    || simplifiedState.visualBucket
+    || simplifiedState.presentationBucket
+    || contractCanonicalVerdict,
+    contractCanonicalVerdict
+  );
   const effectiveCanonicalVerdict = softTrackedWatchSuppression
     ? 'watch'
-    : (preserveTrackedLifecycleCanonicalVerdict
-      ? lifecycleVerdict
-      : normalizeVerdictKey(
-    projectionCanonicalVerdict
-    || (trackRenderModel && trackRenderModel.canonicalVerdict
-      ? trackRenderModel.canonicalVerdict
-      : canonicalVerdict)
-  ));
+    : (projectionCanonicalVerdict
+      ? projectionCanonicalVerdict
+      : (preserveTrackedLifecycleCanonicalVerdict
+        ? lifecycleVerdict
+        : contractCanonicalVerdict));
   const visibleModel = resolveTrackVisibleModelSafe(item, {
     ...simplifiedState,
     canonicalVerdict:effectiveCanonicalVerdict,
@@ -9874,35 +9893,34 @@ function buildSharedReviewTrackPresentation(record, options = {}){
         : (softTrackedWatchSuppression ? 'diminishing' : simplifiedState.tone))
   });
   const visualBucket = normalizeBucket(
-    (effectiveCanonicalVerdict === 'entry'
-      ? 'entry'
-      : (effectiveCanonicalVerdict === 'near_entry'
-        ? 'near_entry'
-        : (softTrackedWatchSuppression ? 'diminishing' : '')))
-    || (trackRenderModel && (trackRenderModel.visibleBucket || trackRenderModel.visualBucket))
-    || visibleModel.visibleBucket
-    || simplifiedState.visualBucket
-    || simplifiedState.presentationBucket
-    || 'monitor'
+    softTrackedWatchSuppression
+      ? 'diminishing'
+      : (projectionVisualBucket
+        || (preserveTrackedLifecycleCanonicalVerdict
+          ? (lifecycleVerdict === 'entry'
+            ? 'entry'
+            : (lifecycleVerdict === 'near_entry' ? 'near_entry' : contractVisualBucket))
+          : contractVisualBucket)
+        || visibleModel.visibleBucket
+        || simplifiedState.visualBucket
+        || simplifiedState.presentationBucket
+        || 'monitor'),
+    effectiveCanonicalVerdict
   );
-  const tone = String(
-    (trackRenderModel && trackRenderModel.tone)
-    || visibleModel.tone
-    || simplifiedState.tone
-    || visualBucket
-    || 'monitor'
-  ).trim().toLowerCase() || 'monitor';
+  const tone = normalizeBucket(visualBucket || 'monitor', effectiveCanonicalVerdict);
   const headline = String(projectionAuthority
     ? 'Entry Ready'
     : preserveTrackedLifecycleCanonicalVerdict
       ? verdictLabel(effectiveCanonicalVerdict || 'watch')
     : (
-      (trackRenderModel && (trackRenderModel.headline || trackRenderModel.statusText))
+      (trackRenderModel
+        && normalizeVerdictKey(trackRenderModel.canonicalVerdict || '') === effectiveCanonicalVerdict
+        && (trackRenderModel.headline || trackRenderModel.statusText))
       || (effectiveCanonicalVerdict === 'entry'
         ? 'Entry Ready'
         : (effectiveCanonicalVerdict === 'near_entry'
           ? 'Near Entry'
-          : String(visibleModel.headline || visibleModel.badgeLabel || verdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))
+          : verdictLabel(effectiveCanonicalVerdict || 'watch')))
     )
   ).trim();
   const nextAction = String(
@@ -9939,12 +9957,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       : preserveTrackedLifecycleCanonicalVerdict
         ? verdictLabel(effectiveCanonicalVerdict || 'watch')
       : (
-        (trackRenderModel && trackRenderModel.badgeLabel)
-        || (effectiveCanonicalVerdict === 'entry'
-          ? 'Entry'
-          : (effectiveCanonicalVerdict === 'near_entry'
-            ? 'Near Entry'
-            : String(visibleModel.badgeLabel || simplifiedState.badgeLabel || verdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim()))
+        verdictLabel(effectiveCanonicalVerdict || 'watch')
       )
     ).trim(),
     actionLabel:String(
@@ -10309,35 +10322,48 @@ function buildSharedReviewTrackPresentation(record, options = {}){
 
 function persistedTrackVisibleModelFromPresentation(presentation = {}){
   const canonicalVerdict = normalizeGlobalVerdictKey(presentation.canonicalVerdict || presentation.finalVerdict || 'watch');
+  const visibleBucket = normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor', canonicalVerdict);
+  const persistedHeadline = String(presentation.headline || presentation.statusText || '').trim();
+  const persistedHeadlineVerdict = normalizeGlobalVerdictKey(reviewVerdictOverrideFromLabel(persistedHeadline) || '');
+  const headline = persistedHeadline && (
+    !persistedHeadlineVerdict
+    || persistedHeadlineVerdict === canonicalVerdict
+  )
+    ? persistedHeadline
+    : presentationStatusLabelForVerdict(canonicalVerdict);
   return {
     canonicalVerdict,
     setupScore:Number.isFinite(Number(presentation.setupScore)) ? Number(presentation.setupScore) : null,
     planVisible:presentation.planVisible === true,
     planStatus:String(presentation.planStatus || '').trim().toLowerCase() || 'missing',
     mainBlocker:String(presentation.mainBlocker || '').trim(),
-    visibleBucket:normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor'),
-    tone:String(presentation.tone || presentation.visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
-    badgeLabel:String(presentation.badgeLabel || globalVerdictLabel(canonicalVerdict || 'watch') || 'Watch').trim(),
-    headline:String(presentation.headline || presentation.statusText || '').trim(),
+    visibleBucket,
+    tone:visibleBucket,
+    badgeLabel:String(verdictPresentationLabelForKey(canonicalVerdict || 'watch') || 'Watch').trim(),
+    headline,
     primaryReason:String(presentation.primaryReason || presentation.mainBlocker || '').trim(),
     nextAction:String(presentation.nextAction || '').trim(),
     planSummary:String(presentation.planSummary || '').trim(),
-    lowerPriority:normalizeVisualBucketForPairing(presentation.visualBucket || '') === 'diminishing',
-    internalVisualBucket:normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor')
+    lowerPriority:visibleBucket === 'diminishing',
+    internalVisualBucket:visibleBucket
   };
 }
 
 function persistedWatchlistVisualStateFromPresentation(presentation = {}){
   const canonicalVerdict = normalizeGlobalVerdictKey(presentation.canonicalVerdict || presentation.finalVerdict || 'watch');
-  const visualBucket = normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor');
-  const tone = String(presentation.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const visualBucket = normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor', canonicalVerdict);
+  const tone = normalizeVisualBucketForPairing(visualBucket || 'monitor', canonicalVerdict);
   const badgeClass = simplifiedVisualBadgeClass(visualBucket);
   const cardClass = simplifiedVisualCardClass(visualBucket);
-  const visualStateKey = canonicalVerdict === 'entry'
-    ? 'entry'
-    : (canonicalVerdict === 'near_entry'
-      ? 'near_entry'
-      : (canonicalVerdict === 'avoid' ? 'avoid' : 'watch'));
+  const visualStateKey = presentationVisualStateForVerdict(canonicalVerdict);
+  const persistedHeadline = String(presentation.headline || presentation.statusText || '').trim();
+  const persistedHeadlineVerdict = normalizeGlobalVerdictKey(reviewVerdictOverrideFromLabel(persistedHeadline) || '');
+  const decisionSummary = persistedHeadline && (
+    !persistedHeadlineVerdict
+    || persistedHeadlineVerdict === canonicalVerdict
+  )
+    ? persistedHeadline
+    : presentationStatusLabelForVerdict(canonicalVerdict);
   const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
   return {
     state:visualStateKey,
@@ -10356,10 +10382,10 @@ function persistedWatchlistVisualStateFromPresentation(presentation = {}){
     toneClass:className,
     styleAttr:'',
     badge:{
-      text:String(presentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch'),
+      text:String(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch'),
       className:badgeClass
     },
-    decision_summary:String(presentation.headline || '').trim(),
+    decision_summary:decisionSummary,
     watchlist_presentation_source:String(presentation.sourceOfTruth || 'watchlist_persisted_presentation'),
     simplifiedTrackCard:true
   };
@@ -15320,11 +15346,7 @@ function renderWatchlistCardElement(record, options = {}){
   const tone = String(trackVisibleModel.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor';
   const badgeClass = simplifiedVisualBadgeClass(visualBucket);
   const cardClass = simplifiedVisualCardClass(visualBucket);
-  const visualStateKey = canonicalVerdict === 'entry'
-    ? 'entry'
-    : (canonicalVerdict === 'near_entry'
-      ? 'near_entry'
-      : (canonicalVerdict === 'avoid' ? 'avoid' : 'watch'));
+  const visualStateKey = presentationVisualStateForVerdict(canonicalVerdict);
   const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
   const trackAuthoritativeState = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
   const watchlistVisualState = persistedWatchlistVisualStateFromPresentation(sharedPresentation);
@@ -18575,7 +18597,14 @@ function renderCompactResultCardFromView(view){
     source:'scan_render',
     mutationSource:'scan_render'
   });
-  const canonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
+  const authoritativeScan = typeof authoritativeScanSurfaceSnapshot === 'function'
+    ? authoritativeScanSurfaceSnapshot(item)
+    : null;
+  const canonicalVerdict = normalizeGlobalVerdictKey(
+    authoritativeScan && authoritativeScan.canonicalVerdict
+    || simplifiedState.canonicalVerdict
+    || 'watch'
+  );
   const scanPresentation = view && view.scanPresentation
     ? view.scanPresentation
     : scanPresentationForView({
@@ -18594,19 +18623,39 @@ function renderCompactResultCardFromView(view){
     ? {
       ...scanPresentation,
       canonicalVerdict,
-      visualBucket:String(simplifiedState.visualBucket || scanPresentation.visualBucket || 'monitor').trim().toLowerCase() || 'monitor',
-      presentationBucket:String(simplifiedState.visualBucket || scanPresentation.presentationBucket || 'monitor').trim().toLowerCase() || 'monitor',
-      tone:resolveScanCardTone(
-        scanPresentation,
-        simplifiedState,
-        simplifiedState.visualBucket || scanPresentation.presentationBucket || scanPresentation.visualBucket || 'monitor'
+      visualBucket:String(
+        authoritativeScan && authoritativeScan.visualBucket
+        || simplifiedState.visualBucket
+        || scanPresentation.visualBucket
+        || 'monitor'
+      ).trim().toLowerCase() || 'monitor',
+      presentationBucket:String(
+        authoritativeScan && authoritativeScan.visualBucket
+        || simplifiedState.visualBucket
+        || scanPresentation.presentationBucket
+        || 'monitor'
+      ).trim().toLowerCase() || 'monitor',
+      tone:normalizeVisualBucketForPairing(
+        authoritativeScan && authoritativeScan.visualBucket
+        || simplifiedState.visualBucket
+        || scanPresentation.presentationBucket
+        || scanPresentation.visualBucket
+        || 'monitor',
+        canonicalVerdict
       ),
-      badgeLabel:String(simplifiedState.badgeLabel || scanPresentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch').trim(),
+      badgeLabel:String(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch').trim(),
       summary:String(simplifiedState.mainBlocker || simplifiedState.actionLabel || scanPresentation.summary || '').trim()
     }
     : scanPresentation;
-  const visualBucket = normalizeVisualBucketForPairing(simplifiedState.visualBucket || effectiveScanPresentation.presentationBucket || 'monitor');
-  const tone = resolveScanCardTone(effectiveScanPresentation, simplifiedState, visualBucket || 'monitor');
+  const visualBucket = normalizeVisualBucketForPairing(
+    authoritativeScan && authoritativeScan.visualBucket
+    || effectiveScanPresentation.presentationBucket
+    || effectiveScanPresentation.visualBucket
+    || simplifiedState.visualBucket
+    || 'monitor',
+    canonicalVerdict
+  );
+  const tone = normalizeVisualBucketForPairing(visualBucket || 'monitor', canonicalVerdict);
   const badgeClass = simplifiedVisualBadgeClass(visualBucket);
   const cardClass = simplifiedVisualCardClass(visualBucket);
   const scanLegacyState = view && view.globalVerdict && typeof view.globalVerdict === 'object'
@@ -18639,13 +18688,7 @@ function renderCompactResultCardFromView(view){
     'priceabilityState',
     'bounceState'
   ]);
-  const visualStateKey = visualBucket === 'avoid'
-    ? 'avoid'
-    : (canonicalVerdict === 'entry'
-    ? 'entry'
-    : (canonicalVerdict === 'near_entry'
-      ? 'near_entry'
-      : (canonicalVerdict === 'avoid' ? 'avoid' : 'watch')));
+  const visualStateKey = presentationVisualStateForVerdict(canonicalVerdict);
   const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
   const sourceVerdict = globalVerdictLabel(canonicalVerdict);
   const scoreLabel = view && view.setupScoreDisplay ? view.setupScoreDisplay : 'Setup --/10';
@@ -18657,7 +18700,7 @@ function renderCompactResultCardFromView(view){
     canonicalVerdict,
     visualBucket,
     tone,
-    badgeLabel:simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel,
+    badgeLabel:verdictPresentationLabelForKey(canonicalVerdict),
     actionLabel:simplifiedState.actionLabel,
     planVisible:simplifiedState.planVisible,
     planStatus:simplifiedState.planStatus,
@@ -18757,7 +18800,7 @@ function renderCompactResultCardFromView(view){
     fromResolvedStateBundleCache:false,
     fromFreshResolverOutput:true
   });
-  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(className)}" style="" data-visual-tone="${escapeHtml(tone)}" data-visual-state="${escapeHtml(visualStateKey)}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch')}</span><span class="score visual-score scan-card__score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="scan-card__body"><div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div></div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
+  return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(className)}" style="" data-visual-tone="${escapeHtml(tone)}" data-visual-state="${escapeHtml(visualStateKey)}" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(badgeClass)}">${escapeHtml(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch')}</span><span class="score visual-score scan-card__score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="scan-card__company tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div><div class="scan-card__body"><div class="scan-card__technical tiny">${escapeHtml(technicalSummary)}</div><div class="scan-card__decision resultreason decision-summary">${escapeHtml(decisionSummary)}</div></div><div class="scan-card__footer"><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button></div>${secondaryUiMarkup}</div>`;
 }
 
 function scanCardSummaryForView(view){
@@ -21286,6 +21329,20 @@ function verdictPresentationLabelForKey(key){
   if(normalized === 'avoid') return 'Avoid';
   if(normalized === 'dead') return 'Dead';
   return 'Watch';
+}
+
+function presentationStatusLabelForVerdict(key){
+  const normalized = normalizeGlobalVerdictKey(key);
+  if(normalized === 'entry') return 'Entry Ready';
+  return verdictPresentationLabelForKey(normalized);
+}
+
+function presentationVisualStateForVerdict(key){
+  const normalized = normalizeGlobalVerdictKey(key);
+  if(normalized === 'entry') return 'entry';
+  if(normalized === 'near_entry') return 'near_entry';
+  if(normalized === 'avoid') return 'avoid';
+  return 'watch';
 }
 
 function debugStateLabel(value, options = {}){
@@ -40357,20 +40414,22 @@ function renderScannerResults(){
         card.innerHTML = renderCompactResultCardFromView(view);
         const node = card.firstElementChild;
         if(!node) return;
-        const canonicalScanState = view && view.simplifiedState && typeof view.simplifiedState === 'object'
-          ? view.simplifiedState
-          : null;
+        const canonicalScanState = typeof authoritativeScanSurfaceSnapshot === 'function'
+          ? authoritativeScanSurfaceSnapshot(view.item)
+          : (view && view.simplifiedState && typeof view.simplifiedState === 'object'
+            ? view.simplifiedState
+            : null);
         if(canonicalScanState){
           const canonicalVerdict = normalizeGlobalVerdictKey(canonicalScanState.canonicalVerdict || 'watch');
-          const canonicalBucket = normalizeVisualBucketForPairing(canonicalScanState.visualBucket || 'monitor');
-          const canonicalTone = String(canonicalBucket || canonicalScanState.tone || 'monitor').trim().toLowerCase() || 'monitor';
+          const canonicalBucket = normalizeVisualBucketForPairing(canonicalScanState.visualBucket || 'monitor', canonicalVerdict);
+          const canonicalTone = String(canonicalBucket || 'monitor').trim().toLowerCase() || 'monitor';
           const badgeNode = node.querySelector('.badge.state-pill');
           if(badgeNode){
-            badgeNode.textContent = String(canonicalScanState.badgeLabel || globalVerdictLabel(canonicalVerdict) || 'Watch').trim();
+            badgeNode.textContent = String(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch').trim();
             badgeNode.className = `badge state-pill ${simplifiedVisualBadgeClass(canonicalBucket)}`;
           }
           node.setAttribute('data-visual-tone', canonicalTone);
-          node.setAttribute('data-visual-state', canonicalVerdict === 'avoid' ? 'avoid' : (canonicalVerdict || 'watch'));
+          node.setAttribute('data-visual-state', presentationVisualStateForVerdict(canonicalVerdict));
         }
         const ticker = view.ticker;
         const sourceVerdict = node.getAttribute('data-source-verdict') || '';
@@ -44155,13 +44214,7 @@ function renderReviewWorkspace(options = {}){
   const reviewVisualTone = accepted50MaSupportTestDisplay && finalReviewVisualBucket === 'monitor'
     ? 'monitor'
     : (simplifiedTone || finalReviewVisualBucket);
-  const finalReviewVisualState = finalReviewVisualBucket === 'near_entry'
-    ? 'near_entry'
-    : (finalReviewVisualBucket === 'entry'
-      ? 'entry'
-      : (finalReviewVisualBucket === 'avoid'
-        ? 'avoid'
-        : (finalReviewVisualBucket === 'diminishing' ? 'diminishing' : 'monitor')));
+  const finalReviewVisualState = presentationVisualStateForVerdict(resolvedReviewFinalVerdictKey || 'watch');
   const reviewBucketAfterFallback = finalReviewVisualBucket;
   const reviewOuterBorderTone = reviewVisualTone;
   const reviewAccentClass = reviewVisualTone === 'diminishing'
@@ -44811,13 +44864,11 @@ function renderReviewWorkspace(options = {}){
       ? canonicalReviewPresentation.visualBucket
       : finalReviewVisualBucket
   );
-  const renderPresentationVisualState = renderPresentationVisualBucket === 'near_entry'
-    ? 'near_entry'
-    : (renderPresentationVisualBucket === 'entry'
-      ? 'entry'
-      : (renderPresentationVisualBucket === 'avoid'
-        ? 'avoid'
-        : (renderPresentationVisualBucket === 'diminishing' ? 'diminishing' : 'monitor')));
+  const renderPresentationVisualState = presentationVisualStateForVerdict(
+    canonicalReviewPresentation && canonicalReviewPresentation.canonicalVerdict
+      ? canonicalReviewPresentation.canonicalVerdict
+      : effectiveReviewPresentationState
+  );
   const renderPresentationTone = String(
     canonicalReviewPresentation && canonicalReviewPresentation.tone
       ? canonicalReviewPresentation.tone

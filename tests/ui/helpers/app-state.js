@@ -691,7 +691,7 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     const reviewProjectionSource = effectiveProjectionSnapshot
       ? String((activeProjectionSnapshot && uiStateRef && uiStateRef.activeReviewProjectionSource) || 'clicked_card_snapshot')
       : '';
-    const reviewShell = document.querySelector('#reviewWorkspace .reviewworkspace-shell');
+    const reviewShell = document.querySelector('#reviewWorkspace .reviewworkspace');
     const activeTrackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
     const activeTrackEntryPanel = activeTrackCard && activeTrackCard.querySelector('.entry-conditions-panel');
     const diaryEntries = Array.isArray(stateRef.tradeDiary)
@@ -783,6 +783,8 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
           mainBlocker:String(scanRenderPathSimplified.mainBlocker || '')
         } : null,
         visibleCard:{
+          visualState:String(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`).dataset && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`).dataset.visualState || ''),
+          visualTone:String(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`).dataset && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`).dataset.visualTone || ''),
           badgeLabel:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`).textContent),
           scoreLabel:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .visual-score, #results .resultcompact[data-ticker="${ticker}"] .score`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .visual-score, #results .resultcompact[data-ticker="${ticker}"] .score`).textContent),
           technicalSummary:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`).textContent),

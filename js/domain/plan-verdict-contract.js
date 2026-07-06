@@ -117,9 +117,12 @@
 
   function normalizeVisualBucket(value, canonicalVerdict = 'watch'){
     const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
-    if(['entry', 'near_entry', 'avoid', 'monitor', 'diminishing'].includes(safe)) return safe;
-    if(safe === 'watch') return visualBucketForVerdict(canonicalVerdict);
-    return visualBucketForVerdict(canonicalVerdict);
+    const canonical = normalizeVerdict(canonicalVerdict);
+    if(canonical === 'entry') return 'entry';
+    if(canonical === 'near_entry') return 'near_entry';
+    if(canonical === 'avoid') return 'avoid';
+    if(safe === 'diminishing') return 'diminishing';
+    return 'monitor';
   }
 
   function verdictLabel(value){
@@ -215,16 +218,14 @@
 
   function resolveCanonicalVisualBucket(inputs, context = {}, canonicalVerdict = 'watch'){
     const resolvedContract = safeObject(context.resolvedContract);
-    const visualState = safeObject(context.visualState);
+    const globalVerdict = safeObject(context.globalVerdict);
     const verdictBucket = visualBucketForVerdict(canonicalVerdict);
     if(['entry', 'near_entry', 'avoid'].includes(verdictBucket)){
       return verdictBucket;
     }
     return normalizeVisualBucket(
       resolvedContract.canonical_visual_bucket
-      || visualState.visualBucket
-      || visualState.presentationBucket
-      || visualState.bucket
+      || globalVerdict.canonical_visual_bucket
       || verdictBucket,
       canonicalVerdict
     );
