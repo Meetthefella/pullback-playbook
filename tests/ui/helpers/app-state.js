@@ -842,7 +842,11 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         uiState:paperTradeUi ? cloneValue(paperTradeUi) : null,
         context:paperTradeContext ? cloneValue({
           ticker:paperTradeContext.ticker,
+          canonicalVerdict:paperTradeContext.canonicalVerdict,
           finalVerdict:paperTradeContext.finalVerdict,
+          eligibilityVerdict:paperTradeContext.eligibilityVerdict,
+          actionabilityState:paperTradeContext.actionabilityState,
+          paperTradeEnabled:paperTradeContext.paperTradeEnabled === true,
           setupScore:paperTradeContext.setupScore,
           eligibility:paperTradeContext.eligibility,
           displayedPlan:paperTradeContext.displayedPlan,
@@ -890,9 +894,27 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         ),
         scanner:scanSimplified ? {
           canonicalVerdict:String(scanSimplified.canonicalVerdict || ''),
+          contractCanonicalVerdict:String(
+            scanSimplified.debug
+            && scanSimplified.debug.authoritativeScanSurfaceSnapshot
+            && scanSimplified.debug.authoritativeScanSurfaceSnapshot.contractCanonicalVerdict
+            || ''
+          ),
           visualBucket:String(scanSimplified.visualBucket || ''),
           actionState:String(scanSimplified.actionLabel || ''),
-          tradePlanStatus:String(scanSimplified.planStatus || '')
+          tradePlanStatus:String(scanSimplified.planStatus || ''),
+          scoutingOnly:!!(
+            scanSimplified.debug
+            && scanSimplified.debug.authoritativeScanSurfaceSnapshot
+            && scanSimplified.debug.authoritativeScanSurfaceSnapshot.scoutingOnly === true
+          ),
+          divergenceType:String(
+            scanSimplified.debug
+            && scanSimplified.debug.authoritativeScanSurfaceSnapshot
+            && scanSimplified.debug.authoritativeScanSurfaceSnapshot.diagnostics
+            && scanSimplified.debug.authoritativeScanSurfaceSnapshot.diagnostics.divergenceType
+            || ''
+          )
         } : null,
         resolver:reviewStateHealth ? {
           canonicalVerdict:String(reviewStateHealth.canonicalVerdict || ''),
@@ -911,19 +933,17 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         watchlist:watchlistPresentation ? cloneValue(watchlistPresentation) : null,
         paperTrade:paperTradeContext ? cloneValue({
           canonicalVerdict:String(
-            paperTradeContext.resolvedContract && (
+            paperTradeContext.canonicalVerdict
+            || paperTradeContext.resolvedContract && (
               paperTradeContext.resolvedContract.finalVerdict
               || paperTradeContext.resolvedContract.final_verdict
               || paperTradeContext.resolvedContract.primaryState
             )
-            || paperTradeContext.finalVerdict
             || ''
           ),
           finalVerdict:paperTradeContext.finalVerdict,
-          actionState:(paperTradeContext.eligibility && paperTradeContext.eligibility.eligible === true)
-            || (/^entry$/i.test(String(paperTradeContext.finalVerdict || '')) && paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status === 'valid')
-            ? 'entry_ready'
-            : 'wait_for_confirmation',
+          eligibilityVerdict:paperTradeContext.eligibilityVerdict || '',
+          actionState:paperTradeContext.actionabilityState || '',
           tradePlanStatus:paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status
         }) : null,
         history:diaryEntries.length ? cloneValue({

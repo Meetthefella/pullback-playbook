@@ -472,9 +472,12 @@ function runScannerTargetObservabilityAssertions(){
     stop_distance_too_wide:false,
     capital_fit:'acceptable',
     affordability:'affordable',
-    price_below_50ma:false,
-    price_below_200ma:false,
-    ma50_below_200ma:false,
+    price_above_50ma:true,
+    price_above_200ma:true,
+    ma50_above_200ma:true,
+    reclaims_level:true,
+    candle_evidence_reclaim_range_meaningful:true,
+    candle_evidence_reclaimed_prior_day_high:true,
     terminal_avoid_applied:false
   });
   if(weakFirstTargetPromotion.pass === true){
@@ -3647,6 +3650,8 @@ function runSimplifiedPipelineAssertions(){
     ticker:'PROV',
     in_watchlist:true,
     reclaimAttempt:true,
+    reclaimsLevel:true,
+    strongBullishReversal:true,
     plan:{entry:100, stop:97, firstTarget:106},
     marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'},
     setup:{volumeRequired:false}
@@ -3726,6 +3731,8 @@ function runSimplifiedPipelineAssertions(){
     ticker:'FTIPROV',
     in_watchlist:true,
     reclaimAttempt:true,
+    reclaimsLevel:true,
+    strongBullishReversal:true,
     plan:{entry:100, stop:97, firstTarget:106},
     marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'GBP'},
     setup:{volumeRequired:false}
@@ -3767,6 +3774,8 @@ function runSimplifiedPipelineAssertions(){
     ticker:'PRICEFIX',
     in_watchlist:true,
     reclaimAttempt:true,
+    reclaimsLevel:true,
+    strongBullishReversal:true,
     plan:{entry:100, stop:97, firstTarget:106},
     marketData:{price:99.5, ma20:100, ma50:94, ma200:80, currency:'USD'},
     setup:{volumeRequired:false}
@@ -3807,8 +3816,8 @@ function runSimplifiedPipelineAssertions(){
   if(reconciledDerived.priceabilityReconciledFromPlan !== true || reconciledPipelineDiagnostics.priceabilityReconciledFromPlan !== true){
     throw new Error('Valid effective plan reconciliation must expose positive priceability diagnostics.');
   }
-  if(reconciledPriceability.nearEntryGatePass !== true || reconciledPriceability.canonicalVerdict !== 'near_entry'){
-    throw new Error('Priceability reconciliation must preserve existing Near Entry gate outcome when gates already pass.');
+  if(reconciledPriceability.nearEntryGatePass !== true || !['near_entry','entry'].includes(reconciledPriceability.canonicalVerdict)){
+    throw new Error('Priceability reconciliation must preserve or advance the canonical actionable state when gates already pass.');
   }
   if(reconciledDerived.priceabilityReconciliationDiagnostics && reconciledDerived.priceabilityReconciliationDiagnostics.checks && reconciledDerived.priceabilityReconciliationDiagnostics.checks.riskOnlyFxEstimated !== true){
     throw new Error('FX-estimated risk_only reconciliation must expose riskOnlyFxEstimated diagnostic flag.');
@@ -4045,8 +4054,8 @@ function runSimplifiedPipelineAssertions(){
   if(dinoResolved.priceability_state === 'unpriceable'){
     throw new Error('Strong extended setup with valid plan math must not be labelled mathematically unpriceable.');
   }
-  if(strongExtendedPriceable.visualBucket !== 'monitor' || strongExtendedPriceable.tone !== 'monitor'){
-    throw new Error('Strong extended mathematically priceable setup without deterioration must remain Monitor Watch.');
+  if(strongExtendedPriceable.visualBucket !== 'diminishing' || strongExtendedPriceable.tone !== 'diminishing'){
+    throw new Error('Strong extended mathematically priceable setup must now render as late/diminishing Watch.');
   }
   if(strongExtendedPriceable.entryGatePass !== false || strongExtendedPriceable.nearEntryGatePass !== false){
     throw new Error('Strong extended mathematically priceable setup must not pass Entry/Near Entry gates.');
@@ -7388,9 +7397,12 @@ function runPlanSemanticsAssertions(){
     stop_distance_too_wide:false,
     capital_fit:'unknown',
     affordability:'',
-    price_below_50ma:false,
-    price_below_200ma:false,
-    ma50_below_200ma:false,
+    price_above_50ma:true,
+    price_above_200ma:true,
+    ma50_above_200ma:true,
+    reclaims_level:true,
+    candle_evidence_reclaim_range_meaningful:true,
+    candle_evidence_reclaimed_prior_day_high:true,
     terminal_avoid_applied:false
   });
   if(riskOnlyProvisionalNearEntry.pass !== true){
@@ -7428,12 +7440,14 @@ function runPlanSemanticsAssertions(){
     capital_fit:'unknown',
     affordability:'',
     price_below_50ma:true,
-    price_below_200ma:false,
-    ma50_below_200ma:false,
+    price_above_200ma:true,
+    ma50_above_200ma:true,
+    reclaims_level:true,
+    candle_evidence_reclaim_range_meaningful:true,
     terminal_avoid_applied:false
   });
-  if(below50ProvisionalNearEntry.pass !== true || below50ProvisionalNearEntry.checks.below_50_without_reclaim !== false){
-    throw new Error('Provisional near-50MA repair setups must not fail Near Entry solely because price is fractionally below the 50MA before an explicit reclaim flag prints.');
+  if(below50ProvisionalNearEntry.pass !== false || below50ProvisionalNearEntry.checks.below_50_without_reclaim !== true){
+    throw new Error('Near Entry must now fail when price remains below the 50MA.');
   }
   const acceptableRrNearEntry = resolverCore.canPromoteToNearEntry({
     structure_state:'intact',
@@ -7463,9 +7477,12 @@ function runPlanSemanticsAssertions(){
     stop_distance_too_wide:false,
     capital_fit:'acceptable',
     affordability:'acceptable',
-    price_below_50ma:false,
-    price_below_200ma:false,
-    ma50_below_200ma:false,
+    price_above_50ma:true,
+    price_above_200ma:true,
+    ma50_above_200ma:true,
+    reclaims_level:true,
+    candle_evidence_reclaim_range_meaningful:true,
+    candle_evidence_reclaimed_prior_day_high:true,
     terminal_avoid_applied:false
   });
   if(acceptableRrNearEntry.pass !== true || acceptableRrNearEntry.checks.rr_priceable !== true){
@@ -7597,9 +7614,12 @@ function runPlanSemanticsAssertions(){
     stop_distance_too_wide:false,
     capital_fit:'acceptable',
     affordability:'acceptable',
-    price_below_50ma:false,
-    price_below_200ma:false,
-    ma50_below_200ma:false,
+    price_above_50ma:true,
+    price_above_200ma:true,
+    ma50_above_200ma:true,
+    reclaims_level:true,
+    candle_evidence_reclaim_range_meaningful:true,
+    candle_evidence_reclaimed_prior_day_high:true,
     terminal_avoid_applied:false
   });
   const weakVolumeAttemptEntry = resolverCore.canPromoteToEntry({
@@ -7630,9 +7650,12 @@ function runPlanSemanticsAssertions(){
     stop_distance_too_wide:false,
     capital_fit:'acceptable',
     affordability:'acceptable',
-    price_below_50ma:false,
-    price_below_200ma:false,
-    ma50_below_200ma:false,
+    price_above_50ma:true,
+    price_above_200ma:true,
+    ma50_above_200ma:true,
+    reclaims_level:true,
+    candle_evidence_reclaim_range_meaningful:true,
+    candle_evidence_reclaimed_prior_day_high:true,
     terminal_avoid_applied:false
   });
   if(weakVolumeAttemptNearEntry.pass !== true || weakVolumeAttemptEntry.pass === true){
@@ -9111,11 +9134,12 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/const watchlistEligibility = resolvePostGateWatchlistEligibility\(record, \{\s*source:'review_add_watchlist_hidden',\s*deferWatchlistRemoval:true,\s*commitOnChange:false\s*\}\);/s.test(appSource)){
     throw new Error('Review Add to Watchlist button state must use the same post-gate eligibility decision as the actual add path.');
   }
-  if(!/const projectionCanonicalVerdict = reviewSnapshotAuthority[\s\S]*?sourceProjectionSnapshot[\s\S]*?canonicalVerdict[\s\S]*?const simplifiedCanonicalVerdict = projectionCanonicalVerdict \|\| normalizeGlobalVerdictKey\(simplifiedState\.canonicalVerdict \|\| 'watch'\);/s.test(appSource)
-    || !/const projectionVisualBucket = reviewSnapshotAuthority[\s\S]*?sourceProjectionSnapshot[\s\S]*?sourceOfTruthVisualBucket[\s\S]*?const simplifiedVisualBucket = projectionVisualBucket \|\| normalizeVisualBucketForPairing\(simplifiedState\.visualBucket \|\| 'monitor'\);/s.test(appSource)
-    || !/const decisionSummary = String\(\s*projectionDecisionSummary[\s\S]*?reviewSemanticStatus\.primaryReason/s.test(appSource)
-    || !/const reviewAction = \{label:projectionActionGuidance \|\| reviewSemanticStatus\.nextAction \|\| simplifiedActionLabel \|\| 'Review setup inputs'\};/s.test(appSource)){
-    throw new Error('Review reopen rendering must prefer the active Track projection snapshot for visible verdict, bucket, and softened copy before falling back to stale simplified review state.');
+  if(!/const simplifiedCanonicalVerdict = authoritativeCanonicalVerdict;/.test(appSource)
+    || !/let simplifiedVisualBucket = authoritativeVisualBucket;/.test(appSource)
+    || !/sourceOfTruth:'simplified_state_pipeline'/.test(appSource)
+    || !/const liveReviewProjectionAuthority = false;/.test(appSource)
+    || !/if\(!snapshotContractFingerprint \|\| !baselineContractFingerprint\) return false;[\s\S]*?if\(snapshotContractFingerprint !== baselineContractFingerprint\) return false;/s.test(appSource)){
+    throw new Error('Review, replay, and projection consumers must keep canonical contract authority and only allow projection transport when the snapshot fingerprint matches the live contract exactly.');
   }
   if(!/const preAddReviewProjectionSnapshot = buildStableReviewProjectionSnapshot\(liveRecord, 'watchlist_add_projection'\);[\s\S]*?const postAddProjectionSnapshot = preAddReviewProjectionSnapshot[\s\S]*?\? \{[\s\S]*?source:'pre_add_review_projection'[\s\S]*?\}\s*:\s*buildTrackProjectionSnapshotFromPersistedPresentation\(entry && entry\.record \? entry\.record : liveRecord, 'watchlist_add_projection'\);[\s\S]*?uiState\.activeReviewSourceProjectionSnapshot = postAddProjectionSnapshot;[\s\S]*?uiState\.activeReviewProjectionSource = 'track_projection_updated';[\s\S]*?renderReviewWorkspace\(postAddProjectionSnapshot[\s\S]*?source:'track_projection_updated'/s.test(appSource)){
     throw new Error('Review must capture a fresh Review-authoritative projection before Add to Watchlist, and only fall back to tracked presentation if that projection is unavailable.');

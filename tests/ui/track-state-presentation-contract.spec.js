@@ -58,6 +58,11 @@ async function seedScenario(page, scenario){
     record.marketData.history = [
       {date:'2026-06-27', open:seed.price - 1, high:seed.price + 1, low:seed.price - 2, close:seed.price, volume:seed.volume}
     ];
+    record.strongBullishReversal = seed.strongBullishReversal === true;
+    record.strongBullishContinuation = seed.strongBullishContinuation === true;
+    record.breaksLocalHigh = seed.breaksLocalHigh === true;
+    record.reclaimAttempt = seed.reclaimAttempt === true;
+    record.reclaimsLevel = seed.reclaimsLevel === true;
     record.setup.structureState = seed.structureState;
     record.setup.structureEligibility = seed.structureEligibility;
     record.setup.setupLocationState = seed.setupLocationState;
@@ -99,6 +104,8 @@ async function seedScenario(page, scenario){
         stabilisation_state:seed.stabilisationState,
         bounce_state:seed.bounceState,
         volume_state:seed.volumeState,
+        candle_evidence_reclaim_range_meaningful:seed.reclaimRangeMeaningful === true ? 'yes' : 'no',
+        candle_evidence_reclaimed_prior_day_high:seed.reclaimedPriorDayHigh === true ? 'yes' : 'no',
         has_clear_invalidation_level:seed.planStatus === 'valid' ? 'yes' : 'no',
         has_priceable_plan:seed.planStatus === 'valid' ? 'yes' : 'no',
         entry_defined:seed.entry ? 'yes' : 'no',
@@ -192,6 +199,12 @@ function entryScenario(){
     stabilisationState:'clear',
     volumeState:'supportive',
     trendState:'strong',
+    strongBullishReversal:true,
+    strongBullishContinuation:true,
+    breaksLocalHigh:true,
+    reclaimAttempt:true,
+    reclaimRangeMeaningful:true,
+    reclaimedPriorDayHigh:true,
     entry:110.27,
     stop:102.29,
     target:136.19,
@@ -274,7 +287,12 @@ function nearEntryScenario(){
     stabilisationState:'stabilising',
     volumeState:'supportive',
     trendState:'strong',
-    entry:88.5,
+    strongBullishReversal:true,
+    reclaimAttempt:true,
+    reclaimsLevel:true,
+    reclaimRangeMeaningful:true,
+    reclaimedPriorDayHigh:true,
+    entry:89.1,
     stop:84.2,
     target:98.0,
     planStatus:'valid',

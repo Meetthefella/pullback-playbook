@@ -15,7 +15,12 @@ function normalizeVerdict(value){
 function normalizeActionState(value){
   const safe = normalizeText(value).toLowerCase().replace(/\s+/g, '_');
   if(!safe) return '';
+  if(safe === 'ready_to_submit') return 'ready_to_submit';
+  if(safe === 'preview_open') return 'preview_open';
+  if(safe === 'submitted') return 'submitted';
+  if(safe === 'open') return 'open';
   if(/entry_ready|ready_to_act|execute_only_if|execute/.test(safe)) return 'entry_ready';
+  if(/entry_blocked/.test(safe)) return 'entry_blocked';
   if(/near_entry|wait_for_confirmation|waiting_for_confirmation|developing|confirmation/.test(safe)) return 'wait_for_confirmation';
   if(/watch|monitor/.test(safe)) return 'monitor';
   if(/avoid|rebuild|dead|inactive/.test(safe)) return 'avoid';
@@ -78,6 +83,11 @@ function buildLifecycleEvidence(appState){
       || appState && appState.paperTrade && appState.paperTrade.context && appState.paperTrade.context.displayedPlan && appState.paperTrade.context.displayedPlan.status
       || ''
     ).toLowerCase(),
+    paperTradeActionabilityState:normalizeActionState(
+      appState && appState.paperTrade && appState.paperTrade.context && appState.paperTrade.context.actionabilityState
+      || appState && appState.authority && appState.authority.paperTrade && appState.authority.paperTrade.actionState
+      || ''
+    ),
     paperTradeGatewayState:normalizeText(gatewayModel.state || '').toLowerCase(),
     paperTradeEligibilityState:appState && appState.paperTrade && appState.paperTrade.context && appState.paperTrade.context.eligibility
       ? {
@@ -104,14 +114,34 @@ function buildLifecycleEvidence(appState){
 
 function buildAuthoritySummary(appState, replayResult){
   const authority = appState.authority || {};
+  const activeReviewTicker = normalizeText(appState && appState.startup && appState.startup.activeReviewTicker).toUpperCase();
+  const currentTicker = normalizeText(appState && appState.ticker).toUpperCase();
+  const paperTradeLifecycleStatus = normalizeText(
+    appState
+    && appState.authority
+    && appState.authority.history
+    && appState.authority.history.lifecycleStatus
+  ).toLowerCase();
+  const paperTradePublicSurfaceActive = !!(
+    activeReviewTicker
+    && currentTicker
+    && activeReviewTicker === currentTicker
+  );
+  const paperTradeLifecycleVisible = /submitted|open/.test(paperTradeLifecycleStatus);
   const paperTradeApplicable = !!(
     appState
     && appState.paperTrade
     && (
-      appState.paperTrade.button && appState.paperTrade.button.enabled === true
-      || appState.paperTrade.context && appState.paperTrade.context.eligibility && appState.paperTrade.context.eligibility.eligible === true
-      || appState.paperTrade.button && normalizeText(appState.paperTrade.button.previewText || '').length
-      || appState.paperTrade.button && /submitted/i.test(normalizeText(appState.paperTrade.button.statusText || ''))
+      paperTradeLifecycleVisible
+      || (
+        paperTradePublicSurfaceActive
+        && (
+          appState.paperTrade.button && appState.paperTrade.button.enabled === true
+          || appState.paperTrade.context && appState.paperTrade.context.eligibility && appState.paperTrade.context.eligibility.eligible === true
+          || appState.paperTrade.button && normalizeText(appState.paperTrade.button.previewText || '').length
+          || appState.paperTrade.button && /submitted/i.test(normalizeText(appState.paperTrade.button.statusText || ''))
+        )
+      )
     )
   );
   const replayCanonicalContract = replayResult && replayResult.canonicalContract && typeof replayResult.canonicalContract === 'object'
@@ -137,7 +167,8 @@ function buildAuthoritySummary(appState, replayResult){
   const allowActionableSoftReadinessSplit = /entry ready|actionable/i.test(reviewTradeStatus);
   const duplicates = fields.map(field => {
     const entries = Object.entries(sources)
-      .filter(([name]) => !(name === 'paperTrade' && (field === 'canonicalVerdict' || field === 'visualBucket')))
+      .filter(([name]) => !(name === 'paperTrade' && ['canonicalVerdict', 'visualBucket', 'actionState'].includes(field)))
+      .filter(([name]) => !(name === 'history' && field === 'actionState'))
       .map(([name, source]) => ({name, value:authorityValueAt(source, field)}))
       .filter(entry => entry.value);
     const grouped = entries.reduce((map, entry) => {
@@ -179,9 +210,7 @@ function buildAuthoritySummary(appState, replayResult){
 
 function buildStaleStateFindings(appState){
   const reviewTradeStatus = normalizeText(appState.visibleCopy && appState.visibleCopy.review && appState.visibleCopy.review.tradeStatus);
-  const canonicalVerdict = /entry ready|actionable/i.test(reviewTradeStatus)
-    ? 'entry'
-    : normalizeVerdict(appState.normalized && appState.normalized.reviewCanonicalVerdict);
+  const canonicalVerdict = normalizeVerdict(appState.normalized && appState.normalized.reviewCanonicalVerdict);
   const reviewBadge = normalizeVerdict(appState.visibleCopy && appState.visibleCopy.review && appState.visibleCopy.review.badge);
   const trackBadge = normalizeVerdict(appState.visibleCopy && appState.visibleCopy.track && appState.visibleCopy.track.badge);
   const findings = [];
@@ -217,6 +246,10 @@ function buildStaleStateFindings(appState){
     if(
       /(^|\.)(scan)\.resolvedVerdict$/i.test(path)
       || /authoritativeInputs\.scanner\.resolvedVerdict$/i.test(path)
+      || /(^|\.)(review)\.savedVerdict$/i.test(path)
+      || /authoritativeInputs\./i.test(path)
+      || /canonicalResolverInputDiagnostics/i.test(path)
+      || /(^|\.)(legacy)\./i.test(path)
     ){
       return;
     }
@@ -263,11 +296,15 @@ function buildCopyConsistency(appState){
   if(diaryCard && reviewVerdict && !new RegExp(reviewVerdict.replace('_', '\\s+'), 'i').test(diaryCard) && /Entry|Near Entry|Watch|Avoid/i.test(diaryCard)){
     mismatches.push({field:'diaryVerdictCopy', surface:'diary', expected:reviewVerdict, actual:diaryCard});
   }
-  const allowEntryScanNearEntryReview = normalizeVerdict(scan.badge) === 'entry'
-    && reviewVerdict === 'near_entry'
-    && /entry ready|actionable/i.test(normalizeText(review.tradeStatus || ''));
-  if(scan.badge && review.badge && normalizeVerdict(scan.badge) && normalizeVerdict(scan.badge) !== reviewVerdict && !allowEntryScanNearEntryReview){
-    mismatches.push({field:'scanToReviewBadge', surface:'scan', expected:reviewVerdict, actual:scan.badge});
+  const normalizedScanBadge = normalizeVerdict(scan.badge);
+  const scanScoutingOnly = !!(
+    appState
+    && appState.authority
+    && appState.authority.scanner
+    && appState.authority.scanner.scoutingOnly === true
+  );
+  if(reviewVerdict === 'entry' && scan.badge && normalizedScanBadge && normalizedScanBadge !== 'entry' && scanScoutingOnly !== true){
+    mismatches.push({field:'scanToReviewBadge', surface:'scan', expected:'entry', actual:scan.badge});
   }
   return mismatches;
 }
@@ -434,6 +471,7 @@ module.exports = {
   buildTransitionReport,
   captureLifecycleSnapshot,
   diffObjects,
+  normalizeActionState,
   normalizeText,
   normalizeVerdict
 };

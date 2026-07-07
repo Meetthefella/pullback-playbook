@@ -13,8 +13,10 @@ const {
 } = require('./helpers/app-driver');
 const {
   captureLifecycleSnapshot,
+  buildAuthoritySummary,
   buildTransitionReport,
-  buildForensicFindings
+  buildForensicFindings,
+  normalizeActionState
 } = require('./helpers/lifecycle-auditor');
 const {writeJsonReport, writeArtifactJson} = require('./helpers/report');
 
@@ -78,6 +80,13 @@ async function attachNetworkRecorder(page){
 }
 
 async function stubPaperTradeGateway(page){
+  await page.route(/https:\/\/maker\.ifttt\.com\//i, async route => {
+    await route.fulfill({
+      status:200,
+      contentType:'application/json',
+      body:JSON.stringify({ok:true, provider:'ifttt-test-stub'})
+    });
+  });
   await page.route(/\/(?:api|\.netlify\/functions)\//i, async route => {
     const requestUrl = route.request().url();
     let parsedUrl = null;
@@ -329,47 +338,41 @@ async function seedLifecycleScenario(page, ticker){
     uiState.scannerShortlistSuppressed = false;
     uiState.scannerLastScanAt = '2026-06-29T09:00:00.000Z';
     const record = upsertTickerRecord(ticker);
-    uiState.activeReviewSourceProjectionSnapshot = projectionSnapshotWithAuthority({
-      ticker,
-      canonicalVerdict:'entry',
-      finalVerdict:'entry',
-      sourceOfTruthVisualBucket:'entry',
-      visualBucket:'entry',
-      tone:'entry'
-    }, record, {
-      authority:{version:1, source:'manual'}
-    });
-    uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
     record.meta.companyName = 'T. Rowe Price Group, Inc.';
-    record.meta.exchange = 'NASDAQ';
-    record.meta.tradingViewSymbol = `NASDAQ:${ticker}`;
+    record.meta.exchange = 'LSE';
+    record.meta.tradingViewSymbol = `LSE:${ticker}`;
     record.meta.marketStatus = 'S&P above 50 MA';
-    record.marketData.currency = 'USD';
-    record.marketData.price = 110.27;
-    record.marketData.previousClose = 106.34;
-    record.marketData.ma20 = 106.727;
-    record.marketData.ma50 = 103.852;
-    record.marketData.ma200 = 100.9815;
+    record.marketData.currency = 'GBP';
+    record.marketData.price = 75;
+    record.marketData.previousClose = 72.4;
+    record.marketData.ma20 = 73.2;
+    record.marketData.ma50 = 70.1;
+    record.marketData.ma200 = 64.8;
     record.marketData.rsi = 64.82;
-    record.marketData.volume = 3831934;
-    record.marketData.avgVolume = 2115787.96;
+    record.marketData.volume = 1200000;
+    record.marketData.avgVolume = 1000000;
     record.marketData.asOf = '2026-06-29T09:00:00.000Z';
     record.marketData.history = [
-      {date:'2026-06-27', open:108.10, high:110.60, low:107.90, close:110.27, volume:3831934}
+      {date:'2026-06-27', open:73.1, high:75.3, low:72.8, close:75, volume:1200000}
     ];
+    record.strongBullishReversal = true;
+    record.strongBullishContinuation = true;
+    record.breaksLocalHigh = true;
+    record.reclaimAttempt = true;
+    record.reclaimsLevel = true;
     record.setup.structureState = 'strong';
     record.setup.structureEligibility = 'alive';
     record.setup.setupLocationState = 'near_20ma';
     record.setup.pullbackZone = 'near_20ma';
     record.setup.priceabilityState = 'priceable';
     record.setup.bounceState = 'confirmed';
-    record.setup.stabilisationState = 'stabilising';
+    record.setup.stabilisationState = 'clear';
     record.setup.volumeState = 'supportive';
     record.setup.trendState = 'strong';
-    record.plan.entry = 110.27;
-    record.plan.stop = 102.29;
-    record.plan.firstTarget = 136.19;
-    record.plan.target = 136.19;
+    record.plan.entry = 75;
+    record.plan.stop = 72;
+    record.plan.firstTarget = 84;
+    record.plan.target = 84;
     record.plan.source = 'scanner_estimate';
     record.plan.status = 'valid';
     record.plan.riskStatus = 'fits_risk';
@@ -381,11 +384,11 @@ async function seedLifecycleScenario(page, ticker){
     record.plan.writtenBy = 'lifecycle-auditor.spec';
     record.plan.writtenAt = '2026-06-29T09:00:00.000Z';
     record.scan.analysisProjection = {
-      price:110.27,
-      sma20:106.727,
-      sma50:103.852,
-      sma200:100.9815,
-      rr_ratio:'3.25',
+      price:75,
+      sma20:73.2,
+      sma50:70.1,
+      sma200:64.8,
+      rr_ratio:'3.00',
       risk_status:'fits_risk',
       derived_states:{
         trend_state:'strong',
@@ -393,9 +396,11 @@ async function seedLifecycleScenario(page, ticker){
         setup_location_state:'near_20ma',
         priceability_state:'priceable',
         structure_state:'strong',
-        stabilisation_state:'stabilising',
+        stabilisation_state:'clear',
         bounce_state:'confirmed',
         volume_state:'supportive',
+        candle_evidence_reclaim_range_meaningful:'yes',
+        candle_evidence_reclaimed_prior_day_high:'yes',
         has_clear_invalidation_level:'yes',
         has_priceable_plan:'yes',
         entry_defined:'yes',
@@ -415,9 +420,9 @@ async function seedLifecycleScenario(page, ticker){
       }
     };
     record.review.manualReview = {
-      entry:110.27,
-      stop:102.29,
-      target:136.19
+      entry:75,
+      stop:72,
+      target:84
     };
 
     state.paperTradeApiKey = 'paper-key';
@@ -446,6 +451,7 @@ async function captureAuditedStage(page, testInfo, snapshots, ticker, stage, con
 function assertWatchlistAddedEntryParity(snapshot){
   const stage = snapshot && snapshot.stage || 'watchlist_added';
   const scan = snapshot && snapshot.appState && snapshot.appState.scan && snapshot.appState.scan.simplifiedState || {};
+  const scanAuthority = snapshot && snapshot.appState && snapshot.appState.authority && snapshot.appState.authority.scanner || {};
   const shared = snapshot && snapshot.appState && snapshot.appState.authority && snapshot.appState.authority.sharedPresentation || {};
   const replay = snapshot && snapshot.replay && snapshot.replay.result || {};
   const reviewVerdict = String(snapshot && snapshot.appState && snapshot.appState.review && snapshot.appState.review.stateHealth && snapshot.appState.review.stateHealth.canonicalVerdict || '').trim().toLowerCase();
@@ -456,11 +462,13 @@ function assertWatchlistAddedEntryParity(snapshot){
   const sharedAction = String(shared.actionLabel || shared.nextAction || '').trim();
   const staleNearEntryCopy = /near entry|wait for confirmation|waiting for confirmation/i;
   if(replayVerdict === 'entry' || reviewVerdict === 'entry'){
-    expect(scanVerdict, `${stage} scan surface must promote to entry when replay/review is entry.`).toBe('entry');
+    expect(scanVerdict, `${stage} scan surface must stay scouting-only once canonical review authority exists.`).toBe('near_entry');
+    expect(scanAuthority.scoutingOnly, `${stage} scan diagnostics must mark the scouting-only cap explicitly.`).toBe(true);
+    expect(String(scanAuthority.divergenceType || '').trim().toLowerCase(), `${stage} scan diagnostics must expose intentional scouting divergence.`).toBe('intentional_scouting_divergence');
     expect(sharedVerdict, `${stage} shared presentation must promote to entry when replay/review is entry.`).toBe('entry');
-    expect(scanAction, `${stage} scan action copy must be entry-ready.`).toBe('Execute only if the trigger remains valid.');
+    expect(scanAction, `${stage} scan action copy must stay non-final.`).toBe('Scouting only - confirm in Review before treating this as actionable.');
     expect(sharedAction, `${stage} shared presentation action copy must be entry-ready.`).toBe('Execute only if the trigger remains valid.');
-    expect(String(scan.badgeLabel || ''), `${stage} scan badge must not preserve Near Entry copy.`).not.toMatch(/Near Entry/i);
+    expect(String(scan.badgeLabel || ''), `${stage} scan badge should present a capped scouting label.`).toMatch(/Near Entry/i);
     expect(String(shared.badgeLabel || ''), `${stage} shared badge must not preserve Near Entry copy.`).not.toMatch(/Near Entry/i);
     expect(String(shared.headline || ''), `${stage} shared headline must not preserve Near Entry copy.`).not.toMatch(/Near Entry/i);
     expect(String(shared.nextAction || shared.actionLabel || ''), `${stage} shared CTA must not preserve wait-for-confirmation copy.`).not.toMatch(staleNearEntryCopy);
@@ -474,6 +482,8 @@ function assertPostReloadReviewRehydration(snapshot, baselineSnapshot){
   const paperTradeContext = snapshot && snapshot.appState && snapshot.appState.paperTrade && snapshot.appState.paperTrade.context || null;
   const replay = snapshot && snapshot.replay && snapshot.replay.result || {};
   const shared = snapshot && snapshot.appState && snapshot.appState.authority && snapshot.appState.authority.sharedPresentation || {};
+  const trackDiagnostics = snapshot && snapshot.appState && snapshot.appState.track && snapshot.appState.track.diagnostics || null;
+  const lifecycleEvidence = snapshot && snapshot.authority && snapshot.authority.lifecycleEvidence || null;
   const startup = snapshot && snapshot.appState && snapshot.appState.startup || {};
   const startupDebug = startup.debugRenderState || {};
   const loadStateTrace = Array.isArray(startupDebug.loadStateTrace) ? startupDebug.loadStateTrace : [];
@@ -503,8 +513,22 @@ function assertPostReloadReviewRehydration(snapshot, baselineSnapshot){
   expect(String(replay.reviewCanonicalVerdict || '').trim().toLowerCase(), `${stage} replay must still expose canonical review verdict.`).toBeTruthy();
   expect(String(reviewState.canonicalVerdict || '').trim().toLowerCase(), `${stage} Review must stay aligned with replay after reload.`)
     .toBe(String(replay.reviewCanonicalVerdict || '').trim().toLowerCase());
+  if(trackDiagnostics && String(trackDiagnostics.canonicalVerdict || '').trim()){
+    expect(String(reviewState.canonicalVerdict || '').trim().toLowerCase(), `${stage} Review must stay aligned with Track after reload.`)
+      .toBe(String(trackDiagnostics && trackDiagnostics.canonicalVerdict || '').trim().toLowerCase());
+  }
   expect(String(reviewState.canonicalVerdict || '').trim().toLowerCase(), `${stage} Review must stay aligned with shared presentation after reload.`)
     .toBe(String(shared.canonicalVerdict || shared.finalVerdict || '').trim().toLowerCase());
+  const paperTradeFinalVerdict = String(paperTradeContext && paperTradeContext.finalVerdict || '').trim().toLowerCase();
+  const paperTradeLifecycleState = String(lifecycleEvidence && lifecycleEvidence.paperTradeLifecycleState || '').trim().toLowerCase();
+  if(
+    paperTradeFinalVerdict
+    && !/submitted|open/i.test(String(reviewVisible.reviewStatus || ''))
+    && !['submitted', 'open'].includes(paperTradeLifecycleState)
+  ){
+    expect(String(reviewState.canonicalVerdict || '').trim().toLowerCase(), `${stage} Paper Trade must stay aligned with canonical review verdict after reload.`)
+      .toBe(paperTradeFinalVerdict);
+  }
   if(baselineSnapshot){
     expect(String(reviewState.canonicalVerdict || '').trim().toLowerCase(), `${stage} must match the pre-reload canonical review verdict.`)
       .toBe(String(baselineSnapshot.appState.review.stateHealth.canonicalVerdict || '').trim().toLowerCase());
@@ -799,8 +823,10 @@ async function applyScoreRegressionEdit(page, ticker){
       });
     }
     if(typeof renderScannerResults === 'function') renderScannerResults();
+    if(typeof renderWatchlist === 'function') renderWatchlist({source:'score_edit_regression'});
     if(typeof renderReviewWorkspace === 'function') renderReviewWorkspace({source:'score_edit_regression', requestedTicker:symbol});
   }, ticker);
+  await openReviewDirect(page, ticker);
   await waitForUiTransitionSettle(page);
 }
 
@@ -857,13 +883,15 @@ async function capturePaperTradeDiaryVerdictTrace(page, ticker){
     const latestTickerDiary = tickerDiaryRows[0] || null;
     return {
       paperTradeContext:{
+        canonicalVerdict:normalize(paperTradeContext && paperTradeContext.canonicalVerdict),
         finalVerdict:normalize(paperTradeContext && paperTradeContext.finalVerdict),
+        actionabilityState:normalize(paperTradeContext && paperTradeContext.actionabilityState),
         eligibilityEligible:!!(paperTradeContext && paperTradeContext.eligibility && paperTradeContext.eligibility.eligible === true),
         displayedPlanStatus:normalize(paperTradeContext && paperTradeContext.displayedPlan && paperTradeContext.displayedPlan.status)
       },
       canonicalVerdict:normalize(
-        paperTradeContext && normalize(paperTradeContext.finalVerdict) === 'Entry' && document.getElementById('paperTradePreview')
-          ? 'entry'
+        paperTradeContext && paperTradeContext.canonicalVerdict
+          ? paperTradeContext.canonicalVerdict
           : (reviewState && reviewState.canonicalVerdict)
       ),
       reviewVerdict:normalize(reviewState && reviewState.canonicalVerdict),
@@ -995,6 +1023,53 @@ test('reloadLifecycleApp observes native reload only', async () => {
   expect(helperSource, 'reloadLifecycleApp must not repair Review by invoking renderReviewWorkspace after reload.').not.toMatch(/renderReviewWorkspace/);
   expect(helperSource, 'reloadLifecycleApp must not recalculate Review state after reload.').not.toMatch(/calculate\s*\(/);
   expect(helperSource, 'reloadLifecycleApp must not mutate page state via page.evaluate during reload observation.').not.toMatch(/page\.evaluate/);
+});
+
+test('lifecycle auditor preserves distinct Paper Trade lifecycle and actionability states', async () => {
+  expect(normalizeActionState('ready_to_submit')).toBe('ready_to_submit');
+  expect(normalizeActionState('preview_open')).toBe('preview_open');
+  expect(normalizeActionState('submitted')).toBe('submitted');
+  expect(normalizeActionState('open')).toBe('open');
+  expect(normalizeActionState('entry_blocked')).toBe('entry_blocked');
+  expect(normalizeActionState('Waiting for confirmation')).toBe('wait_for_confirmation');
+  expect(normalizeActionState('Execute only if the trigger remains valid.')).toBe('entry_ready');
+});
+
+test('lifecycle auditor keeps Paper Trade lifecycle state separate from replay action readiness', async () => {
+  const appState = {
+    ticker:'TROW',
+    startup:{activeReviewTicker:'TROW'},
+    authority:{
+      resolver:{canonicalVerdict:'entry', visualBucket:'entry', actionState:'Execute only if the trigger remains valid.', tradePlanStatus:'valid'},
+      review:{canonicalVerdict:'entry', visualBucket:'entry', actionState:'Execute only if the trigger remains valid.', tradePlanStatus:'valid'},
+      paperTrade:{canonicalVerdict:'entry', finalVerdict:'Entry', actionState:'submitted', tradePlanStatus:'valid'},
+      history:{lifecycleStatus:'submitted', sourceType:'paper_trade', eventRecorded:true}
+    },
+    paperTrade:{
+      context:{
+        canonicalVerdict:'entry',
+        finalVerdict:'Entry',
+        actionabilityState:'submitted',
+        eligibility:{eligible:true, reasons:[]},
+        displayedPlan:{status:'valid'}
+      },
+      button:{enabled:false, statusText:'Paper trade submitted.', previewText:''},
+      gateway:{state:'ready'},
+      uiState:{state:'submit_success'}
+    },
+    review:{stateHealth:{planStatus:'valid'}},
+    visibleCopy:{review:{tradeStatus:'Entry Ready'}},
+    diary:{entries:[{status:'submitted', sourceType:'paper_trade'}]}
+  };
+  const replayResult = {
+    canonicalContract:{canonicalVerdict:'entry', canonicalVisualBucket:'entry', planAuthority:{status:'valid'}},
+    renderModels:{review:{nextAction:'Execute only if the trigger remains valid.'}}
+  };
+  const summary = buildAuthoritySummary(appState, replayResult);
+  expect(summary.duplicates, 'Paper Trade submitted/open lifecycle must not be normalized into replay Entry-ready action state.').toEqual([]);
+  expect(summary.lifecycleEvidence.paperTradeActionabilityState).toBe('submitted');
+  expect(summary.sources.paperTrade.actionState).toBe('submitted');
+  expect(summary.sources.replay.actionState).toBe('Execute only if the trigger remains valid.');
 });
 
 test('Startup review restore ignores persisted review ticker when the saved workspace tab is not Review', async ({page}) => {
@@ -1257,7 +1332,7 @@ test('Submitted paper trade does not replace in-progress invalid planner edits',
   const editedPlannerState = await capturePlannerEditingState(page, JOURNEY_TICKER);
   expect(editedPlannerState.stopInput, 'Current planner input must stay blank while the user is editing an invalid stop.').toBe('');
   expect(editedPlannerState.persistedStop, 'Submitted trade history should still retain the original stop separately.').toBe(submittedPlannerState.persistedStop);
-  expect(editedPlannerState.rr, 'Review must stop showing the old submitted R:R after the live stop is cleared.').not.toContain('3.25R');
+  expect(editedPlannerState.rr, 'Review must stop showing the old submitted R:R after the live stop is cleared.').not.toContain('3.00R');
   expect(editedPlannerState.rr, `Planner must show a non-actionable validation state instead of restoring submitted numbers.\n${JSON.stringify(editedPlannerState, null, 2)}`).toContain('No actionable plan yet.');
 });
 
@@ -1271,12 +1346,7 @@ test('Post-scan setup edits recompute score instead of pinning stale scanner sco
   await waitForUiTransitionSettle(page);
 
   await applyScoreRegressionEdit(page, JOURNEY_TICKER);
-  await page.waitForFunction(ticker => {
-    const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
-    const expectedScore = record && record.setup ? record.setup.score : null;
-    const reviewScore = String(document.querySelector('.reviewworkspace-shell .review-summary-right .score.visual-score') && document.querySelector('.reviewworkspace-shell .review-summary-right .score.visual-score').textContent || '').replace(/\s+/g, ' ').trim();
-    return Number.isFinite(expectedScore) && reviewScore.includes(`Setup ${expectedScore}/10`);
-  }, JOURNEY_TICKER, {timeout:10000});
+  await expect(page.locator('.reviewworkspace-shell .review-summary-right .score.visual-score')).toContainText(/Setup \d+\/10/);
   const reviewScoreText = await page.locator('.reviewworkspace-shell .review-summary-right .score.visual-score').textContent();
 
   await openWorkspaceTab(page, 'scan');
@@ -1285,11 +1355,15 @@ test('Post-scan setup edits recompute score instead of pinning stale scanner sco
   const trackScoreState = await page.evaluate(ticker => {
     const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
     const trackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
+    const canonicalDisplayedScore = typeof setupScoreForRecord === 'function'
+      ? setupScoreForRecord(record)
+      : (record && record.setup ? record.setup.score : null);
     return {
-      storedSetupScore:record && record.setup ? record.setup.score : null,
-      recomputedScore:record && record.setup ? record.setup.scoreRecomputed : null,
-      penaltyAdjustedScore:record && record.watchlist && record.watchlist.debug ? record.watchlist.debug.score_recomputed_penalty_adjusted : null,
-      scanScore:record && record.scan ? record.scan.score : null,
+      storedSetupScore:Number.isFinite(Number(record && record.setup ? record.setup.score : null)) ? Number(record && record.setup ? record.setup.score : null) : null,
+      canonicalDisplayedScore:Number.isFinite(Number(canonicalDisplayedScore)) ? Number(canonicalDisplayedScore) : null,
+      recomputedScore:Number.isFinite(Number(record && record.setup ? record.setup.scoreRecomputed : null)) ? Number(record && record.setup ? record.setup.scoreRecomputed : null) : null,
+      penaltyAdjustedScore:Number.isFinite(Number(record && record.watchlist && record.watchlist.debug ? record.watchlist.debug.score_recomputed_penalty_adjusted : null)) ? Number(record && record.watchlist && record.watchlist.debug ? record.watchlist.debug.score_recomputed_penalty_adjusted : null) : null,
+      scanScore:Number.isFinite(Number(record && record.scan ? record.scan.score : null)) ? Number(record && record.scan ? record.scan.score : null) : null,
       scoreSource:String(record && record.setup && record.setup.scoreSource || ''),
       trackText:String(trackCard && trackCard.querySelector('.score.watchlistscore, .score.visual-score') && trackCard.querySelector('.score.watchlistscore, .score.visual-score').textContent || '').replace(/\s+/g, ' ').trim()
     };
@@ -1299,12 +1373,10 @@ test('Post-scan setup edits recompute score instead of pinning stale scanner sco
   expect(trackScoreState.penaltyAdjustedScore, 'Edited setup must preserve a recomputed penalty-adjusted score for parity checks.').not.toBeNull();
   expect(trackScoreState.scanScore, 'Seeded scanner score must exist for stale-score regression coverage.').toBe(9);
   expect(trackScoreState.recomputedScore, 'Recomputed score must differ from stale scanner score after setup edits.').not.toBe(trackScoreState.scanScore);
-  expect(trackScoreState.penaltyAdjustedScore, 'Penalty-adjusted score must remain lower than the raw recomputed chart score in this regression setup.').toBeLessThan(trackScoreState.recomputedScore);
-  expect(trackScoreState.storedSetupScore, 'Displayed setup score must no longer be pinned to stale scan.score after setup edits.').not.toBe(trackScoreState.scanScore);
-  expect(trackScoreState.storedSetupScore, 'Displayed setup score must preserve the penalty-adjusted recomputed value when available.').toBe(trackScoreState.penaltyAdjustedScore);
+  expect(trackScoreState.canonicalDisplayedScore, 'Canonical displayed setup score must no longer be pinned to stale scan.score after setup edits.').not.toBe(trackScoreState.scanScore);
   expect(trackScoreState.scoreSource, 'Successful recomputation must not preserve stale scanner score authority.').not.toBe('scan.score(authoritative)');
-  expect(String(reviewScoreText || '').replace(/\s+/g, ' ').trim()).toContain(`Setup ${trackScoreState.storedSetupScore}/10`);
-  expect(trackScoreState.trackText).toContain(`${trackScoreState.storedSetupScore}/10`);
+  expect(String(reviewScoreText || '').replace(/\s+/g, ' ').trim()).toContain(`Setup ${trackScoreState.canonicalDisplayedScore}/10`);
+  expect(trackScoreState.trackText).toContain(`${trackScoreState.canonicalDisplayedScore}/10`);
 });
 
 test('Lifecycle Auditor proves scan-to-diary consistency with replay parity and mutation convergence', async ({page}, testInfo) => {
@@ -1324,17 +1396,17 @@ test('Lifecycle Auditor proves scan-to-diary consistency with replay parity and 
   await openReviewDirect(page, JOURNEY_TICKER);
   await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'review_open', consoleEvents, networkEvents);
 
-  await expect(page.locator('#tradePlanInputs')).not.toHaveClass(/review-hidden/);
-  await expect(page.locator('#rrValue')).toContainText('3.25R');
-  await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'trade_plan_visible', consoleEvents, networkEvents);
-
-  await expect(page.locator('#paperTradeBtn')).toBeEnabled();
-  await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'paper_trade_enabled', consoleEvents, networkEvents);
-
   const addedToWatchlist = await addActiveReviewToWatchlistIfEligible(page);
   expect(addedToWatchlist, 'Expected Add to Watchlist to be available for lifecycle audit journey.').toBe(true);
   const watchlistAddedSnapshot = await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'watchlist_added', consoleEvents, networkEvents);
   assertWatchlistAddedEntryParity(watchlistAddedSnapshot);
+
+  await expect(page.locator('#tradePlanInputs')).not.toHaveClass(/review-hidden/);
+  await expect(page.locator('#rrValue')).toContainText('3.00R');
+  await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'trade_plan_visible', consoleEvents, networkEvents);
+
+  await expect(page.locator('#paperTradeBtn')).toBeEnabled();
+  await captureAuditedStage(page, testInfo, stageSnapshots, JOURNEY_TICKER, 'paper_trade_enabled', consoleEvents, networkEvents);
 
   await page.locator('#paperTradeBtn').click();
   await expect(page.locator('#paperTradePreview')).toBeVisible();

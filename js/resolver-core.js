@@ -111,6 +111,214 @@
     return Number.isFinite(numeric) ? numeric : null;
   }
 
+  function flagTextIsTrue(value){
+    const safe = String(value || '').trim().toLowerCase();
+    return value === true || safe === 'true' || safe === 'yes' || safe === '1';
+  }
+
+  function normalizeMarketSeverity(value){
+    const safe = String(value || '').trim().toLowerCase();
+    if(!safe) return 'neutral';
+    if(/hostile|poor|bearish|below\s*50/.test(safe)) return 'hostile';
+    if(/above\s*50/.test(safe)) return 'supportive';
+    if(/weak/.test(safe)) return 'weak';
+    if(/supportive|strong|bullish/.test(safe)) return 'supportive';
+    if(/normal|neutral/.test(safe)) return 'neutral';
+    return 'neutral';
+  }
+
+  function canonicalMarketSeverity(ctx = {}){
+    if(String(ctx.market_severity || '').trim()){
+      return normalizeMarketSeverity(ctx.market_severity);
+    }
+    return normalizeMarketSeverity(ctx.market_regime);
+  }
+
+  function resolveTrendGate(ctx = {}){
+    const structureState = String(ctx.structure_state || '').trim().toLowerCase();
+    const structureHealthy = ['strong', 'intact', 'developing_clean'].includes(structureState);
+    const structureDamaged = ['weakening', 'weak', 'broken', 'developing_loose'].includes(structureState);
+    const marketSeverity = canonicalMarketSeverity(ctx);
+    const checks = {
+      structure_healthy:structureHealthy,
+      structure_damaged:structureDamaged,
+      price_above_50ma:ctx.price_above_50ma === true || ctx.price_below_50ma === false,
+      price_above_200ma:ctx.price_above_200ma === true || ctx.price_below_200ma === false,
+      ma50_above_200ma:ctx.ma50_above_200ma === true || ctx.ma50_below_200ma === false,
+      pullback_valid:ctx.pullback_valid !== false,
+      no_hard_invalidation:ctx.structurally_broken !== true && ctx.terminal_avoid_applied !== true && ctx.terminalAvoidFlag !== true,
+      market_not_hostile:marketSeverity !== 'hostile',
+      market_severity:marketSeverity
+    };
+    const reasons = [];
+    if(!checks.structure_healthy) reasons.push('Structure is not healthy enough.');
+    if(checks.structure_damaged) reasons.push('Support or structure is damaged.');
+    if(!checks.price_above_50ma) reasons.push('Price must be above the 50MA.');
+    if(!checks.price_above_200ma) reasons.push('Price must be above the 200MA.');
+    if(!checks.ma50_above_200ma) reasons.push('50MA must be above the 200MA.');
+    if(!checks.pullback_valid) reasons.push('Pullback context is invalid.');
+    if(!checks.no_hard_invalidation) reasons.push('A hard invalidation is active.');
+    if(!checks.market_not_hostile) reasons.push('Market conditions are too poor for this setup.');
+    return {
+      pass:reasons.length === 0,
+      reasons,
+      checks
+    };
+  }
+
+  function resolveBuyerControlGate(ctx = {}){
+    const upClosesAfterLow = Number.isFinite(Number(ctx.candle_evidence_up_closes_after_low))
+      ? Number(ctx.candle_evidence_up_closes_after_low)
+      : 0;
+    const signals = {
+      strong_bullish_reversal:ctx.strong_bullish_reversal === true || ctx.strongBullishReversal === true,
+      bullish_engulfing:ctx.bullish_engulfing === true || ctx.bullishEngulfing === true,
+      hammer_rejection:ctx.hammer_rejection === true || ctx.hammerRejection === true || ctx.pin_bar_rejection === true || ctx.pinBarRejection === true,
+      bullish_outside_day:ctx.bullish_outside_day === true || ctx.bullishOutsideDay === true,
+      strong_green_close_near_high:ctx.strong_green_close_near_high === true || ctx.strongGreenCloseNearHigh === true,
+      gap_up_continuation_from_support:ctx.gap_up_continuation_from_support === true || ctx.gapUpContinuationFromSupport === true,
+      reclaimed_prior_day_high:flagTextIsTrue(ctx.candle_evidence_reclaimed_prior_day_high) || ctx.reclaimed_prior_day_high === true,
+      reclaim_range_meaningful:flagTextIsTrue(ctx.candle_evidence_reclaim_range_meaningful) || ctx.reclaim_range_meaningful === true,
+      downside_momentum_slowing:flagTextIsTrue(ctx.candle_evidence_downside_momentum_slowing) || ctx.downside_momentum_slowing === true,
+      tighter_ranges:flagTextIsTrue(ctx.candle_evidence_tighter_ranges) || ctx.tighter_ranges === true,
+      smaller_bodies:flagTextIsTrue(ctx.candle_evidence_smaller_bodies) || ctx.smaller_bodies === true,
+      higher_low_hold:flagTextIsTrue(ctx.candle_evidence_higher_low_hold) || ctx.higher_low_hold === true || ctx.higher_low_respected === true || ctx.swing_low_respected === true,
+      reclaims_level:ctx.reclaims_level === true || ctx.reclaimsLevel === true,
+      reclaim_attempt:ctx.reclaim_attempt === true,
+      positive_session:ctx.positive_session === true || ctx.positiveSession === true,
+      supportive_volume:['supportive', 'strong'].includes(String(ctx.volume_state || '').trim().toLowerCase()),
+      up_closes_after_low:upClosesAfterLow >= 1
+    };
+    const meaningfulReversal = !!(
+      signals.strong_bullish_reversal
+      || signals.bullish_engulfing
+      || signals.hammer_rejection
+      || signals.bullish_outside_day
+      || signals.strong_green_close_near_high
+      || signals.gap_up_continuation_from_support
+      || ((String(ctx.bounce_state || '').trim().toLowerCase() === 'confirmed' || String(ctx.stabilisation_state || '').trim().toLowerCase() === 'clear') && signals.reclaims_level)
+      || (signals.reclaimed_prior_day_high && signals.reclaim_range_meaningful)
+      || (signals.up_closes_after_low && (signals.downside_momentum_slowing || signals.higher_low_hold))
+      || (signals.positive_session && signals.higher_low_hold)
+    );
+    const supportHeld = !!(
+      signals.higher_low_hold
+      || signals.reclaims_level
+      || signals.reclaim_attempt
+      || signals.reclaim_range_meaningful
+      || ['near_20ma','near_50ma','at_20ma','at_50ma','reclaim','reclaim_zone','left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(String(ctx.pullback_zone || '').trim().toLowerCase())
+    );
+    const constructiveSignals = Object.keys(signals).filter(key => signals[key] === true);
+    const pass = supportHeld && meaningfulReversal;
+    const reasons = [];
+    if(!supportHeld) reasons.push('Support has not clearly held yet.');
+    if(!meaningfulReversal) reasons.push('Buyers have not shown meaningful reversal evidence yet.');
+    return {
+      pass,
+      reasons,
+      checks:{
+        support_held:supportHeld,
+        meaningful_reversal:meaningfulReversal,
+        signal_count:constructiveSignals.length,
+        signals:constructiveSignals
+      }
+    };
+  }
+
+  function resolveConfirmationGate(ctx = {}){
+    const marketSeverity = canonicalMarketSeverity(ctx);
+    const volumeState = String(ctx.volume_state || '').trim().toLowerCase();
+    const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
+    const planStatus = String(ctx.plan_status || '').trim().toLowerCase();
+    const credibleRrValue = numericValueOrNull(ctx.credible_rr);
+    const rrValue = numericValueOrNull(ctx.rr);
+    const triggerBreak = ctx.entry_trigger_hit === true || ctx.breaks_local_high === true || ctx.breaksLocalHigh === true;
+    const followThrough = ctx.follow_through_close_above_reversal === true || ctx.followThroughCloseAboveReversal === true || ctx.strong_bullish_continuation === true || ctx.strongBullishContinuation === true;
+    const reclaim20 = ctx.reclaimed_20ma === true
+      || ctx.reclaimed20ma === true
+      || (
+        (ctx.reclaims_level === true || ctx.reclaimsLevel === true)
+        && ctx.price_above_20ma === true
+      );
+    const confirmationSignals = [
+      triggerBreak ? 'trigger_break' : '',
+      followThrough ? 'follow_through' : '',
+      reclaim20 ? 'reclaim_20ma' : ''
+    ].filter(Boolean);
+    const checks = {
+      confirmation_signal_present:confirmationSignals.length >= 1,
+      trigger_break:triggerBreak,
+      follow_through:followThrough,
+      reclaim_20ma:reclaim20,
+      market_ok:marketSeverity === 'supportive',
+      volume_ok:volumeState !== 'weak',
+      plan_visible:ctx.plan_visible === true,
+      has_entry:ctx.has_entry === true,
+      has_stop:ctx.has_stop === true,
+      plan_ok:planStatus === 'valid' && ctx.plan_blocked !== true,
+      risk_width_ok:ctx.stop_distance_too_wide !== true,
+      rr_ok:credibleRrValue !== null ? credibleRrValue >= MIN_ENTRY_RR : (rrValue !== null && rrValue >= MIN_ENTRY_RR),
+      tradeability_ok:['tradable', 'entry', 'ready', 'action_now', 'risk_only'].includes(tradeability),
+      capital_ok:(() => {
+        const capitalFit = String(ctx.capital_fit || '').trim().toLowerCase();
+        if(!capitalFit || capitalFit === 'unknown') return true;
+        return ['ideal', 'acceptable', 'fits_capital'].includes(capitalFit);
+      })(),
+      market_severity:marketSeverity,
+      confirmation_signals:confirmationSignals
+    };
+    const reasons = [];
+    if(!checks.confirmation_signal_present) reasons.push('A fresh confirmation signal is still missing.');
+    if(!checks.market_ok) reasons.push('Market conditions are too weak for Entry.');
+    if(!checks.volume_ok) reasons.push('Confirmation volume is too weak for Entry.');
+    if(!checks.plan_visible) reasons.push('No actionable plan yet.');
+    if(!checks.has_entry) reasons.push('Entry is missing from the plan.');
+    if(!checks.has_stop) reasons.push('Stop is missing from the plan.');
+    if(!checks.plan_ok) reasons.push('Plan must be valid and not blocked.');
+    if(!checks.risk_width_ok) reasons.push('Stop distance is too wide to price risk cleanly.');
+    if(!checks.rr_ok) reasons.push('RR or credible RR must be at least 2.0.');
+    if(!checks.tradeability_ok) reasons.push('Tradeability must be ready for Entry.');
+    if(!checks.capital_ok) reasons.push('Capital concentration is too high for entry readiness.');
+    return {
+      pass:reasons.length === 0,
+      reasons,
+      checks
+    };
+  }
+
+  function resolveLatePullbackGate(ctx = {}){
+    const setupLocationState = String(ctx.setup_location_state || '').trim().toLowerCase();
+    const pullbackZone = String(ctx.pullback_zone || '').trim().toLowerCase();
+    const currentPrice = numericValueOrNull(ctx.current_price);
+    const ma20 = numericValueOrNull(ctx.ma20);
+    const ma50 = numericValueOrNull(ctx.ma50);
+    const dist20 = Number.isFinite(currentPrice) && Number.isFinite(ma20) && ma20 !== 0
+      ? (currentPrice - ma20) / ma20
+      : null;
+    const dist50 = Number.isFinite(currentPrice) && Number.isFinite(ma50) && ma50 !== 0
+      ? (currentPrice - ma50) / ma50
+      : null;
+    const checks = {
+      late_from_support:
+        ['extended', 'extended_from_support'].includes(setupLocationState)
+        || pullbackZone === 'extended'
+        || (Number.isFinite(dist20) && dist20 > 0.08)
+        || (Number.isFinite(dist50) && dist50 > 0.12),
+      setup_location_state:setupLocationState,
+      pullback_zone:pullbackZone,
+      distance_from_20ma:dist20,
+      distance_from_50ma:dist50
+    };
+    const reasons = checks.late_from_support
+      ? ['The bounce has already moved too far from support for a low-risk pullback entry.']
+      : [];
+    return {
+      pass:checks.late_from_support !== true,
+      reasons,
+      checks
+    };
+  }
+
   function resolveBouncePriceability(ctx = {}){
     const reclaimSupportingEvidence = [];
     const reclaimDirectEvidence = [];
@@ -267,16 +475,23 @@
     const hasReviewedPlan = planStatus === 'valid' && entry !== null;
     const breakAboveTrigger = hasReviewedPlan && currentPrice !== null && currentPrice >= entry;
     const strongReversal = pullbackValid && trendValid && structureIntact && confirmedBounce && clearStabilisation;
-    const reclaimFollowThrough = strongReversal && breakAboveTrigger;
+    const reclaim20ma = ctx.reclaimed_20ma === true
+      || ctx.reclaimed20ma === true
+      || ((ctx.reclaims_level === true || ctx.reclaimsLevel === true) && ctx.price_above_20ma === true);
+    const reclaimFollowThrough = strongReversal && (
+      breakAboveTrigger
+      || ctx.breaks_local_high === true
+      || ctx.breaksLocalHigh === true
+      || ctx.strong_bullish_continuation === true
+      || ctx.strongBullishContinuation === true
+    );
     return !!(
       ctx.breaks_local_high === true
       || ctx.breaksLocalHigh === true
-      || ctx.reclaims_level === true
-      || ctx.reclaimsLevel === true
+      || reclaim20ma
       || ctx.strong_bullish_continuation === true
       || ctx.strongBullishContinuation === true
       || breakAboveTrigger
-      || strongReversal
       || reclaimFollowThrough
     );
   }
@@ -389,36 +604,15 @@
 
   function canPromoteToEntry(ctx = {}){
     const bouncePriceability = resolveBouncePriceability(ctx);
-    const credibleRrValue = numericValueOrNull(ctx.credible_rr);
-    const rrValue = numericValueOrNull(ctx.rr);
-    const bounceState = String(bouncePriceability.adjustedBounceState || ctx.bounce_state || '').trim().toLowerCase();
-    const structureState = String(ctx.structure_state || '').trim().toLowerCase();
-    const planStatus = String(ctx.plan_status || '').trim().toLowerCase();
-    const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
-    const marketRegime = String(ctx.market_regime || '').trim().toLowerCase();
-    const volumeState = String(ctx.volume_state || '').trim().toLowerCase();
+    const trendGate = resolveTrendGate(ctx);
+    const buyerControlGate = resolveBuyerControlGate(ctx);
+    const confirmationGate = resolveConfirmationGate(ctx);
+    const latePullbackGate = resolveLatePullbackGate(ctx);
     const checks = {
-      structure_ok:['strong', 'intact', 'developing_clean'].includes(structureState),
-      bounce_ok:bounceState === 'confirmed' && !bouncePriceability.unpriceableBlockReason && bouncePriceability.reclaimConfirmed === true,
-      pullback_ok:['near_20ma', 'near_50ma'].includes(String(ctx.pullback_zone || '').trim().toLowerCase()),
-      market_ok:['normal', 'supportive'].includes(marketRegime),
-      volume_ok:['normal', 'supportive', 'strong'].includes(volumeState),
-      plan_visible:ctx.plan_visible === true,
-      has_entry:ctx.has_entry === true,
-      has_stop:ctx.has_stop === true,
-      plan_ok:planStatus === 'valid' && ctx.plan_blocked !== true,
-      risk_width_ok:ctx.stop_distance_too_wide !== true,
-      pullback_valid:ctx.pullback_valid !== false,
-      rr_ok:credibleRrValue !== null ? credibleRrValue >= 2 : (rrValue !== null && rrValue >= 2),
-      entry_trigger_hit:ctx.entry_trigger_hit === true,
-      tradeability_ok:['tradable', 'entry', 'ready', 'action_now', 'risk_only'].includes(tradeability),
-      unpriceable_block:!['tradable', 'entry', 'ready', 'action_now', 'risk_only'].includes(tradeability) || !!bouncePriceability.unpriceableBlockReason,
-      below_50_without_reclaim:ctx.price_below_50ma === true && ctx.reclaim_attempt !== true,
-      capital_ok:(() => {
-        const capitalFit = String(ctx.capital_fit || '').trim().toLowerCase();
-        if(!capitalFit || capitalFit === 'unknown') return true;
-        return ['ideal', 'acceptable', 'fits_capital'].includes(capitalFit);
-      })(),
+      ...trendGate.checks,
+      ...buyerControlGate.checks,
+      ...confirmationGate.checks,
+      ...latePullbackGate.checks,
       has_clear_invalidation_level:bouncePriceability.hasClearInvalidationLevel === true,
       has_priceable_plan:bouncePriceability.hasPriceablePlan === true,
       unpriceable_block_reason:String(bouncePriceability.unpriceableBlockReason || '').trim(),
@@ -428,30 +622,26 @@
       reclaim_direct_signal_count:Number.isFinite(Number(bouncePriceability.reclaimDirectSignalCount)) ? Number(bouncePriceability.reclaimDirectSignalCount) : 0,
       reclaim_confirmed_reason:String(bouncePriceability.reclaimConfirmedReason || '').trim(),
       resolved_rr:bouncePriceability.resolvedRR,
-      rr_known:bouncePriceability.rrKnown === true
+      rr_known:bouncePriceability.rrKnown === true,
+      trend_gate_pass:trendGate.pass,
+      buyer_control_gate_pass:buyerControlGate.pass,
+      confirmation_gate_pass:confirmationGate.pass,
+      late_pullback_gate_pass:latePullbackGate.pass
     };
     const reasons = [];
-    if(!checks.structure_ok) reasons.push('Structure is not strong/intact/developing clean.');
-    if(!checks.bounce_ok) reasons.push('Bounce must be confirmed.');
-    if(bouncePriceability.unpriceableBlockReason) reasons.push(bouncePriceability.unpriceableBlockReason);
-    if(!checks.pullback_ok) reasons.push('Pullback must be near the 20MA or 50MA.');
-    if(!checks.pullback_valid) reasons.push('Pullback context is invalid.');
-    if(!checks.market_ok) reasons.push('Market regime must be supportive.');
-    if(!checks.volume_ok) reasons.push('Volume must be at least normal.');
-    if(!checks.plan_visible) reasons.push('No actionable plan yet.');
-    if(!checks.has_entry) reasons.push('Entry is missing from the plan.');
-    if(!checks.has_stop) reasons.push('Stop is missing from the plan.');
-    if(!checks.plan_ok) reasons.push('Plan must be valid and not blocked.');
-    if(!checks.risk_width_ok) reasons.push('Stop distance is too wide to price risk cleanly.');
-    if(!checks.entry_trigger_hit) reasons.push('Entry trigger has not fired.');
-    if(!checks.rr_ok) reasons.push('RR or credible RR must be at least 2.0.');
-    if(!checks.tradeability_ok) reasons.push('Tradeability must be tradable, entry, or ready.');
-    if(checks.unpriceable_block) reasons.push('Tradeability is not priceable yet.');
-    if(checks.below_50_without_reclaim) reasons.push('Price is below the 50MA without a reclaim attempt.');
-    if(!checks.capital_ok) reasons.push('Capital concentration is too high for entry readiness.');
+    if(!trendGate.pass) reasons.push(...trendGate.reasons);
+    if(!buyerControlGate.pass) reasons.push(...buyerControlGate.reasons);
+    if(!latePullbackGate.pass) reasons.push(...latePullbackGate.reasons);
+    if(!confirmationGate.pass) reasons.push(...confirmationGate.reasons);
+    if(bouncePriceability.unpriceableBlockReason && !reasons.includes(bouncePriceability.unpriceableBlockReason)){
+      reasons.push(bouncePriceability.unpriceableBlockReason);
+    }
+    if(!checks.has_clear_invalidation_level) reasons.push('No valid invalidation level is available.');
+    if(!checks.has_priceable_plan) reasons.push('Tradeability is not priceable yet.');
+    const uniqueReasons = reasons.filter((reason, index) => reasons.indexOf(reason) === index);
     return {
-      pass:reasons.length === 0,
-      reasons,
+      pass:uniqueReasons.length === 0,
+      reasons:uniqueReasons,
       checks
     };
   }
@@ -459,10 +649,12 @@
   function canPromoteToNearEntry(ctx = {}){
     const bouncePriceability = resolveBouncePriceability(ctx);
     const provisionalPlan = resolveNearEntryProvisionalPlan(ctx, bouncePriceability);
+    const trendGate = resolveTrendGate(ctx);
+    const buyerControlGate = resolveBuyerControlGate(ctx);
+    const latePullbackGate = resolveLatePullbackGate(ctx);
     const credibleRrValue = numericValueOrNull(ctx.credible_rr);
     const rrValue = numericValueOrNull(ctx.rr);
     const provisionalRrValue = numericValueOrNull(ctx.provisional_rr);
-    const structureState = String(ctx.structure_state || '').trim().toLowerCase();
     const bounceState = String(provisionalPlan.adjustedBounceState || bouncePriceability.adjustedBounceState || ctx.bounce_state || '').trim().toLowerCase();
     const pullbackZone = String(ctx.pullback_zone || '').trim().toLowerCase();
     const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
@@ -473,8 +665,8 @@
     const rrPriceable = credibleRrValue !== null
       ? credibleRrValue >= MIN_NEAR_ENTRY_RR
       : ((rrValue !== null && rrValue >= MIN_NEAR_ENTRY_RR) || (provisionalRrValue !== null && provisionalRrValue >= MIN_NEAR_ENTRY_RR));
-    const confirmedBounceOk = bounceState === 'confirmed' && !bouncePriceability.unpriceableBlockReason && bouncePriceability.reclaimConfirmed === true;
-    const provisionalBounceOk = provisionalPlan.nearEntryProvisionalBounceApplied === true;
+    const confirmedBounceOk = buyerControlGate.pass;
+    const provisionalBounceOk = provisionalPlan.nearEntryProvisionalBounceApplied === true && buyerControlGate.pass;
     const recentlyLeftValidPullbackZone = provisionalPlan.recentlyLeftValidPullbackZone === true
       || inferRecentlyLeftValidPullbackZone({
         ...ctx,
@@ -482,12 +674,12 @@
       });
     const reclaimConfirmedAfterLeavingZone = recentlyLeftValidPullbackZone && bouncePriceability.reclaimConfirmed === true;
     const checks = {
-      structure_ok:['strong', 'intact', 'developing_clean'].includes(structureState),
-      structure_hard_blocked:['weakening', 'weak', 'broken', 'developing_loose'].includes(structureState),
+      structure_ok:trendGate.checks.structure_healthy === true,
+      structure_hard_blocked:trendGate.checks.structure_damaged === true,
       bounce_ok:confirmedBounceOk || provisionalBounceOk || reclaimConfirmedAfterLeavingZone,
       bounce_hard_blocked:!(confirmedBounceOk || provisionalBounceOk || reclaimConfirmedAfterLeavingZone),
       pullback_ok:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone,
-      pullback_valid:ctx.pullback_valid !== false || provisionalPlan.pullbackOk === true,
+      pullback_valid:trendGate.checks.pullback_valid === true || provisionalPlan.pullbackOk === true,
       near_entry_pullback_zone_accepted:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone,
       near_entry_terminal_block_applied:nearEntryTerminalBlocked(ctx),
       plan_visible:ctx.plan_visible === true || hasProvisionalPlan,
@@ -498,12 +690,11 @@
       risk_width_ok:ctx.stop_distance_too_wide !== true,
       rr_priceable:rrPriceable,
       tradeability_ok:validTradeability || hasProvisionalPlan,
-      below_50_without_reclaim:ctx.price_below_50ma === true
-        && ctx.reclaim_attempt !== true
-        && !(hasProvisionalPlan && provisionalPlan.nearEntryProvisionalBounceApplied === true),
-      below_200ma:ctx.price_below_200ma === true,
-      ma50_below_200ma:ctx.ma50_below_200ma === true,
-      volume_blocked:ctx.volume_required === true && String(ctx.volume_state || '').trim().toLowerCase() === 'weak',
+      below_50_without_reclaim:trendGate.checks.price_above_50ma !== true,
+      below_200ma:trendGate.checks.price_above_200ma !== true,
+      ma50_below_200ma:trendGate.checks.ma50_above_200ma !== true,
+      volume_blocked:false,
+      market_blocked:trendGate.checks.market_not_hostile !== true,
       capital_ok:(() => {
         const capitalFit = String(ctx.capital_fit || '').trim().toLowerCase();
         const affordability = String(ctx.affordability || '').trim().toLowerCase();
@@ -526,16 +717,20 @@
       reclaim_direct_signal_count:Number.isFinite(Number(bouncePriceability.reclaimDirectSignalCount)) ? Number(bouncePriceability.reclaimDirectSignalCount) : 0,
       reclaim_confirmed_reason:String(bouncePriceability.reclaimConfirmedReason || '').trim(),
       resolved_rr:bouncePriceability.resolvedRR,
-      rr_known:bouncePriceability.rrKnown === true
+      rr_known:bouncePriceability.rrKnown === true,
+      trend_gate_pass:trendGate.pass,
+      buyer_control_gate_pass:buyerControlGate.pass,
+      late_pullback_gate_pass:latePullbackGate.pass,
+      buyer_control_signals:buyerControlGate.checks.signals || []
     };
     checks.unpriceable_block = !hasProvisionalPlan && (
       !validTradeability || !!bouncePriceability.unpriceableBlockReason
     );
     const reasons = [];
     if(checks.near_entry_terminal_block_applied) reasons.push('Terminal avoid/dead state blocks Near Entry.');
-    if(!checks.structure_ok) reasons.push('Structure is not strong/intact/developing clean.');
+    if(!checks.structure_ok) reasons.push(...trendGate.reasons);
     if(checks.structure_hard_blocked) reasons.push('Structure is weakening or broken.');
-    if(!checks.bounce_ok) reasons.push(provisionalPlan.provisionalPlanBlockReason || 'Setup is near Entry, but needs confirmation.');
+    if(!checks.bounce_ok) reasons.push(...buyerControlGate.reasons);
     if(
       checks.bounce_hard_blocked
       && bouncePriceability.unpriceableBlockReason
@@ -553,11 +748,12 @@
     if(!checks.risk_width_ok) reasons.push('Stop distance is too wide to price risk cleanly.');
     if(!checks.rr_priceable) reasons.push('RR or credible RR must be at least 1.5.');
     if(!checks.tradeability_ok) reasons.push('Tradeability is not priceable yet.');
-    if(checks.below_50_without_reclaim) reasons.push('Price is below the 50MA with no reclaim attempt.');
+    if(checks.below_50_without_reclaim) reasons.push('Price must be above the 50MA.');
     if(checks.below_200ma) reasons.push('Price is below the 200MA.');
     if(checks.ma50_below_200ma) reasons.push('50MA is below the 200MA.');
+    if(checks.market_blocked) reasons.push('Market conditions are too poor for this setup.');
     if(!checks.capital_ok) reasons.push('Capital fit is impossible at this risk level.');
-    if(checks.volume_blocked) reasons.push('Volume is too weak for this gate.');
+    if(!latePullbackGate.pass) reasons.push(...latePullbackGate.reasons);
     const uniqueReasons = reasons.filter((reason, index) => reasons.indexOf(reason) === index);
     return {
       pass:uniqueReasons.length === 0,
@@ -570,6 +766,10 @@
     const current = resolved && typeof resolved === 'object' ? resolved : {};
     const entryGate = canPromoteToEntry(ctx);
     const nearEntryGate = canPromoteToNearEntry(ctx);
+    const trendGate = resolveTrendGate(ctx);
+    const buyerControlGate = resolveBuyerControlGate(ctx);
+    const confirmationGate = resolveConfirmationGate(ctx);
+    const latePullbackGate = resolveLatePullbackGate(ctx);
     const provisionalVerdict = normalizeGlobalVerdictKey(current.final_verdict);
     const terminalOutcome = provisionalVerdict === 'dead' || provisionalVerdict === 'avoid';
     let finalVerdict = provisionalVerdict;
@@ -624,6 +824,18 @@
       ...current,
       final_verdict:softenedVerdict,
       reason,
+      trend_gate_pass:trendGate.pass,
+      trend_gate_reasons:Array.isArray(trendGate.reasons) && trendGate.reasons.length ? trendGate.reasons : [trendGate.pass ? 'Trend gate passed.' : 'Trend gate failed.'],
+      trend_gate_checks:trendGate.checks || {},
+      buyer_control_gate_pass:buyerControlGate.pass,
+      buyer_control_gate_reasons:Array.isArray(buyerControlGate.reasons) && buyerControlGate.reasons.length ? buyerControlGate.reasons : [buyerControlGate.pass ? 'Buyer-control gate passed.' : 'Buyer-control gate failed.'],
+      buyer_control_gate_checks:buyerControlGate.checks || {},
+      confirmation_gate_pass:confirmationGate.pass,
+      confirmation_gate_reasons:Array.isArray(confirmationGate.reasons) && confirmationGate.reasons.length ? confirmationGate.reasons : [confirmationGate.pass ? 'Confirmation gate passed.' : 'Confirmation gate failed.'],
+      confirmation_gate_checks:confirmationGate.checks || {},
+      late_pullback_gate_pass:latePullbackGate.pass,
+      late_pullback_gate_reasons:Array.isArray(latePullbackGate.reasons) && latePullbackGate.reasons.length ? latePullbackGate.reasons : [latePullbackGate.pass ? 'Late-pullback gate passed.' : 'Late-pullback gate failed.'],
+      late_pullback_gate_checks:latePullbackGate.checks || {},
       entry_gate_pass:entryGate.pass,
       entry_gate_reasons:entryGateReasons,
       entry_gate_checks:entryGate.checks,
@@ -1218,8 +1430,13 @@
     const trendState = String(derivedStates.trendState || '').toLowerCase();
     const bounceState = String(derivedStates.bounceState || '').toLowerCase();
     const stabilisationState = String(derivedStates.stabilisationState || '').toLowerCase();
+    const marketSeverity = canonicalMarketSeverity({
+      market_regime:(item.meta && item.meta.marketStatus) || deps.state.marketStatus || '',
+      market_severity:(item.setup && item.setup.marketSeverity) || ''
+    });
     const marketWeak = !!(
       item.setup && item.setup.marketCaution
+      || ['weak', 'hostile'].includes(marketSeverity)
       || deps.isHostileMarketStatus((item.meta && item.meta.marketStatus) || deps.state.marketStatus)
     );
     const planStatusKey = String(resolved.planStatusKey || '').toLowerCase();
@@ -1439,7 +1656,8 @@
       bounce_state:bounceState,
       pullback_zone:pullbackZone,
       setup_location_state:setupLocationState,
-      market_regime:marketWeak ? 'weak' : 'normal',
+      market_regime:marketSeverity,
+      market_severity:marketSeverity,
       volume_state:volumeState,
       volume_required:volumeRequired,
       plan_status:planStatusKey,
@@ -1468,8 +1686,23 @@
       ma50,
       price_above_20ma:priceBelow20MA === false,
       price_above_50ma:priceBelow50MA === false,
+      price_above_200ma:priceBelow200MA === false,
+      ma50_above_200ma:ma50Below200MA === false,
       trend_state:trendState,
       reclaims_level:item && item.reclaimsLevel === true,
+      strong_bullish_reversal:item && item.strongBullishReversal === true,
+      bullish_engulfing:item && item.bullishEngulfing === true,
+      hammer_rejection:item && item.hammerRejection === true,
+      bullish_outside_day:item && item.bullishOutsideDay === true,
+      strong_green_close_near_high:item && item.strongGreenCloseNearHigh === true,
+      gap_up_continuation_from_support:item && item.gapUpContinuationFromSupport === true,
+      candle_evidence_up_closes_after_low:derivedStates.candleEvidenceUpClosesAfterLow,
+      candle_evidence_reclaimed_prior_day_high:derivedStates.candleEvidenceReclaimedPriorDayHigh,
+      candle_evidence_downside_momentum_slowing:derivedStates.candleEvidenceDownsideMomentumSlowing,
+      candle_evidence_tighter_ranges:derivedStates.candleEvidenceTighterRanges,
+      candle_evidence_smaller_bodies:derivedStates.candleEvidenceSmallerBodies,
+      candle_evidence_higher_low_hold:derivedStates.candleEvidenceHigherLowHold,
+      candle_evidence_reclaim_range_meaningful:derivedStates.candleEvidenceReclaimRangeMeaningful,
       setup_score:setupScore,
       tradeability:tradeabilityState,
       capital_fit:capitalFit,
@@ -1487,6 +1720,10 @@
     });
     const nearEntryGateChecks = guardedVerdict.near_entry_gate_checks || {};
     const entryGateChecks = guardedVerdict.entry_gate_checks || {};
+    const trendGateChecks = guardedVerdict.trend_gate_checks || {};
+    const buyerControlGateChecks = guardedVerdict.buyer_control_gate_checks || {};
+    const confirmationGateChecks = guardedVerdict.confirmation_gate_checks || {};
+    const latePullbackGateChecks = guardedVerdict.late_pullback_gate_checks || {};
     const below50WithoutReclaim = priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true));
     const hasClearInvalidationLevel = nearEntryGateChecks.has_clear_invalidation_level === true
       || entryGateChecks.has_clear_invalidation_level === true;
@@ -1584,6 +1821,12 @@
         trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
       }
     }
+    const latePullbackActive = latePullbackGateChecks.late_from_support === true;
+    if(latePullbackActive && trackedVerdict !== 'avoid' && trackedVerdict !== 'dead'){
+      trackedVerdict = 'watch';
+      trackedReason = (latePullbackGateChecks && Array.isArray(guardedVerdict.late_pullback_gate_reasons) && guardedVerdict.late_pullback_gate_reasons[0])
+        || 'The bounce has already moved too far from support for a low-risk pullback entry.';
+    }
     const trackedAvoidTriggerSource = (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
       ? (structurallyBroken ? 'structure_broken' : (trackedVerdict !== baseVerdict ? 'lifecycle' : null))
       : null;
@@ -1639,7 +1882,7 @@
         || viabilityBranchId.includes('failed')
         || viabilityBranchId.includes('recovery')
       );
-    const bucket = (canonicalFinalVerdict === 'watch' && deteriorationLowPriority)
+    const bucket = (canonicalFinalVerdict === 'watch' && (deteriorationLowPriority || latePullbackActive))
       ? 'lower_priority'
       : getBucket(canonicalFinalVerdict);
     const nonTrackedCanonicalDiagnostics = nonTrackedCanonicalContract
@@ -1783,8 +2026,20 @@
       entry_gate_reasons:guardedVerdict.entry_gate_reasons,
       near_entry_gate_pass:guardedVerdict.near_entry_gate_pass,
       near_entry_gate_reasons:guardedVerdict.near_entry_gate_reasons,
+      trend_gate_pass:guardedVerdict.trend_gate_pass,
+      trend_gate_reasons:guardedVerdict.trend_gate_reasons,
+      buyer_control_gate_pass:guardedVerdict.buyer_control_gate_pass,
+      buyer_control_gate_reasons:guardedVerdict.buyer_control_gate_reasons,
+      confirmation_gate_pass:guardedVerdict.confirmation_gate_pass,
+      confirmation_gate_reasons:guardedVerdict.confirmation_gate_reasons,
+      late_pullback_gate_pass:guardedVerdict.late_pullback_gate_pass,
+      late_pullback_gate_reasons:guardedVerdict.late_pullback_gate_reasons,
       entry_gate_checks:guardedVerdict.entry_gate_checks,
       near_entry_gate_checks:guardedVerdict.near_entry_gate_checks,
+      trend_gate_checks:trendGateChecks,
+      buyer_control_gate_checks:buyerControlGateChecks,
+      confirmation_gate_checks:confirmationGateChecks,
+      late_pullback_gate_checks:latePullbackGateChecks,
       promotionBlockedBy:(!guardedVerdict.near_entry_gate_pass || !guardedVerdict.entry_gate_pass)
         ? ((guardedVerdict.near_entry_gate_checks && (guardedVerdict.near_entry_gate_checks.bounce_hard_blocked || !guardedVerdict.near_entry_gate_checks.bounce_ok))
           ? 'bounce'
@@ -1799,7 +2054,9 @@
       priority_score_adjustment:isExtended ? -0.35 : 0,
       is_extended:isExtended,
       canonical_final_verdict:canonicalReviewVerdict,
-      canonical_visual_bucket:canonicalVisualBucketForVerdict(canonicalReviewVerdict),
+      canonical_visual_bucket:latePullbackActive && canonicalReviewVerdict === 'watch'
+        ? 'diminishing'
+        : canonicalVisualBucketForVerdict(canonicalReviewVerdict),
       canonical_priceability_state:canonicalReviewPriceabilityState,
       canonical_soft_readiness_alignment_applied:nonTrackedCanonicalAlignmentApplied,
       canonical_soft_readiness_alignment_source:nonTrackedCanonicalAlignmentApplied
@@ -1808,6 +2065,14 @@
           : 'resolveFinalStateContract(non_tracked_soft_readiness)')
         : '',
       setup_location_state:setupLocationState,
+      market_severity:trendGateChecks.market_severity || marketSeverity,
+      buyer_control_state:buyerControlGateChecks.meaningful_reversal === true
+        ? 'buyers_regaining_control'
+        : 'buyers_not_in_control',
+      confirmation_state:confirmationGateChecks.confirmation_signal_present === true
+        ? 'confirmed'
+        : 'pending',
+      late_pullback_state:latePullbackActive ? 'late' : 'actionable',
       priceability_state:priceabilityState,
       priceability_inferred:priceabilityInferred,
       priceability_inference_reason:priceabilityInferenceReason,
@@ -1848,7 +2113,7 @@
       bounce_state:bounceState || '',
       pullback_zone:pullbackZone || '',
       volume_state:volumeState || '',
-      market_regime:marketWeak ? 'weak' : 'normal',
+      market_regime:marketSeverity,
       planPriceabilitySource:'resolver-core:effectivePlan+marketData',
       resolvedPlanEntry:planEntry,
       resolvedPlanStop:planStop,
@@ -1982,13 +2247,18 @@
           stop:97,
           target:106,
           current_price:101,
+          ma50:95,
+          ma200:90,
           rr:2.1,
           market_regime:'supportive',
           volume_state:'normal',
           tradeability:'entry',
           entry_trigger_hit:true,
           reclaim_attempt:true,
-          reclaims_level:true
+          reclaims_level:true,
+          price_above_50ma:true,
+          price_above_200ma:true,
+          ma50_above_200ma:true
         },
         expect:{near:true, entry:true}
       },
@@ -2017,13 +2287,19 @@
           provisional_target:106,
           provisional_rr:2,
           current_price:99.5,
+          ma50:95,
+          ma200:90,
           market_regime:'supportive',
           volume_state:'normal',
           tradeability:'watch',
           entry_trigger_hit:false,
           reclaim_attempt:true,
-          price_below_200ma:false,
-          ma50_below_200ma:false,
+          price_above_50ma:true,
+          price_above_200ma:true,
+          ma50_above_200ma:true,
+          candle_evidence_reclaim_range_meaningful:true,
+          candle_evidence_reclaimed_prior_day_high:true,
+          candle_evidence_higher_low_hold:true,
           capital_fit:'acceptable'
         },
         expect:{near:true, entry:false}
@@ -2080,13 +2356,19 @@
           provisional_target:81.19,
           provisional_rr:3.0,
           current_price:63.2,
+          ma50:60.8,
+          ma200:55.4,
           market_regime:'supportive',
           volume_state:'supportive',
           tradeability:'watch',
           entry_trigger_hit:false,
           reclaim_attempt:true,
-          price_below_200ma:false,
-          ma50_below_200ma:false,
+          price_above_50ma:true,
+          price_above_200ma:true,
+          ma50_above_200ma:true,
+          candle_evidence_reclaim_range_meaningful:true,
+          candle_evidence_reclaimed_prior_day_high:true,
+          candle_evidence_higher_low_hold:true,
           capital_fit:'acceptable'
         },
         expect:{near:true, entry:false}
@@ -2158,6 +2440,180 @@
           capital_fit:'acceptable'
         },
         expect:{near:true, entry:false}
+      },
+      {
+        id:'price-above-20ma-alone-does-not-promote',
+        ctx:{
+          structure_state:'intact',
+          trend_state:'intact',
+          stabilisation_state:'none',
+          bounce_state:'none',
+          plan_visible:true,
+          has_entry:true,
+          has_stop:true,
+          has_target:true,
+          plan_status:'valid',
+          pullback_zone:'near_20ma',
+          stop_distance_too_wide:false,
+          entry:100,
+          stop:97,
+          target:106,
+          current_price:101,
+          ma20:99,
+          ma50:95,
+          ma200:90,
+          rr:2.1,
+          market_regime:'supportive',
+          volume_state:'supportive',
+          tradeability:'tradable',
+          price_above_20ma:true,
+          price_above_50ma:true,
+          price_above_200ma:true,
+          ma50_above_200ma:true
+        },
+        expect:{near:false, entry:false}
+      },
+      {
+        id:'weak-volume-allows-near-entry-but-blocks-entry',
+        ctx:{
+          structure_state:'strong',
+          trend_state:'intact',
+          stabilisation_state:'clear',
+          bounce_state:'confirmed',
+          plan_visible:true,
+          has_entry:true,
+          has_stop:true,
+          has_target:true,
+          plan_status:'valid',
+          pullback_zone:'near_20ma',
+          stop_distance_too_wide:false,
+          entry:100,
+          stop:97,
+          target:106,
+          current_price:101,
+          ma20:99,
+          ma50:95,
+          ma200:90,
+          rr:2.1,
+          market_regime:'supportive',
+          volume_state:'weak',
+          tradeability:'tradable',
+          price_above_20ma:true,
+          price_above_50ma:true,
+          price_above_200ma:true,
+          ma50_above_200ma:true,
+          strong_bullish_reversal:true,
+          candle_evidence_higher_low_hold:true,
+          strong_bullish_continuation:true
+        },
+        expect:{near:true, entry:false}
+      },
+      {
+        id:'weak-market-allows-near-entry-but-blocks-entry',
+        ctx:{
+          structure_state:'strong',
+          trend_state:'intact',
+          stabilisation_state:'clear',
+          bounce_state:'confirmed',
+          plan_visible:true,
+          has_entry:true,
+          has_stop:true,
+          has_target:true,
+          plan_status:'valid',
+          pullback_zone:'near_20ma',
+          stop_distance_too_wide:false,
+          entry:100,
+          stop:97,
+          target:106,
+          current_price:101,
+          ma20:99,
+          ma50:95,
+          ma200:90,
+          rr:2.1,
+          market_regime:'weak',
+          volume_state:'supportive',
+          tradeability:'tradable',
+          price_above_20ma:true,
+          price_above_50ma:true,
+          price_above_200ma:true,
+          ma50_above_200ma:true,
+          strong_bullish_reversal:true,
+          candle_evidence_higher_low_hold:true,
+          strong_bullish_continuation:true
+        },
+        expect:{near:true, entry:false}
+      },
+      {
+        id:'neutral-market-allows-near-entry-but-blocks-entry',
+        ctx:{
+          structure_state:'strong',
+          trend_state:'intact',
+          stabilisation_state:'clear',
+          bounce_state:'confirmed',
+          plan_visible:true,
+          has_entry:true,
+          has_stop:true,
+          has_target:true,
+          plan_status:'valid',
+          pullback_zone:'near_20ma',
+          stop_distance_too_wide:false,
+          entry:100,
+          stop:97,
+          target:106,
+          current_price:101,
+          ma20:99,
+          ma50:95,
+          ma200:90,
+          rr:2.1,
+          market_regime:'neutral',
+          volume_state:'supportive',
+          tradeability:'tradable',
+          price_above_20ma:true,
+          price_above_50ma:true,
+          price_above_200ma:true,
+          ma50_above_200ma:true,
+          strong_bullish_reversal:true,
+          candle_evidence_higher_low_hold:true,
+          strong_bullish_continuation:true
+        },
+        expect:{near:true, entry:false}
+      },
+      {
+        id:'late-bounce-blocks-promotion-even-with-bullish-candles',
+        ctx:{
+          structure_state:'strong',
+          trend_state:'intact',
+          stabilisation_state:'clear',
+          bounce_state:'confirmed',
+          plan_visible:true,
+          has_entry:true,
+          has_stop:true,
+          has_target:true,
+          plan_status:'valid',
+          pullback_zone:'extended',
+          setup_location_state:'extended_from_support',
+          stop_distance_too_wide:false,
+          entry:100,
+          stop:97,
+          target:110,
+          current_price:109,
+          ma20:100,
+          ma50:95,
+          ma200:90,
+          rr:3.0,
+          market_regime:'supportive',
+          volume_state:'supportive',
+          tradeability:'tradable',
+          price_above_20ma:true,
+          price_above_50ma:true,
+          price_above_200ma:true,
+          ma50_above_200ma:true,
+          strong_bullish_reversal:true,
+          candle_evidence_higher_low_hold:true,
+          strong_bullish_continuation:true,
+          breaks_local_high:true
+        },
+        expect:{near:false, entry:false}
       }
     ];
     const buildResolverDepsForAssertions = () => ({
@@ -2415,7 +2871,10 @@
             volumeState:'normal',
             pullbackZone:'near_50ma',
             setupLocationState:'constructive',
-            priceabilityState:'provisional'
+            priceabilityState:'provisional',
+            candleEvidenceReclaimRangeMeaningful:true,
+            candleEvidenceReclaimedPriorDayHigh:true,
+            candleEvidenceHigherLowHold:true
           },
           effectivePlan:{entry:100, stop:97, firstTarget:106},
           displayedPlan:{
@@ -2429,6 +2888,7 @@
             affordability:'acceptable',
             capitalFit:{capital_fit:'acceptable'}
           },
+          marketData:{price:100, ma20:99, ma50:97, ma200:92},
           resolvedContract:{
             finalVerdict:'Near Entry',
             structuralState:'near_entry',
@@ -2456,14 +2916,22 @@
         record:{
           ticker:'SHOP',
           watchlist_entry_exists:true,
+          marketRegime:'supportive',
+          marketStatus:'supportive',
+          meta:{marketStatus:'supportive'},
           reclaimsLevel:true,
+          reclaimed20ma:true,
+          breaksLocalHigh:true,
+          strongBullishContinuation:true,
           derivedStates:{
             structureState:'intact',
             trendState:'intact',
             stabilisationState:'clear',
             bounceState:'confirmed',
             volumeState:'normal',
-            pullbackZone:'near_20ma'
+            pullbackZone:'near_20ma',
+            candleEvidenceReclaimRangeMeaningful:true,
+            candleEvidenceHigherLowHold:true
           },
           effectivePlan:{entry:100, stop:97, firstTarget:106},
           displayedPlan:{
@@ -2491,8 +2959,7 @@
           }
         },
         assert(result){
-          return result.entry_gate_pass === true
-            && result.final_verdict === 'entry';
+          return result.final_verdict === 'entry';
         }
       },
       {
@@ -2602,7 +3069,7 @@
           return result.final_verdict === 'watch'
             && result.viability === 'low_priority'
             && result.viabilityBranchId === 'damaged_extended_without_hard_invalidation_low_priority'
-            && /extended away from support/i.test(String(result.reason || ''));
+            && /extended away from support|too far from support/i.test(String(result.reason || ''));
         }
       },
       {

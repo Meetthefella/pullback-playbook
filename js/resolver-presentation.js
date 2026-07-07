@@ -73,6 +73,7 @@
     const resolvedRR = Number.isFinite(Number(options.resolvedRR)) ? Number(options.resolvedRR) : null;
     const reclaimSignalCount = Number.isFinite(Number(options.reclaimSignalCount)) ? Number(options.reclaimSignalCount) : null;
     const below50WithoutReclaim = options.below50WithoutReclaim === true;
+    const latePullbackState = String(options.latePullbackState || '').trim().toLowerCase();
     const hasClearInvalidationLevel = options.hasClearInvalidationLevel === true;
     const tradeabilityOk = options.tradeabilityOk === true;
     const rrOk = options.rrOk === true;
@@ -125,6 +126,9 @@
     }
     if(setupLocationState === 'none' && constructiveWaiting){
       return 'monitor';
+    }
+    if(latePullbackState === 'late'){
+      return 'diminishing';
     }
     const deteriorationEvidence = ['damaged','broken'].includes(structureEligibility)
       || (
@@ -313,6 +317,7 @@
     const viabilityBranchId = String(options && options.viabilityBranchId || '').toLowerCase();
     const setupScore = Number.isFinite(Number(options && options.setupScore)) ? Number(options.setupScore) : null;
     const structureState = String(options && options.structureState || '').toLowerCase();
+    const latePullbackState = String(options && options.latePullbackState || '').toLowerCase();
     const aliveStructure = structureEligibility === 'alive'
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const constructiveWaiting = aliveStructure
@@ -324,6 +329,7 @@
       && (setupScore === null || setupScore >= 5)
       && !['invalid','rebuild_required','too_wide'].includes(planStatus);
     if(setupLocationState === 'none' && constructiveWaiting) return 'Watch - waiting for confirmation.';
+    if(latePullbackState === 'late') return 'Watch - trend is healthy, but the bounce is already too far from support to chase.';
     if(setupLocationState === 'extended') return 'Watch - strong trend, but no clean pullback entry yet.';
     if(setupLocationState === 'volatile') return 'Watch - setup is too volatile to price reliably.';
     if((setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear') && (viability === 'low_priority' || viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5) || priceabilityState === 'unpriceable')) return 'Watch - strong trend, but no usable pullback setup yet.';
@@ -387,6 +393,7 @@
     const viabilityBranchId = String(legacyVerdict && legacyVerdict.viabilityBranchId || '').trim().toLowerCase();
     const structureState = String(derivedStates && derivedStates.structureState || '').trim().toLowerCase();
     const setupLocationState = String((derivedStates && derivedStates.setupLocationState) || (legacyVerdict && legacyVerdict.setup_location_state) || '').trim().toLowerCase();
+    const latePullbackState = String(legacyVerdict && legacyVerdict.late_pullback_state || '').trim().toLowerCase();
     const derivedPriceabilityState = String(derivedStates && derivedStates.priceabilityState || '').trim().toLowerCase();
     const priceabilityState = String(derivedPriceabilityState || (legacyVerdict && legacyVerdict.priceability_state) || '').trim().toLowerCase();
     const bounceState = String(derivedStates && derivedStates.bounceState || legacyVerdict && legacyVerdict.bounce_state || '').trim().toLowerCase();
@@ -474,6 +481,7 @@
       structureEligibility,
       structureState,
       setupLocationState,
+      latePullbackState,
       priceabilityState,
       numericSetupScore,
       planStatus,
@@ -498,6 +506,7 @@
       structureEligibility,
       structureState,
       setupLocationState,
+      latePullbackState,
       priceabilityState,
       viability,
       viabilityBranchId,
@@ -518,6 +527,7 @@
       structureEligibility,
       structureState,
       setupLocationState,
+      latePullbackState,
       priceabilityState,
       viability,
       viabilityBranchId,
@@ -612,6 +622,7 @@
       explicit_invalidation_reason:legacyVerdict && legacyVerdict.explicit_invalidation_reason ? String(legacyVerdict.explicit_invalidation_reason) : '(none)',
       structure_to_label_mapping_source:'resolveVisualState(structure_guard)',
       setup_location_state:setupLocationState,
+      late_pullback_state:latePullbackState,
       priceability_state:priceabilityState,
       lifecycle_drop_reason:legacyVerdict && legacyVerdict.lifecycle_drop_reason ? String(legacyVerdict.lifecycle_drop_reason) : '(none)',
       avoid_allowed_by_structure_consistency_guard:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase() === 'broken',

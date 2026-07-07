@@ -4159,6 +4159,16 @@ function projectionSnapshotWithAuthority(snapshot, record, overrides = {}){
   };
 }
 
+function projectionSnapshotContractFingerprint(snapshot){
+  const safeSnapshot = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  return String(
+    safeSnapshot.contractFingerprint
+    || safeSnapshot.snapshotContractFingerprint
+    || safeSnapshot.canonicalContractFingerprint
+    || ''
+  ).trim();
+}
+
 function persistedProjectionCanPreserveEntryDisplay(record){
   const item = normalizeTickerRecordReadOnly(record || {});
   if(normalizeGlobalVerdictKey(item.review && item.review.savedVerdict || '') !== 'entry') return false;
@@ -4205,9 +4215,15 @@ function reviewProjectionCanDriveEntryDisplay(snapshot, projectionSource, record
     mutationSource:'projection_authority_validation'
   })) || {};
   const baselineTrackVerdict = normalizeGlobalVerdictKey(baselineTrackState.canonicalVerdict || '');
+  const baselineContractFingerprint = String(
+    canonicalBundle.contract && canonicalBundle.contract.contractFingerprint || ''
+  ).trim();
+  const snapshotContractFingerprint = projectionSnapshotContractFingerprint(safeSnapshot);
   if(baselineContractVerdict !== 'entry') return false;
   if(baselineReviewVerdict && baselineReviewVerdict !== 'entry') return false;
   if(baselineTrackVerdict && baselineTrackVerdict !== 'entry') return false;
+  if(!snapshotContractFingerprint || !baselineContractFingerprint) return false;
+  if(snapshotContractFingerprint !== baselineContractFingerprint) return false;
   return true;
 }
 
@@ -4320,33 +4336,6 @@ function currentReviewStateHealthSnapshot(record){
   const globalVerdict = resolveGlobalVerdict(item);
   const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
   const effectiveSimplifiedState = applyReviewWatchlistSoftReadinessDisplayOverride(item, simplifiedState, globalVerdict, lifecycleSnapshot);
-  const projectionCanonicalVerdict = reviewSnapshotAuthority
-    ? normalizeGlobalVerdictKey(
-      sourceProjectionSnapshot && (
-        sourceProjectionSnapshot.canonicalVerdict
-        || sourceProjectionSnapshot.finalVerdict
-        || sourceProjectionSnapshot.renderedVerdict
-      ) || ''
-    )
-    : '';
-  const projectionVisualBucket = reviewSnapshotAuthority
-    ? normalizeVisualBucketForPairing(
-      sourceProjectionSnapshot && (
-        sourceProjectionSnapshot.sourceOfTruthVisualBucket
-        || sourceProjectionSnapshot.visualBucket
-        || sourceProjectionSnapshot.renderedBucket
-      ) || ''
-    )
-    : '';
-  const projectionTone = reviewSnapshotAuthority
-    ? (String(
-      presentationProjectionSnapshot && (
-        presentationProjectionSnapshot.tone
-        || presentationProjectionSnapshot.sourceOfTruthVisualBucket
-        || presentationProjectionSnapshot.visualBucket
-      ) || ''
-    ).trim().toLowerCase() || '')
-    : '';
   const authoritativeCanonicalVerdict = normalizeGlobalVerdictKey(effectiveSimplifiedState.canonicalVerdict || 'watch');
   let authoritativeVisualBucket = normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || 'monitor');
   if(authoritativeCanonicalVerdict === 'entry' && authoritativeVisualBucket !== 'entry'){
@@ -4354,19 +4343,16 @@ function currentReviewStateHealthSnapshot(record){
   }else if(authoritativeCanonicalVerdict === 'near_entry' && authoritativeVisualBucket === 'monitor'){
     authoritativeVisualBucket = 'near_entry';
   }
-  const simplifiedCanonicalVerdict = projectionCanonicalVerdict
-    || authoritativeCanonicalVerdict;
-  let simplifiedVisualBucket = projectionVisualBucket
-    || authoritativeVisualBucket;
+  const simplifiedCanonicalVerdict = authoritativeCanonicalVerdict;
+  let simplifiedVisualBucket = authoritativeVisualBucket;
   if(simplifiedCanonicalVerdict === 'entry' && simplifiedVisualBucket !== 'entry'){
     simplifiedVisualBucket = 'entry';
   }else if(simplifiedCanonicalVerdict === 'near_entry' && simplifiedVisualBucket === 'monitor'){
     simplifiedVisualBucket = 'near_entry';
   }
-  const derivedTone = projectionTone
-    || (String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor');
-  const authoritativeEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'entry';
-  const authoritativeNearEntryPresentation = reviewSnapshotAuthority && simplifiedCanonicalVerdict === 'near_entry';
+  const derivedTone = String(effectiveSimplifiedState.tone || simplifiedVisualBucket || 'monitor').trim().toLowerCase() || 'monitor';
+  const authoritativeEntryPresentation = simplifiedCanonicalVerdict === 'entry';
+  const authoritativeNearEntryPresentation = simplifiedCanonicalVerdict === 'near_entry';
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
   let displayedPlan = applySetupConfirmationPlanGate(
@@ -4491,46 +4477,9 @@ function currentReviewStateHealthSnapshot(record){
   const authoritativeCanonicalContract = canonicalContract
     ? safeDiagnosticClone(canonicalContract, {})
     : canonicalContract;
-  const authoritativeReviewRenderModel = reviewSnapshotAuthority && reviewRenderModel
-    ? {
-      ...safeDiagnosticClone(reviewRenderModel, {}),
-      canonicalVerdict:simplifiedCanonicalVerdict || reviewRenderModel.canonicalVerdict,
-      visualBucket:simplifiedVisualBucket || reviewRenderModel.visualBucket,
-      tone:derivedTone || reviewRenderModel.tone,
-      badgeLabel:authoritativeVerdictLabel,
-      headline:authoritativeVerdictLabel,
-      nextAction:authoritativeNextAction || reviewRenderModel.nextAction,
-      primaryReason:authoritativeEntryPresentation ? '' : String(reviewRenderModel.primaryReason || ''),
-      actionable:authoritativeEntryPresentation ? true : reviewRenderModel.actionable === true
-    }
-    : reviewRenderModel;
-  const authoritativeTrackRenderModel = reviewSnapshotAuthority && renderModels && renderModels.trackRenderModel
-    ? {
-      ...safeDiagnosticClone(renderModels.trackRenderModel, {}),
-      canonicalVerdict:simplifiedCanonicalVerdict || renderModels.trackRenderModel.canonicalVerdict,
-      visualBucket:simplifiedVisualBucket || renderModels.trackRenderModel.visualBucket,
-      visibleBucket:simplifiedVisualBucket || renderModels.trackRenderModel.visibleBucket || renderModels.trackRenderModel.visualBucket,
-      tone:derivedTone || renderModels.trackRenderModel.tone,
-      badgeLabel:authoritativeVerdictLabel,
-      headline:authoritativeVerdictLabel,
-      statusText:authoritativeVerdictLabel,
-      nextAction:authoritativeNextAction || renderModels.trackRenderModel.nextAction,
-      actionLabel:authoritativeNextAction || renderModels.trackRenderModel.actionLabel,
-      primaryReason:authoritativeEntryPresentation ? '' : String(renderModels.trackRenderModel.primaryReason || ''),
-      mainBlocker:authoritativeEntryPresentation ? '' : String(renderModels.trackRenderModel.mainBlocker || '')
-    }
-    : (renderModels && renderModels.trackRenderModel ? renderModels.trackRenderModel : null);
-  const authoritativeTrackLongPressModel = reviewSnapshotAuthority && renderModels && renderModels.trackLongPressModel
-    ? {
-      ...safeDiagnosticClone(renderModels.trackLongPressModel, {}),
-      canonicalVerdict:simplifiedCanonicalVerdict || renderModels.trackLongPressModel.canonicalVerdict,
-      visualBucket:simplifiedVisualBucket || renderModels.trackLongPressModel.visualBucket,
-      header:authoritativeVerdictLabel,
-      actionable:authoritativeEntryPresentation ? true : renderModels.trackLongPressModel.actionable === true,
-      nextAction:authoritativeNextAction || renderModels.trackLongPressModel.nextAction,
-      primaryReason:authoritativeEntryPresentation ? '' : String(renderModels.trackLongPressModel.primaryReason || '')
-    }
-    : (renderModels && renderModels.trackLongPressModel ? renderModels.trackLongPressModel : null);
+  const authoritativeReviewRenderModel = reviewRenderModel;
+  const authoritativeTrackRenderModel = renderModels && renderModels.trackRenderModel ? renderModels.trackRenderModel : null;
+  const authoritativeTrackLongPressModel = renderModels && renderModels.trackLongPressModel ? renderModels.trackLongPressModel : null;
   const persistedReviewProjection = persistedReviewProjectionSnapshot(item, 'review_diagnostic');
   const displayCacheDivergence = canonicalDisplayDivergenceSummary(
     authoritativeCanonicalContract,
@@ -4611,7 +4560,7 @@ function currentReviewStateHealthSnapshot(record){
     divergenceDetected = false;
   }
   return {
-    sourceOfTruth:reviewSnapshotAuthority ? 'review_projection_snapshot' : 'simplified_state_pipeline',
+    sourceOfTruth:'simplified_state_pipeline',
     ticker:String(item.ticker || ''),
     contract:safeDiagnosticClone(authoritativeCanonicalContract || {}, {}),
     renderModels:safeDiagnosticClone({
@@ -4721,6 +4670,36 @@ function buildTrackDiagnosticSnapshot(record){
     const normalizeProjectionSource = typeof normalizeReviewProjectionSource === 'function'
       ? normalizeReviewProjectionSource
       : ((source) => String(source || '').trim().toLowerCase());
+    const normalizeVerdictKey = typeof normalizeGlobalVerdictKey === 'function'
+      ? normalizeGlobalVerdictKey
+      : ((value) => {
+        const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+        if(['entry', 'near_entry', 'watch', 'avoid'].includes(safe)) return safe;
+        if(safe.indexOf('near') >= 0 && safe.indexOf('entry') >= 0) return 'near_entry';
+        if(safe.indexOf('entry') >= 0) return 'entry';
+        if(safe.indexOf('avoid') >= 0) return 'avoid';
+        return 'watch';
+      });
+    const normalizeBucket = typeof normalizeVisualBucketForPairing === 'function'
+      ? normalizeVisualBucketForPairing
+      : ((value, canonicalVerdict = '') => {
+        const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+        if(['entry', 'near_entry', 'monitor', 'diminishing', 'avoid'].includes(safe)) return safe;
+        const canonical = normalizeVerdictKey(canonicalVerdict);
+        if(canonical === 'entry') return 'entry';
+        if(canonical === 'near_entry') return 'near_entry';
+        if(canonical === 'avoid') return 'avoid';
+        return 'monitor';
+      });
+    const verdictLabel = typeof globalVerdictLabel === 'function'
+      ? globalVerdictLabel
+      : ((value) => {
+        const safe = normalizeVerdictKey(value);
+        if(safe === 'entry') return 'Entry';
+        if(safe === 'near_entry') return 'Near Entry';
+        if(safe === 'avoid') return 'Avoid';
+        return 'Watch';
+      });
     const hasPresentationSnapshot = typeof hasPresentationAuthoritySnapshot === 'function'
       ? hasPresentationAuthoritySnapshot
       : ((snapshot, tickerValue) => {
@@ -4770,11 +4749,33 @@ function buildTrackDiagnosticSnapshot(record){
       : null;
     const lifecycleSnapshot = watchlistLifecycleSnapshot(item);
     const synthesizedWatchlistDebug = diagnosticWatchlistDebugSnapshot(item, {lifecycleSnapshot});
-    const simplifiedState = resolveSimplifiedStateForWatchlistPresentation(item, {
+    const simplifiedStateRaw = resolveSimplifiedStateForWatchlistPresentation(item, {
       surface:'track',
       source:'diagnostic_snapshot',
       reason:'diagnostic_snapshot'
     });
+    const simplifiedStateFromPersistedCacheOnly = !!(
+      simplifiedStateRaw
+      && typeof simplifiedStateRaw === 'object'
+      && (
+        simplifiedStateRaw.persistedPresentationCacheOnly === true
+        || (
+          persistedPresentation != null
+          && (!simplifiedStateRaw.debug || typeof simplifiedStateRaw.debug !== 'object')
+          && !String(simplifiedStateRaw.sourceOfTruth || '').trim()
+        )
+      )
+    );
+    const simplifiedState = simplifiedStateRaw && typeof simplifiedStateRaw === 'object' && !simplifiedStateFromPersistedCacheOnly
+      ? simplifiedStateRaw
+      : {
+        canonicalVerdict:'watch',
+        visualBucket:'monitor',
+        tone:'monitor',
+        structureEligibility:'alive',
+        priceabilityState:'priceable',
+        persistedPresentationCacheOnly:persistedPresentation != null
+      };
     const simplifiedDebug = simplifiedState.debug && typeof simplifiedState.debug === 'object'
       ? simplifiedState.debug
       : {};
@@ -4887,17 +4888,85 @@ function buildTrackDiagnosticSnapshot(record){
     const renderedVisibleModel = trackDebug.visibleModel && typeof trackDebug.visibleModel === 'object'
       ? trackDebug.visibleModel
       : null;
+    const diagnosticCanonicalVerdict = normalizeVerdictKey(
+      canonicalTrackRenderModel && canonicalTrackRenderModel.canonicalVerdict
+      || canonicalContract && canonicalContract.canonicalVerdict
+      || canonicalContract && canonicalContract.canonicalVerdictKey
+      || simplifiedState.canonicalVerdict
+      || (!simplifiedStateFromPersistedCacheOnly && (
+        trackVisibleModel.canonicalVerdict
+        || effectiveSharedPresentation.canonicalVerdict
+        || renderedVisibleModel && renderedVisibleModel.canonicalVerdict
+      ))
+      || 'watch'
+    );
+    const diagnosticVisualBucket = normalizeBucket(
+      canonicalTrackRenderModel && (canonicalTrackRenderModel.visibleBucket || canonicalTrackRenderModel.visualBucket)
+      || canonicalContract && canonicalContract.canonicalVisualBucket
+      || simplifiedState.visualBucket
+      || (!simplifiedStateFromPersistedCacheOnly && (
+        trackVisibleModel.visibleBucket
+        || effectiveSharedPresentation.visualBucket
+        || renderedVisibleModel && renderedVisibleModel.visibleBucket
+      ))
+      || 'monitor',
+      diagnosticCanonicalVerdict
+    );
     const trackStateHealth = {
       sourceOfTruth:diagnosticsSourceOfTruth,
       ticker:String(item.ticker || ''),
       contractFingerprint:String(canonicalContract && canonicalContract.contractFingerprint || ''),
-      canonicalVerdict:String(canonicalTrackRenderModel && canonicalTrackRenderModel.canonicalVerdict || trackVisibleModel.canonicalVerdict || effectiveSharedPresentation.canonicalVerdict || renderedVisibleModel && renderedVisibleModel.canonicalVerdict || ''),
-      visualBucket:String(canonicalTrackRenderModel && (canonicalTrackRenderModel.visibleBucket || canonicalTrackRenderModel.visualBucket) || trackVisibleModel.visibleBucket || effectiveSharedPresentation.visualBucket || renderedVisibleModel && renderedVisibleModel.visibleBucket || ''),
-      tone:String(canonicalTrackRenderModel && canonicalTrackRenderModel.tone || trackVisibleModel.tone || effectiveSharedPresentation.tone || renderedVisibleModel && renderedVisibleModel.tone || ''),
-      badgeLabel:String(canonicalTrackRenderModel && canonicalTrackRenderModel.badgeLabel || trackVisibleModel.badgeLabel || effectiveSharedPresentation.badgeLabel || renderedVisibleModel && renderedVisibleModel.badgeLabel || ''),
-      headline:String(canonicalTrackRenderModel && canonicalTrackRenderModel.headline || trackVisibleModel.headline || effectiveSharedPresentation.headline || renderedVisibleModel && renderedVisibleModel.headline || ''),
-      statusText:String(canonicalTrackRenderModel && canonicalTrackRenderModel.statusText || trackVisibleModel.statusText || effectiveSharedPresentation.statusText || renderedVisibleModel && renderedVisibleModel.headline || ''),
-      actionLabel:String(canonicalTrackRenderModel && canonicalTrackRenderModel.actionLabel || trackVisibleModel.actionLabel || effectiveSharedPresentation.actionLabel || ''),
+      canonicalVerdict:String(diagnosticCanonicalVerdict || ''),
+      visualBucket:String(diagnosticVisualBucket || ''),
+      tone:String(
+        canonicalTrackRenderModel && canonicalTrackRenderModel.tone
+        || (!simplifiedStateFromPersistedCacheOnly && (
+          trackVisibleModel.tone
+          || effectiveSharedPresentation.tone
+          || renderedVisibleModel && renderedVisibleModel.tone
+        ))
+        || diagnosticVisualBucket
+        || ''
+      ),
+      badgeLabel:String(
+        canonicalTrackRenderModel && canonicalTrackRenderModel.badgeLabel
+        || (!simplifiedStateFromPersistedCacheOnly && (
+          trackVisibleModel.badgeLabel
+          || effectiveSharedPresentation.badgeLabel
+          || renderedVisibleModel && renderedVisibleModel.badgeLabel
+        ))
+        || verdictLabel(diagnosticCanonicalVerdict)
+        || ''
+      ),
+      headline:String(
+        canonicalTrackRenderModel && canonicalTrackRenderModel.headline
+        || (!simplifiedStateFromPersistedCacheOnly && (
+          trackVisibleModel.headline
+          || effectiveSharedPresentation.headline
+          || renderedVisibleModel && renderedVisibleModel.headline
+        ))
+        || verdictLabel(diagnosticCanonicalVerdict)
+        || ''
+      ),
+      statusText:String(
+        canonicalTrackRenderModel && canonicalTrackRenderModel.statusText
+        || (!simplifiedStateFromPersistedCacheOnly && (
+          trackVisibleModel.statusText
+          || effectiveSharedPresentation.statusText
+          || renderedVisibleModel && renderedVisibleModel.headline
+        ))
+        || verdictLabel(diagnosticCanonicalVerdict)
+        || ''
+      ),
+      actionLabel:String(
+        canonicalTrackRenderModel && canonicalTrackRenderModel.actionLabel
+        || (!simplifiedStateFromPersistedCacheOnly && (
+          trackVisibleModel.actionLabel
+          || effectiveSharedPresentation.actionLabel
+        ))
+        || simplifiedState.actionLabel
+        || ''
+      ),
       structureEligibility:String(simplifiedState.structureEligibility || ''),
       structureState:String(simplifiedState.structureState || ''),
       setupLocationState:String(simplifiedState.setupLocationState || ''),
@@ -4923,6 +4992,14 @@ function buildTrackDiagnosticSnapshot(record){
     const persistenceInputDivergence = persistenceDivergenceSummary(item, canonicalContract);
     return {
       ticker:String(item.ticker || ''),
+      canonicalVerdict:String(trackStateHealth.canonicalVerdict || ''),
+      visualBucket:String(trackStateHealth.visualBucket || ''),
+      tone:String(trackStateHealth.tone || ''),
+      badgeLabel:String(trackStateHealth.badgeLabel || ''),
+      headline:String(trackStateHealth.headline || ''),
+      statusText:String(trackStateHealth.statusText || ''),
+      actionLabel:String(trackStateHealth.actionLabel || ''),
+      contractFingerprint:String(trackStateHealth.contractFingerprint || ''),
       contract:safeDiagnosticClone(canonicalContract || {}, {}),
       renderModels:safeDiagnosticClone({
         review:renderModels && renderModels.reviewRenderModel ? renderModels.reviewRenderModel : null,
@@ -4970,16 +5047,7 @@ function buildReplaySnapshotForTicker(tickerOrRecord, options = {}){
     reviewProjectionSnapshot
   );
   const reviewState = currentReviewStateHealthSnapshot(liveRecord);
-  const liveReviewProjectionAuthority = (
-    reviewState
-    && String(reviewState.sourceOfTruth || '').trim().toLowerCase() === 'review_projection_snapshot'
-  ) || (
-    reviewProjectionCanDriveEntryDisplay(
-      reviewProjectionSnapshot,
-      reviewProjectionSource,
-      liveRecord
-    ) && ['clicked_card_snapshot', 'track_projection_updated'].includes(reviewProjectionSource)
-  );
+  const liveReviewProjectionAuthority = false;
   const trackState = buildTrackDiagnosticSnapshot(liveRecord);
   const scanState = withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(record, 'scan', {
     log:false,
@@ -14488,14 +14556,16 @@ function appendWatchlistDebugEvent(record, event){
   record.watchlist.debug.auditTrail = [nextEvent, ...trail].slice(0, 5);
 }
 
-function triggerEntryAlert(record, globalVerdict){
-  const item = normalizeTickerRecord(record);
-  const displayedPlan = deriveCurrentPlanState(
-    item.plan && item.plan.entry,
-    item.plan && item.plan.stop,
-    item.plan && item.plan.firstTarget,
-    item.marketData && item.marketData.currency
-  );
+function triggerEntryAlert(record, globalVerdict, options = {}){
+  const item = normalizeTickerRecordReadOnly(record);
+  const displayedPlan = options.displayedPlan && typeof options.displayedPlan === 'object'
+    ? options.displayedPlan
+    : deriveCurrentPlanState(
+      item.plan && item.plan.entry,
+      item.plan && item.plan.stop,
+      item.plan && item.plan.firstTarget,
+      item.marketData && item.marketData.currency
+    );
   const positionSize = numericOrNull(item.plan && item.plan.positionSize)
     ?? numericOrNull(displayedPlan && displayedPlan.riskFit && displayedPlan.riskFit.position_size);
   const entryPrice = numericOrNull(item.plan && item.plan.entry)
@@ -14513,34 +14583,102 @@ function triggerEntryAlert(record, globalVerdict){
   }).catch(() => {});
 }
 
+function canonicalPaperTradeSubmitReady(record, globalVerdict, options = {}){
+  const item = normalizeTickerRecordReadOnly(record);
+  const verdict = globalVerdict && typeof globalVerdict === 'object'
+    ? globalVerdict
+    : resolveGlobalVerdict(item);
+  const symbol = normalizeTicker(item.ticker || (record && record.ticker) || '');
+  const paperTradeContext = options.paperTradeContext && typeof options.paperTradeContext === 'object'
+    ? options.paperTradeContext
+    : (symbol ? currentPaperTradeContextForTicker(symbol) : null);
+  const displayedPlan = options.displayedPlan && typeof options.displayedPlan === 'object'
+    ? options.displayedPlan
+    : (paperTradeContext && paperTradeContext.displayedPlan && typeof paperTradeContext.displayedPlan === 'object'
+      ? paperTradeContext.displayedPlan
+      : deriveCurrentPlanState(
+        item.plan && item.plan.entry,
+        item.plan && item.plan.stop,
+        item.plan && item.plan.firstTarget,
+        item.marketData && item.marketData.currency
+      ));
+  const eligibility = paperTradeContext && paperTradeContext.eligibility && typeof paperTradeContext.eligibility === 'object'
+    ? paperTradeContext.eligibility
+    : {eligible:false, reasons:[]};
+  const actionabilityState = String(
+    paperTradeContext && paperTradeContext.actionabilityState
+    || paperTradeContext && paperTradeContext.debugSnapshot && paperTradeContext.debugSnapshot.paperTradeEligibilityState
+    || ''
+  ).trim().toLowerCase();
+  const runtimeGatewayReady = paperTradeGatewayReady() === true;
+  const readyToSubmit = !!(
+    paperTradeContext
+    && paperTradeContext.paperTradeEnabled === true
+    && actionabilityState === 'ready_to_submit'
+  );
+  return {
+    readyToSubmit,
+    runtimeGatewayReady,
+    canonicalPlanActionableEntry:readyToSubmit,
+    eligibility,
+    planAuthority:paperTradeContext && paperTradeContext.debugSnapshot ? paperTradeContext.debugSnapshot.planAuthority : null,
+    displayedPlan,
+    actionabilityState,
+    paperTradeContext
+  };
+}
+
 function maybeTriggerEntryAlert(record, globalVerdict, options = {}){
-  const item = normalizeTickerRecord(record);
+  const liveRecord = record && typeof record === 'object' ? record : {};
+  const item = normalizeTickerRecordReadOnly(liveRecord);
   const verdict = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : resolveGlobalVerdict(item);
   const finalVerdict = normalizeGlobalVerdictKey(verdict.final_verdict);
-  const previousFinalVerdict = normalizeGlobalVerdictKey(item.meta && item.meta.previousFinalVerdict);
-  const lastAlertedState = String(item.meta && item.meta.lastAlertedState || '').trim().toLowerCase();
-  const shouldTrigger = previousFinalVerdict !== 'entry'
-    && finalVerdict === 'entry'
+  liveRecord.meta = liveRecord.meta && typeof liveRecord.meta === 'object' ? liveRecord.meta : {};
+  liveRecord.watchlist = liveRecord.watchlist && typeof liveRecord.watchlist === 'object' ? liveRecord.watchlist : {};
+  liveRecord.watchlist.debug = liveRecord.watchlist.debug && typeof liveRecord.watchlist.debug === 'object' ? liveRecord.watchlist.debug : {};
+  const previousFinalVerdict = normalizeGlobalVerdictKey(liveRecord.meta.previousFinalVerdict);
+  const previousSubmitReady = String(liveRecord.meta.previousEntryAlertSubmitReady || '').trim().toLowerCase() === 'true';
+  const lastAlertedState = String(liveRecord.meta.lastAlertedState || '').trim().toLowerCase();
+  const submitReadyState = canonicalPaperTradeSubmitReady(liveRecord, verdict, {
+    source:String(options.source || 'entry_alert'),
+    reason:'entry_alert',
+    context:'entry_alert'
+  });
+  const shouldTrigger = finalVerdict === 'entry'
+    && submitReadyState.readyToSubmit === true
+    && (previousFinalVerdict !== 'entry' || previousSubmitReady !== true)
     && lastAlertedState !== 'entry';
 
-  item.meta = item.meta && typeof item.meta === 'object' ? item.meta : {};
-  item.watchlist = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : {};
-  item.watchlist.debug = item.watchlist.debug && typeof item.watchlist.debug === 'object' ? item.watchlist.debug : {};
-  item.watchlist.debug.alertTriggeredThisCycle = shouldTrigger ? 'true' : 'false';
+  liveRecord.watchlist.debug.alertTriggeredThisCycle = shouldTrigger ? 'true' : 'false';
+  liveRecord.watchlist.debug.entryAlertActionabilityState = submitReadyState.actionabilityState
+    || (submitReadyState.readyToSubmit === true
+      ? 'ready_to_submit'
+      : (submitReadyState.runtimeGatewayReady === true
+        ? 'blocked'
+        : 'gateway_unavailable'));
 
   if(shouldTrigger){
-    triggerEntryAlert(item, verdict);
-    item.meta.lastAlertedState = 'entry';
-    appendWatchlistDebugEvent(item, {
+    triggerEntryAlert(liveRecord, verdict, {displayedPlan:submitReadyState.displayedPlan});
+    liveRecord.meta.lastAlertedState = 'entry';
+    appendWatchlistDebugEvent(liveRecord, {
       at:new Date().toISOString(),
       source:String(options.source || 'entry_alert'),
       result:'alert: entry_webhook_sent'
     });
+  }else if(finalVerdict === 'entry' && lastAlertedState !== 'entry'){
+    appendWatchlistDebugEvent(liveRecord, {
+      at:new Date().toISOString(),
+      source:String(options.source || 'entry_alert'),
+      result:submitReadyState.readyToSubmit === true
+        ? 'unchanged: entry_alert_ready'
+        : `blocked: entry_alert_${submitReadyState.actionabilityState || (submitReadyState.runtimeGatewayReady === true ? 'not_submit_ready' : 'gateway_unavailable')}`
+    });
   }else if(finalVerdict !== 'entry' && lastAlertedState === 'entry'){
-    item.meta.lastAlertedState = finalVerdict || '';
+    liveRecord.meta.lastAlertedState = finalVerdict || '';
   }
 
-  item.meta.previousFinalVerdict = finalVerdict || '';
+  liveRecord.meta.previousFinalVerdict = finalVerdict || '';
+  liveRecord.meta.previousEntryAlertSubmitReady = submitReadyState.readyToSubmit === true ? 'true' : 'false';
   return shouldTrigger;
 }
 
@@ -18644,7 +18782,13 @@ function renderCompactResultCardFromView(view){
         canonicalVerdict
       ),
       badgeLabel:String(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch').trim(),
-      summary:String(simplifiedState.mainBlocker || simplifiedState.actionLabel || scanPresentation.summary || '').trim()
+      summary:String(
+        authoritativeScan && authoritativeScan.summary
+        || simplifiedState.mainBlocker
+        || simplifiedState.actionLabel
+        || scanPresentation.summary
+        || ''
+      ).trim()
     }
     : scanPresentation;
   const visualBucket = normalizeVisualBucketForPairing(
@@ -21229,7 +21373,7 @@ function diagnosticWatchlistDebugSnapshot(record, options = {}){
 
 function authoritativeScanSurfaceSnapshot(record){
   const item = normalizeTickerRecordReadOnly(record || {});
-  const hasSharedAuthorityInputs = !!(
+  const hasCanonicalReviewAuthority = !!(
     item.review && item.review.manualReview
     || normalizeOptionalGlobalVerdictKey(item.review && item.review.savedVerdict || '')
     || item.watchlist && item.watchlist.inWatchlist === true
@@ -21261,12 +21405,12 @@ function authoritativeScanSurfaceSnapshot(record){
       || cachedBundle.canonicalContract.planVerdictContract && cachedBundle.canonicalContract.planVerdictContract.canonicalVerdict
     ) || ''
   );
-  const sharedBundle = !cachedCanonicalVerdict && hasSharedAuthorityInputs
-    ? buildResolvedStateBundleFromRecord(cloneData(item), {
+  const sharedBundle = !cachedCanonicalVerdict && hasCanonicalReviewAuthority
+    ? withReviewProjectionSuppressed(() => buildResolvedStateBundleFromRecord(cloneData(item), {
       source:'scan_surface_authority',
       sourceSurface:'review',
       reason:'scan_surface_authority'
-    })
+    }))
     : null;
   const sharedBundleCanonicalVerdict = normalizeOptionalGlobalVerdictKey(
     sharedBundle && sharedBundle.canonicalContract && (
@@ -21275,17 +21419,25 @@ function authoritativeScanSurfaceSnapshot(record){
     ) || ''
   );
   const runtimeVerdictLabel = currentRuntimeVerdictForRecord(record);
-  const contract = buildCanonicalPlanVerdictContract(item, {
+  const contract = withReviewProjectionSuppressed(() => buildCanonicalPlanVerdictContract(item, {
     surface:'scan',
     source:'scan_surface_authority',
     reason:'scan_surface_authority'
-  });
-  const canonicalVerdict = cachedCanonicalVerdict
+  }));
+  const contractCanonicalVerdict = normalizeOptionalGlobalVerdictKey(
+    contract && contract.canonicalVerdict || ''
+  );
+  const rawCanonicalVerdict = contractCanonicalVerdict
+    || cachedCanonicalVerdict
     || sharedBundleCanonicalVerdict
-    || normalizeGlobalVerdictKey(runtimeVerdictLabel || '');
-  if(!canonicalVerdict) return null;
+    || withReviewProjectionSuppressed(() => normalizeGlobalVerdictKey(runtimeVerdictLabel || ''));
+  if(!rawCanonicalVerdict) return null;
+  const scoutingOnly = hasCanonicalReviewAuthority === true;
+  const canonicalVerdict = scoutingOnly && rawCanonicalVerdict === 'entry'
+    ? 'near_entry'
+    : rawCanonicalVerdict;
   const score = currentRuntimeScoreForRecord(record);
-  const summary = String(
+  const authoritySummary = String(
     sharedBundle && sharedBundle.canonicalContract && sharedBundle.canonicalContract.reason
     || sharedBundle && sharedBundle.globalVerdict && sharedBundle.globalVerdict.reason
     || cachedBundleValid && cachedBundle && cachedBundle.canonicalContract && cachedBundle.canonicalContract.reason
@@ -21293,20 +21445,57 @@ function authoritativeScanSurfaceSnapshot(record){
     || currentRuntimeSummaryForRecord(record)
     || ''
   ).trim();
-  const visualBucket = normalizeVisualBucketForPairing(
+  let visualBucket = normalizeVisualBucketForPairing(
     (sharedBundle && sharedBundle.canonicalContract && sharedBundle.canonicalContract.bucket)
-    || (canonicalVerdict === 'watch'
+    || (rawCanonicalVerdict === 'watch'
       ? (contract && contract.canonicalVisualBucket)
       : '')
-    || (canonicalVerdict === 'dead' ? 'avoid' : canonicalVerdict),
-    canonicalVerdict
+    || (rawCanonicalVerdict === 'dead' ? 'avoid' : rawCanonicalVerdict),
+    rawCanonicalVerdict
+  );
+  if(scoutingOnly && rawCanonicalVerdict === 'entry'){
+    visualBucket = 'near_entry';
+  }else{
+    visualBucket = normalizeVisualBucketForPairing(visualBucket, canonicalVerdict);
+  }
+  const scoutingActionLabel = scoutingOnly
+    ? 'Scouting only - confirm in Review before treating this as actionable.'
+    : (canonicalVerdict === 'entry'
+      ? 'Execute only if the trigger remains valid.'
+      : (canonicalVerdict === 'near_entry'
+        ? 'Close to trigger - confirm in Review.'
+        : 'Wait for stronger confirmation before considering an entry.'));
+  const summary = scoutingOnly
+    ? (
+      rawCanonicalVerdict === 'entry'
+        ? 'Scouting only - Review has the final authority before any trade-ready decision.'
+        : (authoritySummary || 'Scouting only - use Review for the final decision.')
+    )
+    : authoritySummary;
+  const intentionalScoutingDivergence = scoutingOnly && (
+    rawCanonicalVerdict !== canonicalVerdict
+    || visualBucket !== normalizeVisualBucketForPairing(rawCanonicalVerdict, rawCanonicalVerdict)
   );
   return {
     canonicalVerdict,
+    contractCanonicalVerdict:rawCanonicalVerdict,
     visualBucket,
     tone:visualBucket,
+    scoutingOnly,
+    hasCanonicalReviewAuthority,
+    actionLabel:scoutingActionLabel,
     score:Number.isFinite(score) ? Math.max(0, Math.min(10, Math.round(score))) : null,
-    summary
+    summary,
+    diagnostics:{
+      source:'scan_surface_authority',
+      reviewProjectionAuthorityAllowed:false,
+      intentionalScoutingDivergence,
+      divergenceType:intentionalScoutingDivergence ? 'intentional_scouting_divergence' : '',
+      divergenceReason:intentionalScoutingDivergence
+        ? 'Scan remains a scouting surface after canonical review authority exists, so public scan readiness is capped below final trade authority.'
+        : '',
+      actionLabel:scoutingActionLabel
+    }
   };
 }
 
@@ -21606,11 +21795,14 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
       resolved.badgeLabel = authoritativeScanSurface.canonicalVerdict === 'watch'
         ? 'Watch'
         : globalVerdictLabel(authoritativeScanSurface.canonicalVerdict);
-      resolved.actionLabel = authoritativeScanSurface.canonicalVerdict === 'entry'
-        ? 'Execute only if the trigger remains valid.'
-        : (authoritativeScanSurface.canonicalVerdict === 'watch'
+      resolved.actionLabel = String(
+        authoritativeScanSurface.actionLabel
+        || (authoritativeScanSurface.canonicalVerdict === 'watch'
           ? 'Wait for stronger confirmation before considering an entry.'
-          : (resolved.actionLabel || ''));
+          : resolved.actionLabel
+        )
+        || ''
+      ).trim();
       if(authoritativeScanSurface.canonicalVerdict === 'entry' && authoritativeScanPlanCandidate){
         resolved.planStatus = 'valid';
         resolved.planVisible = true;
@@ -21623,9 +21815,13 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
         scanSurfaceAuthority:'scan.resolvedVerdict',
         authoritativeScanSurfaceSnapshot:{
           canonicalVerdict:authoritativeScanSurface.canonicalVerdict,
+          contractCanonicalVerdict:authoritativeScanSurface.contractCanonicalVerdict,
           visualBucket:authoritativeScanSurface.visualBucket,
           score:Number.isFinite(Number(resolved.setupScore)) ? Number(resolved.setupScore) : null,
-          summary:authoritativeScanSurface.summary
+          summary:authoritativeScanSurface.summary,
+          actionLabel:authoritativeScanSurface.actionLabel,
+          scoutingOnly:authoritativeScanSurface.scoutingOnly === true,
+          diagnostics:authoritativeScanSurface.diagnostics || {}
         }
       };
     }
@@ -40777,12 +40973,6 @@ function currentPaperTradeContextForTicker(ticker){
     deriveCurrentPlanState(effectivePlan.entry, effectivePlan.stop, effectivePlan.firstTarget, record.marketData.currency),
     derivedStates
   );
-  if(paperTradeProjectionEntryAuthority && displayedPlan.status !== 'valid'){
-    const fallbackDisplayedPlan = reviewFallbackDisplayedPlan(record, derivedStates);
-    if(fallbackDisplayedPlan && fallbackDisplayedPlan.status === 'valid'){
-      displayedPlan = fallbackDisplayedPlan;
-    }
-  }
   const paperTradeStampedEntryFallbackSeed = paperTradeActiveProjectionSource !== 'clicked_card_snapshot'
     && paperTradeActiveProjectionSource !== 'track_projection_updated'
     && hasCanonicalTradePlanStamp(record.plan)
@@ -40845,36 +41035,16 @@ function currentPaperTradeContextForTicker(ticker){
     resolvedContract,
     visualState
   });
-  const persistedPaperTradeEntryProjection = paperTradeSavedEntryAuthority
-    ? persistedReviewProjectionSnapshot(record, 'paper_trade_context')
-    : null;
-  const activeReviewProjectionBackedEntry = !!(
-    persistedPaperTradeEntryProjection
-    || (
-      activeReviewStateHealth
-      && String(activeReviewStateHealth.sourceOfTruth || '').trim().toLowerCase() === 'review_projection_snapshot'
-      && (
-        paperTradeActiveProjectionSource === 'track_projection_updated'
-          ? paperTradeSavedEntryAuthority
-          : (paperTradeActiveProjectionSource === 'clicked_card_snapshot'
-            ? paperTradeScanEntryAuthority
-            : (paperTradeScanEntryAuthority || paperTradeSavedEntryAuthority))
-      )
-    )
-  );
   const projectionOnlyReviewEntryBlocked = ['clicked_card_snapshot', 'track_projection_updated'].includes(paperTradeActiveProjectionSource)
     && paperTradeProjectionEntryAuthority !== true
-    && paperTradeStampedEntryFallback !== true
-    && !activeReviewProjectionBackedEntry;
+    && paperTradeStampedEntryFallback !== true;
   const authoritativeReviewVerdictKey = normalizeGlobalVerdictKey(
     paperTradeStampedEntryFallback
       ? 'entry'
       : (projectionOnlyReviewEntryBlocked
         ? (canonicalResolverVerdict || 'watch')
         : (
-        ((activeReviewStateHealth && String(activeReviewStateHealth.sourceOfTruth || '').trim().toLowerCase() !== 'review_projection_snapshot')
-          || activeReviewProjectionBackedEntry)
-          && activeReviewStateHealth && activeReviewStateHealth.canonicalVerdict
+        activeReviewStateHealth && activeReviewStateHealth.canonicalVerdict
         || 
         reviewRenderModel && reviewRenderModel.canonicalVerdict
         || reviewPresentation.verdictKey
@@ -40919,9 +41089,16 @@ function currentPaperTradeContextForTicker(ticker){
     || globalVerdict.finalVerdict
     || ''
   );
+  const canonicalPaperTradeVerdict = normalizeGlobalVerdictKey(
+    planVerdictContract && planVerdictContract.canonicalVerdict
+    || authoritativeReviewVerdictKey
+    || canonicalPlanVerdict
+    || canonicalResolverVerdict
+    || 'watch'
+  );
+  const canonicalPaperTradeVerdictLabel = globalVerdictLabel(canonicalPaperTradeVerdict || 'watch');
   const canonicalPlanActionableEntry = (
     planAuthority.actionable === true
-    || paperTradeStampedEntryFallback
   )
     && planAuthority.planStatus === 'valid'
     && planAuthority.riskFits === true
@@ -40936,9 +41113,7 @@ function currentPaperTradeContextForTicker(ticker){
     && planVerdictContract.paperTradeAuthority.submittedTrades.length
       ? 'submitted'
       : '';
-  const reviewFinalVerdict = canonicalPlanActionableEntry
-    ? 'Entry'
-    : 'Watch';
+  const reviewFinalVerdict = canonicalPaperTradeVerdictLabel;
   const planStatusForEligibility = canonicalPlanActionableEntry
     ? 'valid'
     : displayedPlan.status;
@@ -40950,7 +41125,7 @@ function currentPaperTradeContextForTicker(ticker){
     : (displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit);
   const primaryStateForEligibility = canonicalPlanActionableEntry
     ? 'entry'
-    : resolvedContract.primaryState;
+    : canonicalPaperTradeVerdict;
   const hardBlockerForEligibility = canonicalPlanActionableEntry
     ? ''
     : resolvedContract.blockerReason;
@@ -40993,19 +41168,35 @@ function currentPaperTradeContextForTicker(ticker){
       reasons:[]
     };
   }
-  const finalVerdict = (
+  const paperTradeEnabled = (
     previewSnapshotApproved
     || (canonicalPlanActionableEntry && mergedEligibility.eligible === true)
-  )
-    ? 'Entry'
-    : 'Watch';
+  );
+  const actionabilityState = previewSnapshotApproved
+    ? 'preview_open'
+    : (paperTradeEnabled
+      ? 'ready_to_submit'
+      : (submittedPaperTradeLifecycleState
+        ? submittedPaperTradeLifecycleState
+        : (canonicalPaperTradeVerdict === 'entry'
+          ? 'entry_blocked'
+          : 'waiting_for_confirmation')));
+  const finalVerdict = canonicalPaperTradeVerdictLabel;
   const debugSnapshot = {
     ticker:symbol,
+    canonicalVerdict:canonicalPaperTradeVerdict,
     finalVerdict,
+    eligibilityVerdict:paperTradeEnabled ? 'eligible' : 'blocked',
+    actionabilityState,
+    paperTradeEnabled,
+    paperTradeEligibility:safeDiagnosticClone(mergedEligibility, {}),
     projectionCanonicalVerdict:paperTradeProjectionVerdict || '',
     projectedEntryAuthority:paperTradeProjectionEntryAuthority === true,
     reviewHeaderVerdict:finalVerdict,
     authoritativeReviewVerdict:authoritativeReviewVerdictKey,
+    canonicalPaperTradeVerdict,
+    paperTradeSurfaceVerdict:finalVerdict,
+    paperTradeEligibilityState:actionabilityState,
     visualFinalVerdict:String(visualState.finalVerdict || visualState.final_verdict || '').trim(),
     planStatus:String(planStatusForEligibility || displayedPlan.status || '').trim(),
     entry:displayedPlan.entry,
@@ -41027,8 +41218,12 @@ function currentPaperTradeContextForTicker(ticker){
   return {
     ticker:symbol,
     record,
+    canonicalVerdict:canonicalPaperTradeVerdict,
     displayedPlan,
     finalVerdict,
+    eligibilityVerdict:paperTradeEnabled ? 'eligible' : 'blocked',
+    actionabilityState,
+    paperTradeEnabled,
     derivedStates,
     setupScore:Number.isFinite(Number(planVerdictContract && planVerdictContract.derivedStates && planVerdictContract.derivedStates.setupScore))
       ? Number(planVerdictContract.derivedStates.setupScore)
@@ -41194,7 +41389,7 @@ function openPaperTradePreview(ticker){
   if(!context) return;
   logPaperTradeContextDiagnostics(context, 'paper_trade_click');
   const renderApprovedButton = !!($('paperTradeBtn') && $('paperTradeBtn').disabled !== true);
-  if(renderApprovedButton && String(context.finalVerdict || '').trim().toLowerCase() !== 'entry'){
+  if(renderApprovedButton && String(context.actionabilityState || '').trim().toLowerCase() !== 'ready_to_submit'){
     const restoredProjectionSnapshot = persistedReviewProjectionSnapshot(context.record, 'paper_trade_preview')
       || projectionSnapshotWithAuthority(
         buildStableReviewProjectionSnapshot(context.record, 'paper_trade_preview'),
@@ -43890,9 +44085,7 @@ function renderReviewWorkspace(options = {}){
     && paperTradeScanVerdict === 'entry';
   const paperTradeAuthoritySimplifiedState = {
     ...simplifiedState,
-    canonicalVerdict:(paperTradeProjectionEntryAuthority || paperTradeStampedEntryFallback)
-      ? 'entry'
-      : (paperTradeLiveResolverVerdict || paperTradeAuthoritativeReviewVerdict || 'watch')
+    canonicalVerdict:(paperTradeLiveResolverVerdict || paperTradeAuthoritativeReviewVerdict || 'watch')
   };
   const paperTradePlanAuthority = resolveCanonicalTradePlanAuthority({
     record,
@@ -43902,21 +44095,16 @@ function renderReviewWorkspace(options = {}){
     derivedStates,
     context:'review_render_paper_trade'
   });
-  const paperTradePlanActionable = (paperTradePlanAuthority.actionable === true
-    || paperTradeStampedEntryFallback
-    || (
-      paperTradeProjectionEntryAuthority
-      && paperTradePlanAuthority.planStatus === 'valid'
-      && paperTradePlanAuthority.riskFits === true
-      && paperTradePlanAuthority.capitalAffordable === true
-      && paperTradePlanAuthority.tradeabilityActionable === true
-      && paperTradePlanAuthority.terminalAvoid !== true
-      && paperTradePlanAuthority.structuralWeakness !== true
-      && paperTradePlanAuthority.planFieldsPresent === true
-    ))
+  const paperTradePlanActionable = (paperTradePlanAuthority.actionable === true)
     && paperTradePlanAuthority.planStatus === 'valid';
+  const paperTradeCanonicalVerdictKey = normalizeGlobalVerdictKey(
+    paperTradeAuthoritySimplifiedState.canonicalVerdict
+    || paperTradePlanAuthority.verdict
+    || paperTradeLiveResolverVerdict
+    || 'watch'
+  );
   const reviewFinalVerdictForPaperTrade = normalizeAnalysisVerdict(
-    paperTradePlanActionable ? 'entry' : 'watch'
+    globalVerdictLabel(paperTradeCanonicalVerdictKey || 'watch')
   );
   const paperTradeEligibilityTradeability = paperTradePlanActionable ? 'tradable' : displayedPlan.tradeability;
   const paperTradeEligibilityCapitalFit = paperTradePlanActionable ? 'fits_capital' : (displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit);
@@ -43945,6 +44133,14 @@ function renderReviewWorkspace(options = {}){
   const paperTradeEligible = paperTradePlanActionable === true
     && mergedPaperTradeEligibilityState.eligible === true
     && gatewayReadyForPaperTrade === true;
+  const paperTradePreviouslySubmitted = hasSubmittedPaperTradeEvidenceForRecord(record) === true;
+  const paperTradeActionabilityState = paperTradePreviouslySubmitted
+    ? 'submitted'
+    : (paperTradeEligible
+      ? 'ready_to_submit'
+      : (paperTradeCanonicalVerdictKey === 'entry'
+        ? 'entry_blocked'
+        : 'waiting_for_confirmation'));
   const paperTradeDebugForced = mergedPaperTradeEligibilityState.debugForced === true;
   const hasPreviewSnapshot = paperTradeUi.previewOpen === true
     && paperTradeUi.snapshot
@@ -43955,31 +44151,35 @@ function renderReviewWorkspace(options = {}){
     paperTradeUi.snapshot = null;
   }
   const paperTradeSubmitting = paperTradeUi.state === 'submitting';
-  const paperTradePreviouslySubmitted = hasSubmittedPaperTradeEvidenceForRecord(record) === true;
   const paperTradeButtonDisabled = ((!paperTradeEligible && !hasPreviewSnapshot) || paperTradeSubmitting);
   const paperTradeButtonLabel = paperTradeSubmitting ? 'Submitting...' : 'Paper Trade';
   const paperTradePanelOpen = (paperTradeEligible || hasPreviewSnapshot) && (paperTradeUi.previewOpen === true || paperTradeUi.state === 'submit_error');
   const paperTradePreviewVisible = paperTradePanelOpen;
   const paperTradePrimaryReason = mergedPaperTradeEligibilityState.reasons[0] || '';
-  const paperTradeDisabledReason = trading212PaperSupported !== true
-    ? 'Paper trading gateway is unavailable.'
-    : (trading212PaperAvailabilityChecked !== true
-    ? 'Checking paper trading gateway...'
-    : (trading212PaperEnabled !== true
-    ? trading212PaperAvailabilityMessage
-    : (paperTradePreviouslySubmitted
-      ? 'Paper trade submitted for this setup.'
-    : (!paperTradeEligible
-      ? (
-      paperTradePlanAuthority.reasonCode === 'capital_not_affordable'
-        ? 'Setup may be valid, but the position is not affordable within account limits'
-        : (isResolverBlockedEstimatedPlanAuthority(paperTradePlanAuthority)
-          ? 'Estimated plan maths exist, but the resolver still blocks Entry for this setup'
-        : (String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'
-        ? 'Not actionable - setup is not Entry-ready'
-        : 'Trade plan not valid'))
-    )
-    : ''))));
+  let paperTradeDisabledReason = '';
+  if(trading212PaperSupported !== true){
+    paperTradeDisabledReason = 'Paper trading gateway is unavailable.';
+  }else if(trading212PaperAvailabilityChecked !== true){
+    paperTradeDisabledReason = 'Checking paper trading gateway...';
+  }else if(trading212PaperEnabled !== true){
+    paperTradeDisabledReason = trading212PaperAvailabilityMessage;
+  }else if(paperTradePreviouslySubmitted){
+    paperTradeDisabledReason = 'Paper trade submitted for this setup.';
+  }else if(!paperTradeEligible){
+    if(paperTradePlanAuthority.reasonCode === 'capital_not_affordable'){
+      paperTradeDisabledReason = 'Setup may be valid, but the position is not affordable within account limits';
+    }else if(isResolverBlockedEstimatedPlanAuthority(paperTradePlanAuthority)){
+      paperTradeDisabledReason = 'Estimated plan maths exist, but the resolver still blocks Entry for this setup';
+    }else if(paperTradeCanonicalVerdictKey === 'near_entry'){
+      paperTradeDisabledReason = 'Waiting for confirmation before Paper Trade is ready';
+    }else if(paperTradeCanonicalVerdictKey === 'watch'){
+      paperTradeDisabledReason = 'Setup is still developing before Paper Trade can be considered';
+    }else if(String(reviewFinalVerdictForPaperTrade || '').trim().toLowerCase() !== 'entry'){
+      paperTradeDisabledReason = 'Not actionable - setup is not Entry-ready';
+    }else{
+      paperTradeDisabledReason = 'Trade plan not valid';
+    }
+  }
   const paperTradeHasRuntimeStatus = !!paperTradeUi.message
     || paperTradeUi.state === 'submitting'
     || paperTradeUi.state === 'submit_success'

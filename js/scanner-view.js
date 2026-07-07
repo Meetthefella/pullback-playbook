@@ -239,6 +239,16 @@
     const resolvedState = simplified && simplified.debug && simplified.debug.resolvedState && typeof simplified.debug.resolvedState === 'object'
       ? simplified.debug.resolvedState
       : {};
+    const scanAuthorityDebug = simplified && simplified.debug && simplified.debug.authoritativeScanSurfaceSnapshot
+      && typeof simplified.debug.authoritativeScanSurfaceSnapshot === 'object'
+        ? simplified.debug.authoritativeScanSurfaceSnapshot
+        : {};
+    const scoutingOnly = scanAuthorityDebug.scoutingOnly === true;
+    const intentionalScoutingDivergence = !!(
+      scoutingOnly
+      && scanAuthorityDebug.diagnostics
+      && scanAuthorityDebug.diagnostics.intentionalScoutingDivergence === true
+    );
     const entryGateChecks = resolvedState.entry_gate_checks || resolvedState.entryGateChecks || {};
     const nearEntryGateChecks = resolvedState.near_entry_gate_checks || resolvedState.nearEntryGateChecks || {};
     const setupScore = firstFiniteNumber(
@@ -317,7 +327,7 @@
     let presentationBucket = 'monitor';
     let presentationTone = 'monitor';
     let sortPriority = 30;
-    if(canonicalVerdict === 'entry' || visualBucket === 'entry'){
+    if((canonicalVerdict === 'entry' || visualBucket === 'entry') && scoutingOnly !== true){
       scanSection = 'tradeable_entry';
       presentationBucket = 'entry';
       presentationTone = 'entry';
@@ -356,6 +366,12 @@
     }else if(scanSection === 'monitor_watch' && !summary){
       summary = 'Needs confirmation before promotion.';
     }
+    if(intentionalScoutingDivergence){
+      summary = String(
+        scanAuthorityDebug.summary
+        || 'Scouting only - confirm in Review before treating this as actionable.'
+      ).trim();
+    }
 
     return {
       canonicalVerdict,
@@ -376,7 +392,12 @@
       hasClearInvalidationLevel,
       resolvedRR,
       failedReclaimEvidence,
-      deteriorationEvidence:hasDeteriorationEvidence
+      deteriorationEvidence:hasDeteriorationEvidence,
+      scoutingOnly,
+      diagnostics:{
+        intentionalScoutingDivergence,
+        divergenceType:intentionalScoutingDivergence ? 'intentional_scouting_divergence' : ''
+      }
     };
   }
 

@@ -55,6 +55,10 @@
     'setup.bounceState':CATEGORY.DERIVED_AUTHORITY,
     'setup.stabilisationState':CATEGORY.DERIVED_AUTHORITY,
     'setup.trendState':CATEGORY.DERIVED_AUTHORITY,
+    'setup.marketSeverity':CATEGORY.DERIVED_AUTHORITY,
+    'setup.buyerControlState':CATEGORY.DERIVED_AUTHORITY,
+    'setup.confirmationState':CATEGORY.DERIVED_AUTHORITY,
+    'setup.latePullbackState':CATEGORY.DERIVED_AUTHORITY,
     'lifecycle.stage':CATEGORY.PERSISTED_STATE,
     'lifecycle.status':CATEGORY.PERSISTED_STATE,
     'lifecycle.lockReason':CATEGORY.PERSISTED_STATE,
@@ -149,6 +153,24 @@
     return 'Confirmation is still developing, so the setup stays on watch.';
   }
 
+  function primaryReasonForContract(contract){
+    const safe = safeObject(contract);
+    const lateState = String(safe.derivedStates && safe.derivedStates.latePullbackState || '').trim().toLowerCase();
+    if(lateState === 'late'){
+      return 'Trend is still healthy, but the pullback has already stretched too far from support.';
+    }
+    return primaryReasonForVerdict(safe.canonicalVerdict);
+  }
+
+  function nextActionForContract(contract){
+    const safe = safeObject(contract);
+    const lateState = String(safe.derivedStates && safe.derivedStates.latePullbackState || '').trim().toLowerCase();
+    if(lateState === 'late'){
+      return 'Wait for price to reset closer to support before considering a new pullback entry.';
+    }
+    return nextActionForVerdict(safe.canonicalVerdict);
+  }
+
   function stableClone(value){
     if(value == null) return value;
     try{
@@ -209,8 +231,6 @@
       || globalVerdict.final_verdict
       || globalVerdict.finalVerdict
       || globalVerdict.canonical_final_verdict
-      || savedReviewVerdict
-      || manualReviewVerdict
       || inputs.scanner.resolvedVerdict
       || 'watch'
     );
@@ -291,6 +311,8 @@
   function resolveDerivedStateSnapshot(record, context = {}, inputs, planAuthority, lifecycleAuthority){
     const setup = safeObject(safeObject(record).setup);
     const derivedStates = safeObject(context.derivedStates);
+    const resolvedContract = safeObject(context.resolvedContract);
+    const globalVerdict = safeObject(context.globalVerdict);
     return {
       setupScore:firstFinite([context.setupScore, context.displayedPlan && context.displayedPlan.setupScore, resolveSetupScore(record, inputs)]),
       planReady:Number.isFinite(planAuthority.entry) && Number.isFinite(planAuthority.stop) && Number.isFinite(planAuthority.firstTarget),
@@ -304,7 +326,11 @@
       setupLocationState:String(derivedStates.setupLocationState || setup.setupLocationState || '').trim().toLowerCase(),
       priceabilityState:String(derivedStates.priceabilityState || setup.priceabilityState || '').trim().toLowerCase(),
       bounceState:String(derivedStates.bounceState || setup.bounceState || '').trim().toLowerCase(),
-      lifecycleState:String(lifecycleAuthority.state || '').trim().toLowerCase()
+      lifecycleState:String(lifecycleAuthority.state || '').trim().toLowerCase(),
+      marketSeverity:String(derivedStates.marketSeverity || resolvedContract.market_severity || globalVerdict.market_severity || '').trim().toLowerCase(),
+      buyerControlState:String(derivedStates.buyerControlState || resolvedContract.buyer_control_state || globalVerdict.buyer_control_state || '').trim().toLowerCase(),
+      confirmationState:String(derivedStates.confirmationState || resolvedContract.confirmation_state || globalVerdict.confirmation_state || '').trim().toLowerCase(),
+      latePullbackState:String(derivedStates.latePullbackState || resolvedContract.late_pullback_state || globalVerdict.late_pullback_state || '').trim().toLowerCase()
     };
   }
 
@@ -415,7 +441,29 @@
         fieldCategories:FIELD_CLASSIFICATIONS,
         source:String(context.source || '').trim().toLowerCase(),
         surface:String(context.surface || '').trim().toLowerCase(),
-        reason:String(context.reason || '').trim()
+        reason:String(context.reason || '').trim(),
+        gates:stableClone({
+          trendGate:{
+            pass:context.globalVerdict && context.globalVerdict.trend_gate_pass === true,
+            reasons:Array.isArray(context.globalVerdict && context.globalVerdict.trend_gate_reasons) ? context.globalVerdict.trend_gate_reasons.slice() : [],
+            checks:context.globalVerdict && context.globalVerdict.trend_gate_checks || null
+          },
+          buyerControlGate:{
+            pass:context.globalVerdict && context.globalVerdict.buyer_control_gate_pass === true,
+            reasons:Array.isArray(context.globalVerdict && context.globalVerdict.buyer_control_gate_reasons) ? context.globalVerdict.buyer_control_gate_reasons.slice() : [],
+            checks:context.globalVerdict && context.globalVerdict.buyer_control_gate_checks || null
+          },
+          confirmationGate:{
+            pass:context.globalVerdict && context.globalVerdict.confirmation_gate_pass === true,
+            reasons:Array.isArray(context.globalVerdict && context.globalVerdict.confirmation_gate_reasons) ? context.globalVerdict.confirmation_gate_reasons.slice() : [],
+            checks:context.globalVerdict && context.globalVerdict.confirmation_gate_checks || null
+          },
+          latePullbackGate:{
+            pass:context.globalVerdict && context.globalVerdict.late_pullback_gate_pass === true,
+            reasons:Array.isArray(context.globalVerdict && context.globalVerdict.late_pullback_gate_reasons) ? context.globalVerdict.late_pullback_gate_reasons.slice() : [],
+            checks:context.globalVerdict && context.globalVerdict.late_pullback_gate_checks || null
+          }
+        })
       }
     };
     contract.contractFingerprint = contractFingerprint(contract);
@@ -454,9 +502,9 @@
       visualBucket,
       tone:visualBucket,
       badgeLabel:verdictLabel(verdict),
-      headline:verdict === 'entry' ? 'Entry Ready' : verdictLabel(verdict),
-      nextAction:nextActionForVerdict(verdict),
-      primaryReason:primaryReasonForVerdict(verdict),
+      headline:verdict === 'entry' ? 'Entry Ready' : (String(safe.derivedStates && safe.derivedStates.latePullbackState || '').trim().toLowerCase() === 'late' ? 'Watch' : verdictLabel(verdict)),
+      nextAction:nextActionForContract(safe),
+      primaryReason:primaryReasonForContract(safe),
       planVisible:verdict === 'entry',
       planStatus:String(safe.planAuthority && safe.planAuthority.status || safe.derivedStates && safe.derivedStates.planStatus || 'missing').trim().toLowerCase(),
       setupScore:numericOrNull(safe.derivedStates && safe.derivedStates.setupScore),
@@ -471,8 +519,8 @@
     const verdict = normalizeVerdict(safe.canonicalVerdict);
     const visualBucket = String(safe.canonicalVisualBucket || 'monitor');
     const planVisible = verdict === 'entry';
-    const nextAction = nextActionForVerdict(verdict);
-    const primaryReason = primaryReasonForVerdict(verdict);
+    const nextAction = nextActionForContract(safe);
+    const primaryReason = primaryReasonForContract(safe);
     return {
       ticker:String(safe.ticker || ''),
       canonicalVerdict:verdict,

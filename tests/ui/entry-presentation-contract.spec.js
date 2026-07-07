@@ -73,6 +73,11 @@ test('canonical Entry presentation remains authoritative across review, trade pl
     record.marketData.history = [
       {date:'2026-06-27', open:108.10, high:110.60, low:107.90, close:110.27, volume:seed.volume}
     ];
+    record.strongBullishReversal = true;
+    record.strongBullishContinuation = true;
+    record.breaksLocalHigh = true;
+    record.reclaimAttempt = true;
+    record.reclaimsLevel = true;
     record.setup.structureState = 'strong';
     record.setup.structureEligibility = 'alive';
     record.setup.setupLocationState = 'near_20ma';
@@ -112,6 +117,8 @@ test('canonical Entry presentation remains authoritative across review, trade pl
         stabilisation_state:'clear',
         bounce_state:'confirmed',
         volume_state:'supportive',
+        candle_evidence_reclaim_range_meaningful:'yes',
+        candle_evidence_reclaimed_prior_day_high:'yes',
         has_clear_invalidation_level:'yes',
         has_priceable_plan:'yes',
         entry_defined:'yes',
@@ -325,7 +332,7 @@ test('canonical Entry presentation remains authoritative across review, trade pl
   expect(contract.paperTrade.reasons).toEqual([]);
 
   const reviewStateHealth = await page.evaluate(() => currentReviewStateHealthSnapshot(getTickerRecord('TROW')));
-  expect(reviewStateHealth.sourceOfTruth).toBe('review_projection_snapshot');
+  expect(reviewStateHealth.sourceOfTruth).toBe('simplified_state_pipeline');
   expect(reviewStateHealth.resolvedRR).toBeCloseTo(2.5, 6);
   if(reviewStateHealth.plannedRR != null) expect(reviewStateHealth.plannedRR).toBeCloseTo(2.5, 6);
   if(reviewStateHealth.resolverRR != null) expect(reviewStateHealth.resolverRR).toBeCloseTo(2.5, 6);
@@ -351,10 +358,15 @@ test('canonical Entry presentation remains authoritative across review, trade pl
     setActiveReviewTicker('TROW');
     return currentPaperTradeContextForTicker('TROW');
   });
-  expect(clickContextFallback && clickContextFallback.finalVerdict).toBe('Entry');
-  expect(clickContextFallback && clickContextFallback.eligibility && clickContextFallback.eligibility.eligible).toBe(true);
+  expect(clickContextFallback && clickContextFallback.canonicalVerdict).toBe('near_entry');
+  expect(clickContextFallback && clickContextFallback.finalVerdict).toBe('Near Entry');
+  expect(clickContextFallback && clickContextFallback.actionabilityState).toBe('waiting_for_confirmation');
+  expect(clickContextFallback && clickContextFallback.eligibility && clickContextFallback.eligibility.eligible).toBe(false);
   expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.authoritativeReviewVerdict).toBe('entry');
-  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.reasons).toEqual([]);
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.canonicalPaperTradeVerdict).toBe('near_entry');
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.paperTradeSurfaceVerdict).toBe('Near Entry');
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.paperTradeEligibilityState).toBe('waiting_for_confirmation');
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.reasons[0]).toContain('Not actionable');
 
   await page.evaluate(() => {
     renderWatchlist({source:'entry_contract_test'});
@@ -425,6 +437,11 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
     record.marketData.history = [
       {date:'2026-06-27', open:73.1, high:75.3, low:72.8, close:75, volume:1200000}
     ];
+    record.strongBullishReversal = true;
+    record.strongBullishContinuation = true;
+    record.breaksLocalHigh = true;
+    record.reclaimAttempt = true;
+    record.reclaimsLevel = true;
     record.setup.structureState = 'strong';
     record.setup.structureEligibility = 'alive';
     record.setup.setupLocationState = 'near_20ma';
@@ -464,6 +481,8 @@ test('canonical Entry can enable Paper Trade through backend gateway configurati
         stabilisation_state:'clear',
         bounce_state:'confirmed',
         volume_state:'supportive',
+        candle_evidence_reclaim_range_meaningful:'yes',
+        candle_evidence_reclaimed_prior_day_high:'yes',
         has_clear_invalidation_level:'yes',
         has_priceable_plan:'yes',
         entry_defined:'yes',

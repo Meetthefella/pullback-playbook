@@ -1,6 +1,7 @@
 const {test, expect} = require('@playwright/test');
 const path = require('path');
 const {
+  dismissOptionalOverlays,
   openTrackTab,
   waitForUiTransitionSettle
 } = require('./helpers/app-driver');
@@ -59,16 +60,18 @@ async function seedCanonicalWatchWithValidPlan(page){
     record.marketData.history = [
       {date:'2026-06-27', open:19.8, high:20.6, low:19.6, close:20.4, volume:3831934}
     ];
+    record.strongBullishReversal = true;
+    record.reclaimAttempt = true;
     record.setup.structureState = 'strong';
     record.setup.structureEligibility = 'alive';
     record.setup.setupLocationState = 'near_20ma';
     record.setup.pullbackZone = 'near_20ma';
     record.setup.priceabilityState = 'priceable';
     record.setup.bounceState = 'confirmed';
-    record.setup.stabilisationState = 'stabilising';
+    record.setup.stabilisationState = 'clear';
     record.setup.volumeState = 'supportive';
     record.setup.trendState = 'strong';
-    record.plan.entry = 20.4;
+    record.plan.entry = 20.6;
     record.plan.stop = 18.8;
     record.plan.firstTarget = 25.2;
     record.plan.target = 25.2;
@@ -107,9 +110,11 @@ async function seedCanonicalWatchWithValidPlan(page){
         setup_location_state:'near_20ma',
         priceability_state:'priceable',
         structure_state:'strong',
-        stabilisation_state:'stabilising',
+        stabilisation_state:'clear',
         bounce_state:'confirmed',
         volume_state:'supportive',
+        candle_evidence_reclaim_range_meaningful:'yes',
+        candle_evidence_reclaimed_prior_day_high:'yes',
         has_clear_invalidation_level:'yes',
         has_priceable_plan:'yes',
         entry_defined:'yes',
@@ -304,7 +309,8 @@ test('clicked snapshot source without a matching projection refreshes from live 
   result.outcomes.forEach(outcome => {
     expect(outcome.stateHealth.sourceOfTruth, `snapshot ${outcome.snapshotTicker || '(null)'} must not be projection authority`).not.toBe('review_projection_snapshot');
     expect(outcome.stateHealth.canonicalVerdict, `snapshot ${outcome.snapshotTicker || '(null)'} must use live resolver verdict`).toBe('near_entry');
-    expect(outcome.paperTrade && outcome.paperTrade.finalVerdict, `snapshot ${outcome.snapshotTicker || '(null)'} must not enable Paper Trade Entry`).not.toBe('Entry');
+    expect(outcome.paperTrade && outcome.paperTrade.finalVerdict, `snapshot ${outcome.snapshotTicker || '(null)'} must preserve the canonical Near Entry verdict in Paper Trade.`).toBe('Near Entry');
+    expect(outcome.paperTrade && outcome.paperTrade.eligibility && outcome.paperTrade.eligibility.eligible, `snapshot ${outcome.snapshotTicker || '(null)'} must still keep Paper Trade disabled.`).toBe(false);
   });
 });
 
@@ -378,7 +384,8 @@ test('score-only Review snapshot cannot become presentation authority', async ({
   expect(result.forcedClickedSharedPresentation.visualBucket, 'score-only clicked snapshot must not change shared presentation bucket').toBe(result.baselineSharedPresentation.visualBucket);
   expect(result.forcedClickedSharedPresentation.headline, 'score-only clicked snapshot must not change shared presentation headline').toBe(result.baselineSharedPresentation.headline);
   expect(result.tradeStatus, 'score-only snapshot must not render clicked Entry copy').not.toContain('Entry Ready');
-  expect(result.paperTrade && result.paperTrade.finalVerdict, 'score-only snapshot must not enable Paper Trade Entry').not.toBe('Entry');
+  expect(result.paperTrade && result.paperTrade.finalVerdict, 'score-only snapshot must preserve the live canonical Near Entry verdict').toBe('Near Entry');
+  expect(result.paperTrade && result.paperTrade.eligibility && result.paperTrade.eligibility.eligible, 'score-only snapshot must keep Paper Trade disabled').toBe(false);
 });
 
 test('unknown capital fit never enables Paper Trade eligibility', async ({page}) => {
@@ -466,7 +473,7 @@ test('lifecycle Entry without canonical actionable plan does not force Paper Tra
     return currentPaperTradeContextForTicker('TROW');
   });
 
-  expect(context && context.finalVerdict, 'lifecycle Entry alone must not force paper-trade verdict Entry').not.toBe('Entry');
+  expect(context && context.finalVerdict, 'lifecycle Entry alone must not relabel the paper-trade verdict away from canonical Near Entry.').toBe('Near Entry');
   expect(context && context.eligibility && context.eligibility.eligible, 'lifecycle Entry alone must not enable Paper Trade').toBe(false);
 });
 
@@ -574,6 +581,7 @@ test('persisted sharedPresentation Entry cannot become lifecycle or Review soft-
       reviewCanonicalVerdict:review.canonicalVerdict,
       reviewVisualBucket:review.visualBucket,
       reviewOverrideApplied:!!(review.debug && review.debug.reviewWatchlistSoftReadinessDisplayOverrideApplied === true),
+      paperTradeCanonicalVerdict:paperTrade && paperTrade.canonicalVerdict,
       paperTradeFinalVerdict:paperTrade && paperTrade.finalVerdict,
       paperTradeEligible:!!(paperTrade && paperTrade.eligibility && paperTrade.eligibility.eligible === true)
     };
@@ -584,7 +592,8 @@ test('persisted sharedPresentation Entry cannot become lifecycle or Review soft-
   expect(result.reviewCanonicalVerdict, 'persisted lifecycle/presentation must not soft-promote Review').toBe('watch');
   expect(result.reviewVisualBucket, 'persisted lifecycle/presentation must not promote Review bucket').toBe('monitor');
   expect(result.reviewOverrideApplied, 'Review soft-readiness override must not run without resolver alignment').toBe(false);
-  expect(result.paperTradeFinalVerdict, 'persisted Entry presentation must not promote paper-trade verdict').not.toBe('Entry');
+  expect(String(result.paperTradeCanonicalVerdict || '').trim().toLowerCase(), 'persisted Entry presentation must not promote the canonical paper-trade verdict').toBe('avoid');
+  expect(result.paperTradeFinalVerdict, 'persisted Entry presentation must keep the public paper-trade verdict aligned with canonical authority').toBe('Avoid');
   expect(result.paperTradeEligible, 'persisted Entry presentation must not enable paper-trade eligibility').toBe(false);
 });
 
@@ -708,9 +717,235 @@ test('paper trade ignores Entry verdict when canonical plan authority is not act
 
   expect(context && context.debugSnapshot && context.debugSnapshot.planAuthority && context.debugSnapshot.planAuthority.verdict, 'test fixture should expose Entry verdict authority').toBe('entry');
   expect(context && context.debugSnapshot && context.debugSnapshot.planAuthority && context.debugSnapshot.planAuthority.actionable, 'plan authority is deliberately non-actionable').toBe(false);
-  expect(context && context.finalVerdict, 'Entry verdict alone must not force Paper Trade Entry').not.toBe('Entry');
+  expect(context && context.finalVerdict, 'Entry authority without an actionable plan must keep the public canonical verdict aligned to Near Entry.').toBe('Near Entry');
   expect(context && context.eligibility && context.eligibility.eligible, 'non-actionable Entry verdict must not enable Paper Trade').toBe(false);
   expect(context && context.debugSnapshot && context.debugSnapshot.blockerReason, 'non-actionable Entry verdict must not clear blockers').not.toBe('');
+});
+
+test('entry webhook does not fire when canonical Entry is not submit-ready for Paper Trade', async ({page}) => {
+  await bootApp(page);
+  await seedCanonicalWatchWithValidPlan(page);
+
+  const result = await page.evaluate(async () => {
+    const originalFetch = window.fetch;
+    const fetchCalls = [];
+    window.fetch = async (...args) => {
+      fetchCalls.push(args.map(value => {
+        if(typeof value === 'string') return value;
+        if(value && typeof value === 'object' && value.url) return value.url;
+        try{
+          return JSON.stringify(value);
+        }catch(_error){
+          return String(value);
+        }
+      }));
+      return {ok:true, json:async () => ({ok:true}), text:async () => 'ok'};
+    };
+    const originalPaperTradeContext = currentPaperTradeContextForTicker;
+    const originalPaperTradeGatewayReady = paperTradeGatewayReady;
+    currentPaperTradeContextForTicker = function patchedCurrentPaperTradeContextForTicker(){
+      return {
+        ticker:'TROW',
+        canonicalVerdict:'near_entry',
+        finalVerdict:'Near Entry',
+        paperTradeEnabled:false,
+        actionabilityState:'waiting_for_confirmation',
+        eligibility:{eligible:false, reasons:['Waiting for confirmation.']},
+        displayedPlan:{
+          entry:75,
+          stop:72,
+          target:84,
+          riskFit:{position_size:13, max_loss:39},
+          rewardRisk:{rrRatio:3}
+        },
+        debugSnapshot:{
+          planAuthority:{actionable:false, verdict:'near_entry'},
+          paperTradeEligibilityState:'waiting_for_confirmation'
+        }
+      };
+    };
+    paperTradeGatewayReady = () => false;
+    try{
+      const record = getTickerRecord('TROW');
+      if(record && record.meta) delete record.meta.previousFinalVerdict;
+      if(record && record.meta) delete record.meta.lastAlertedState;
+      if(record && record.meta) delete record.meta.previousEntryAlertSubmitReady;
+      const verdict = {final_verdict:'entry', finalVerdict:'entry'};
+      const triggered = maybeTriggerEntryAlert(record, verdict, {source:'entry_alert_contract_test'});
+      return {
+        triggered,
+        fetchCalls,
+        actionabilityState:record && record.watchlist && record.watchlist.debug ? record.watchlist.debug.entryAlertActionabilityState : ''
+      };
+    }finally{
+      currentPaperTradeContextForTicker = originalPaperTradeContext;
+      paperTradeGatewayReady = originalPaperTradeGatewayReady;
+      window.fetch = originalFetch;
+    }
+  });
+
+  expect(result.triggered).toBe(false);
+  expect(result.fetchCalls).toEqual([]);
+  expect(result.actionabilityState).toBe('waiting_for_confirmation');
+});
+
+test('entry webhook does not fire when Paper Trade gateway is unavailable', async ({page}) => {
+  await bootApp(page);
+  await seedCanonicalWatchWithValidPlan(page);
+
+  const result = await page.evaluate(async () => {
+    const originalFetch = window.fetch;
+    const fetchCalls = [];
+    window.fetch = async (...args) => {
+      fetchCalls.push(args.map(value => {
+        if(typeof value === 'string') return value;
+        if(value && typeof value === 'object' && value.url) return value.url;
+        try{
+          return JSON.stringify(value);
+        }catch(_error){
+          return String(value);
+        }
+      }));
+      return {ok:true, json:async () => ({ok:true}), text:async () => 'ok'};
+    };
+    const originalPaperTradeContext = currentPaperTradeContextForTicker;
+    const originalPaperTradeGatewayReady = paperTradeGatewayReady;
+    currentPaperTradeContextForTicker = function patchedCurrentPaperTradeContextForTicker(){
+      return {
+        ticker:'TROW',
+        canonicalVerdict:'entry',
+        finalVerdict:'Entry',
+        paperTradeEnabled:false,
+        actionabilityState:'entry_blocked',
+        eligibility:{eligible:false, reasons:['Paper gateway unavailable.']},
+        displayedPlan:{
+          entry:75,
+          stop:72,
+          target:84,
+          riskFit:{position_size:13, max_loss:39},
+          rewardRisk:{rrRatio:3}
+        },
+        debugSnapshot:{
+          planAuthority:{actionable:true, verdict:'entry'},
+          paperTradeEligibilityState:'entry_blocked'
+        }
+      };
+    };
+    paperTradeGatewayReady = () => false;
+    try{
+      const record = getTickerRecord('TROW');
+      if(record && record.meta) delete record.meta.previousFinalVerdict;
+      if(record && record.meta) delete record.meta.lastAlertedState;
+      if(record && record.meta) delete record.meta.previousEntryAlertSubmitReady;
+      const verdict = {final_verdict:'entry', finalVerdict:'entry'};
+      const triggered = maybeTriggerEntryAlert(record, verdict, {source:'entry_alert_gateway_test'});
+      return {
+        triggered,
+        fetchCalls,
+        actionabilityState:record && record.watchlist && record.watchlist.debug ? record.watchlist.debug.entryAlertActionabilityState : ''
+      };
+    }finally{
+      currentPaperTradeContextForTicker = originalPaperTradeContext;
+      paperTradeGatewayReady = originalPaperTradeGatewayReady;
+      window.fetch = originalFetch;
+    }
+  });
+
+  expect(result.triggered).toBe(false);
+  expect(result.fetchCalls).toEqual([]);
+  expect(result.actionabilityState).toBe('entry_blocked');
+});
+
+test('entry webhook fires once when Paper Trade becomes submit-ready after gateway readiness catches up', async ({page}) => {
+  await bootApp(page);
+  await seedCanonicalWatchWithValidPlan(page);
+
+  const result = await page.evaluate(async () => {
+    const originalFetch = window.fetch;
+    const fetchCalls = [];
+    window.fetch = async (...args) => {
+      fetchCalls.push(args.map(value => {
+        if(typeof value === 'string') return value;
+        if(value && typeof value === 'object' && value.url) return value.url;
+        try{
+          return JSON.stringify(value);
+        }catch(_error){
+          return String(value);
+        }
+      }));
+      return {ok:true, json:async () => ({ok:true}), text:async () => 'ok'};
+    };
+    let gatewayReady = false;
+    const originalPaperTradeContext = currentPaperTradeContextForTicker;
+    const originalPaperTradeGatewayReady = paperTradeGatewayReady;
+    currentPaperTradeContextForTicker = function patchedCurrentPaperTradeContextForTicker(){
+      return {
+        ticker:'TROW',
+        canonicalVerdict:'entry',
+        finalVerdict:'Entry',
+        paperTradeEnabled:gatewayReady === true,
+        actionabilityState:gatewayReady === true ? 'ready_to_submit' : 'entry_blocked',
+        eligibility:{eligible:gatewayReady === true, reasons:gatewayReady === true ? [] : ['Gateway pending.']},
+        displayedPlan:{
+          entry:75,
+          stop:72,
+          target:84,
+          riskFit:{position_size:13, max_loss:39},
+          rewardRisk:{rrRatio:3}
+        },
+        debugSnapshot:{
+          planAuthority:{actionable:true, verdict:'entry'},
+          paperTradeEligibilityState:gatewayReady === true ? 'ready_to_submit' : 'entry_blocked'
+        }
+      };
+    };
+    paperTradeGatewayReady = () => gatewayReady;
+    try{
+      const record = getTickerRecord('TROW');
+      if(record && record.meta) delete record.meta.previousFinalVerdict;
+      if(record && record.meta) delete record.meta.lastAlertedState;
+      if(record && record.meta) delete record.meta.previousEntryAlertSubmitReady;
+      const verdict = {final_verdict:'entry', finalVerdict:'entry'};
+      const firstTriggered = maybeTriggerEntryAlert(record, verdict, {source:'entry_alert_gateway_pending'});
+      const firstMeta = {
+        previousFinalVerdict:record && record.meta ? record.meta.previousFinalVerdict : '',
+        previousEntryAlertSubmitReady:record && record.meta ? record.meta.previousEntryAlertSubmitReady : '',
+        lastAlertedState:record && record.meta ? record.meta.lastAlertedState : ''
+      };
+
+      gatewayReady = true;
+      const secondTriggered = maybeTriggerEntryAlert(record, verdict, {source:'entry_alert_gateway_ready'});
+      const secondMeta = {
+        previousFinalVerdict:record && record.meta ? record.meta.previousFinalVerdict : '',
+        previousEntryAlertSubmitReady:record && record.meta ? record.meta.previousEntryAlertSubmitReady : '',
+        lastAlertedState:record && record.meta ? record.meta.lastAlertedState : ''
+      };
+
+      const thirdTriggered = maybeTriggerEntryAlert(record, verdict, {source:'entry_alert_gateway_ready_repeat'});
+      return {
+        firstTriggered,
+        secondTriggered,
+        thirdTriggered,
+        firstMeta,
+        secondMeta,
+        fetchCalls
+      };
+    }finally{
+      currentPaperTradeContextForTicker = originalPaperTradeContext;
+      paperTradeGatewayReady = originalPaperTradeGatewayReady;
+      window.fetch = originalFetch;
+    }
+  });
+
+  expect(result.firstTriggered).toBe(false);
+  expect(result.firstMeta.previousFinalVerdict).toBe('entry');
+  expect(result.firstMeta.previousEntryAlertSubmitReady).toBe('false');
+  expect(result.firstMeta.lastAlertedState || '').toBe('');
+  expect(result.secondTriggered).toBe(true);
+  expect(result.secondMeta.previousEntryAlertSubmitReady).toBe('true');
+  expect(result.secondMeta.lastAlertedState).toBe('entry');
+  expect(result.thirdTriggered).toBe(false);
+  expect(result.fetchCalls).toHaveLength(1);
 });
 
 test('visible Paper Trade stays disabled when Entry presentation lacks actionable plan authority', async ({page}) => {
@@ -845,7 +1080,9 @@ test('clicked Review Entry projection collapses to live non-entry authority befo
         reviewAuthority:observedAuthorities.find(entry => entry.context === 'review_render_paper_trade') || null,
         contextAuthority:observedAuthorities.find(entry => entry.context === 'paper_trade_context') || null,
         buttonDisabled:button ? button.disabled === true : null,
+        canonicalVerdict:context && context.canonicalVerdict,
         finalVerdict:context && context.finalVerdict,
+        actionabilityState:context && context.actionabilityState,
         eligible:context && context.eligibility && context.eligibility.eligible,
         previewOpen:afterPreview && afterPreview.previewOpen === true,
         previewSnapshot:afterPreview && afterPreview.snapshot,
@@ -862,7 +1099,9 @@ test('clicked Review Entry projection collapses to live non-entry authority befo
   expect(result.reviewAuthority && result.reviewAuthority.reasonCode, 'projection Entry must not satisfy Paper Trade authority').toBe('verdict_not_entry');
   expect(result.buttonDisabled, 'visible Paper Trade button must remain disabled').toBe(true);
   expect(result.contextAuthority && result.contextAuthority.actionable, 'preview/submit context authority must also stay non-actionable').toBe(false);
-  expect(result.finalVerdict, 'preview/submit context must not return Entry').not.toBe('Entry');
+  expect(result.canonicalVerdict, 'preview/submit context must keep the canonical verdict aligned with Review.').toBe('near_entry');
+  expect(result.finalVerdict, 'preview/submit context must keep the public verdict aligned with canonical Near Entry.').toBe('Near Entry');
+  expect(result.actionabilityState, 'preview/submit context must expose a separate blocked actionability state.').toBe('waiting_for_confirmation');
   expect(result.eligible, 'preview/submit eligibility must stay false').toBe(false);
   expect(result.previewOpen, 'preview must not open').toBe(false);
   expect(result.previewSnapshot, 'preview must not create an executable snapshot').toBeFalsy();
@@ -933,7 +1172,9 @@ test('paper trade preview and submit ignore authoritative Review Entry when plan
       const afterSubmit = paperTradeUiStateForTicker('TROW');
       return {
         buttonDisabled:button ? button.disabled === true : null,
+        canonicalVerdict:context && context.canonicalVerdict,
         finalVerdict:context && context.finalVerdict,
+        actionabilityState:context && context.actionabilityState,
         eligible:context && context.eligibility && context.eligibility.eligible,
         previewOpen:afterPreview && afterPreview.previewOpen === true,
         previewSnapshot:afterPreview && afterPreview.snapshot,
@@ -947,7 +1188,9 @@ test('paper trade preview and submit ignore authoritative Review Entry when plan
   });
 
   expect(result.buttonDisabled, 'visible button must remain disabled').toBe(true);
-  expect(result.finalVerdict, 'paper trade context must not fall back to Review Entry presentation').not.toBe('Entry');
+  expect(result.canonicalVerdict, 'paper trade context must not fall back to Review Entry presentation').toBe('near_entry');
+  expect(result.finalVerdict, 'paper trade context must keep the public verdict aligned with Near Entry.').toBe('Near Entry');
+  expect(result.actionabilityState, 'paper trade context must expose blocked actionability separately from verdict.').toBe('waiting_for_confirmation');
   expect(result.eligible, 'preview context must remain ineligible').toBe(false);
   expect(result.previewOpen, 'preview must not open without actionable plan authority').toBe(false);
   expect(result.previewSnapshot, 'preview must not create an executable snapshot').toBeFalsy();
@@ -1029,4 +1272,276 @@ test('unstamped track projection snapshot cannot force Review into Entry', async
   expect(String(result.sourceOfTruth || '').trim().toLowerCase()).not.toBe('review_projection_snapshot');
   expect(String(result.canonicalVerdict || '').trim().toLowerCase()).not.toBe('entry');
   expect(String(result.visualBucket || '').trim().toLowerCase()).not.toBe('entry');
+});
+
+test('Scan does not revive stale projection authority after Review has canonical authority', async ({page}) => {
+  await bootApp(page);
+  await seedCanonicalWatchWithValidPlan(page);
+
+  const result = await page.evaluate(() => {
+    const record = getTickerRecord('TROW');
+    uiState.activeReviewSourceProjectionSnapshot = {
+      ticker:'TROW',
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      renderedVerdict:'entry',
+      visualBucket:'entry',
+      sourceOfTruthVisualBucket:'entry',
+      renderedBucket:'entry',
+      tone:'entry',
+      decisionSummary:'STALE ENTRY SNAPSHOT',
+      actionGuidance:'Execute only if the trigger remains valid.'
+    };
+    uiState.activeReviewProjectionSource = 'clicked_card_snapshot';
+    renderScannerResults();
+    const scanAuthority = authoritativeScanSurfaceSnapshot(record);
+    const simplified = resolveSimplifiedStateForSurface(record, 'scan', {
+      source:'scan_projection_regression',
+      mutationSource:'scan_projection_regression'
+    });
+    const card = document.querySelector('#results .resultcompact[data-ticker="TROW"]');
+    return {
+      scanAuthority,
+      simplified:{
+        canonicalVerdict:String(simplified && simplified.canonicalVerdict || ''),
+        actionLabel:String(simplified && simplified.actionLabel || ''),
+        badgeLabel:String(simplified && simplified.badgeLabel || ''),
+        debug:(
+          simplified
+          && simplified.debug
+          && simplified.debug.authoritativeScanSurfaceSnapshot
+        ) || null
+      },
+      visible:{
+        badgeLabel:String(card && card.querySelector('.badge.state-pill') && card.querySelector('.badge.state-pill').textContent || '').trim(),
+        decisionSummary:String(card && card.querySelector('.scan-card__decision') && card.querySelector('.scan-card__decision').textContent || '').trim()
+      }
+    };
+  });
+
+  expect(String(result.scanAuthority && result.scanAuthority.canonicalVerdict || '').trim().toLowerCase()).toBe('watch');
+  expect(String(result.simplified.canonicalVerdict || '').trim().toLowerCase()).toBe('watch');
+  expect(String(result.visible.badgeLabel || '').trim()).toBe('Watch');
+  expect(String(result.scanAuthority && result.scanAuthority.diagnostics && result.scanAuthority.diagnostics.reviewProjectionAuthorityAllowed || '')).not.toBe('true');
+  expect(String(result.simplified.actionLabel || '').trim()).toContain('Scouting only');
+  expect(String(result.scanAuthority && result.scanAuthority.diagnostics && result.scanAuthority.diagnostics.divergenceType || '').trim()).toBe('');
+});
+
+test('Review, Track, and Paper Trade canonical authority stay aligned after reload', async ({page}) => {
+  await bootApp(page);
+
+  await page.evaluate(() => {
+    const ticker = 'TROW';
+    state.paperTradeApiKey = 'paper-key';
+    state.paperTradeApiSecret = 'paper-secret';
+    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    trading212PaperAvailabilityChecked = true;
+    trading212PaperEnabled = true;
+    trading212PaperAvailabilityMessage = 'Paper gateway ready.';
+    const record = upsertTickerRecord(ticker);
+    record.meta.companyName = 'T. Rowe Price Group, Inc.';
+    record.meta.exchange = 'LSE';
+    record.meta.tradingViewSymbol = 'LSE:TROW';
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.currency = 'GBP';
+    record.marketData.price = 20.4;
+    record.marketData.previousClose = 19.9;
+    record.marketData.ma20 = 20.1;
+    record.marketData.ma50 = 19.4;
+    record.marketData.ma200 = 17.8;
+    record.marketData.volume = 3831934;
+    record.marketData.avgVolume = 2115787.96;
+    record.marketData.asOf = '2026-06-29T09:00:00.000Z';
+    record.marketData.history = [
+      {date:'2026-06-27', open:19.8, high:20.6, low:19.6, close:20.4, volume:3831934}
+    ];
+    record.strongBullishReversal = true;
+    record.reclaimAttempt = true;
+    record.setup.structureState = 'strong';
+    record.setup.structureEligibility = 'alive';
+    record.setup.setupLocationState = 'near_20ma';
+    record.setup.pullbackZone = 'near_20ma';
+    record.setup.priceabilityState = 'priceable';
+    record.setup.bounceState = 'confirmed';
+    record.setup.stabilisationState = 'clear';
+    record.setup.volumeState = 'supportive';
+    record.setup.trendState = 'strong';
+    record.plan.entry = 20.6;
+    record.plan.stop = 18.8;
+    record.plan.firstTarget = 25.2;
+    record.plan.target = 25.2;
+    record.plan.status = 'valid';
+    record.plan.source = 'scanner_estimate';
+    record.plan.riskStatus = 'fits_risk';
+    record.plan.tradeability = 'risk_only';
+    record.plan.authoritySource = 'resolver';
+    record.plan.authorityVersion = 'trade_plan_v1';
+    record.plan.authorityReason = 'reload_alignment_seed';
+    record.plan.writtenBy = 'playwright';
+    record.plan.writtenAt = '2026-06-29T09:00:00.000Z';
+    record.plan.capitalFit = {
+      capital_fit:'unknown',
+      capital_note:'Capital fit cannot be confirmed yet.',
+      position_cost:4080,
+      quote_currency:'GBP',
+      fx_status:'native'
+    };
+    record.scan.score = 9;
+    record.scan.resolvedVerdict = 'Watch';
+    record.scan.verdict = 'Watch';
+    record.scan.summary = 'Bounce still tentative.';
+    record.scan.analysisProjection = {
+      price:20.4,
+      sma20:20.1,
+      sma50:19.4,
+      sma200:17.8,
+      rr_ratio:'3.00',
+      risk_status:'fits_risk',
+      derived_states:{
+        trend_state:'strong',
+        pullback_zone:'near_20ma',
+        setup_location_state:'near_20ma',
+        priceability_state:'priceable',
+        structure_state:'strong',
+        stabilisation_state:'clear',
+        bounce_state:'confirmed',
+        volume_state:'supportive',
+        candle_evidence_reclaim_range_meaningful:'yes',
+        candle_evidence_reclaimed_prior_day_high:'yes',
+        has_clear_invalidation_level:'yes',
+        has_priceable_plan:'yes',
+        entry_defined:'yes',
+        stop_defined:'yes',
+        target_defined:'yes'
+      }
+    };
+    record.review.savedVerdict = 'Entry';
+    record.review.savedScore = 2;
+    record.review.savedSummary = 'Stale saved review verdict.';
+    record.review.analysisState = {normalized:{coach_summary:'Ignore stale review presentation.'}};
+    record.review.manualReview = {entry:20.4, stop:18.8, target:25.2};
+    record.review.cardOpen = true;
+    record.watchlist.inWatchlist = true;
+    record.watchlist.addedAt = '2026-06-29';
+    record.watchlist.expiryAfterTradingDays = 5;
+    state.tickers = [ticker];
+    uiState.scannerSessionTickers = [ticker];
+    uiState.activeReviewTicker = ticker;
+    uiState.activeWorkspaceTab = 'review';
+    commitTickerState();
+    if(typeof persistState === 'function') persistState();
+    renderReviewWorkspace({source:'reload_alignment_seed'});
+    renderWatchlist({source:'reload_alignment_seed'});
+  });
+
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => {
+    if(typeof startupDebugRenderState !== 'function') return false;
+    const ready = startupDebugRenderState();
+    return !!(ready && ready.hydrationComplete === true && ready.riskRefreshComplete === true);
+  }, null, {timeout:30000});
+  await dismissOptionalOverlays(page);
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  const result = await page.evaluate(() => {
+    const record = getTickerRecord('TROW');
+    const reviewState = currentReviewStateHealthSnapshot(record);
+    const trackState = buildTrackDiagnosticSnapshot(record);
+    const paperTrade = currentPaperTradeContextForTicker('TROW');
+    return {
+      reviewVerdict:String(reviewState && reviewState.canonicalVerdict || '').trim().toLowerCase(),
+      trackVerdict:String(trackState && trackState.canonicalVerdict || '').trim().toLowerCase(),
+      paperTradeAuthorityVerdict:String(
+        paperTrade
+        && paperTrade.planVerdictContract
+        && paperTrade.planVerdictContract.canonicalVerdict
+        || ''
+      ).trim().toLowerCase(),
+      paperTradeReviewAuthorityVerdict:String(
+        paperTrade
+        && paperTrade.debugSnapshot
+        && paperTrade.debugSnapshot.authoritativeReviewVerdict
+        || ''
+      ).trim().toLowerCase(),
+      paperTradeVerdict:String(paperTrade && paperTrade.finalVerdict || '').trim().toLowerCase(),
+      paperTradeActionabilityState:String(paperTrade && paperTrade.actionabilityState || '').trim().toLowerCase(),
+      paperTradeEligible:!!(paperTrade && paperTrade.eligibility && paperTrade.eligibility.eligible === true)
+    };
+  });
+
+  expect(result.reviewVerdict).toBe('near_entry');
+  expect(result.trackVerdict).toBe('near_entry');
+  expect(result.paperTradeAuthorityVerdict).toBe('near_entry');
+  expect(result.paperTradeReviewAuthorityVerdict).toBe('near_entry');
+  expect(result.paperTradeVerdict).toBe('near entry');
+  expect(result.paperTradeActionabilityState).toBe('waiting_for_confirmation');
+  expect(result.paperTradeEligible).toBe(false);
+});
+
+test('paper trade diagnostics keep canonical verdict, review verdict, and lifecycle state separate', async ({page}) => {
+  const appUrl = `file:///${path.resolve(__dirname, '..', '..', 'index.html').replace(/\\/g, '/')}`;
+  await page.goto(appUrl, {waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => {
+    if(typeof startupDebugRenderState !== 'function') return false;
+    const ready = startupDebugRenderState();
+    return !!(ready && ready.hydrationComplete === true && ready.riskRefreshComplete === true);
+  }, null, {timeout:30000});
+
+  const diagnostic = await page.evaluate(() => {
+    resetAllData();
+    const record = upsertTickerRecord('DIAG');
+    record.meta.companyName = 'Diagnostics Inc.';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.currency = 'USD';
+    record.marketData.price = 75;
+    record.marketData.previousClose = 72.4;
+    record.marketData.ma20 = 73.2;
+    record.marketData.ma50 = 70.1;
+    record.marketData.ma200 = 64.8;
+    record.marketData.volume = 1200000;
+    record.marketData.avgVolume = 1000000;
+    record.strongBullishReversal = true;
+    record.setup.structureState = 'strong';
+    record.setup.structureEligibility = 'alive';
+    record.setup.setupLocationState = 'near_20ma';
+    record.setup.pullbackZone = 'near_20ma';
+    record.setup.priceabilityState = 'priceable';
+    record.setup.bounceState = 'confirmed';
+    record.setup.stabilisationState = 'clear';
+    record.setup.volumeState = 'supportive';
+    record.setup.trendState = 'strong';
+    record.plan.entry = 75;
+    record.plan.stop = 72;
+    record.plan.firstTarget = 84;
+    record.plan.target = 84;
+    record.plan.status = 'valid';
+    record.plan.riskStatus = 'fits_risk';
+    record.plan.tradeability = 'tradable';
+    record.review.savedVerdict = 'Near Entry';
+    state.paperTradeApiKey = 'paper-key';
+    state.paperTradeApiSecret = 'paper-secret';
+    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    try{ trading212PaperSupported = true; }catch(_error){}
+    try{ trading212PaperAvailabilityChecked = true; }catch(_error){}
+    try{ trading212PaperEnabled = true; }catch(_error){}
+    try{ trading212PaperAvailabilityMessage = 'Paper gateway ready.'; }catch(_error){}
+    setActiveReviewTicker('DIAG');
+    const context = currentPaperTradeContextForTicker('DIAG');
+    return context && context.debugSnapshot ? {
+      authoritativeReviewVerdict:context.debugSnapshot.authoritativeReviewVerdict,
+      canonicalPaperTradeVerdict:context.debugSnapshot.canonicalPaperTradeVerdict,
+      paperTradeSurfaceVerdict:context.debugSnapshot.paperTradeSurfaceVerdict,
+      paperTradeEligibilityState:context.debugSnapshot.paperTradeEligibilityState,
+      finalVerdict:context.debugSnapshot.finalVerdict
+    } : null;
+  });
+
+  expect(diagnostic).toBeTruthy();
+  expect(diagnostic.authoritativeReviewVerdict).toBe('near_entry');
+  expect(diagnostic.canonicalPaperTradeVerdict).toBe('near_entry');
+  expect(diagnostic.paperTradeSurfaceVerdict).toBe('Near Entry');
+  expect(diagnostic.paperTradeEligibilityState).toBe('waiting_for_confirmation');
+  expect(diagnostic.finalVerdict).toBe('Near Entry');
 });
