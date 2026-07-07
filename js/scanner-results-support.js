@@ -97,9 +97,9 @@
       },
       {
         key:'monitor-diminishing',
-        title:'Monitor / Diminishing',
+        title:'Diminishing Watch',
         summary: monitorDiminishing.length
-          ? `${monitorDiminishing.length} lower-priority watch setup${monitorDiminishing.length === 1 ? '' : 's'}`
+          ? `${monitorDiminishing.length} weakening watch setup${monitorDiminishing.length === 1 ? '' : 's'}`
           : 'No Diminishing Watch Setups',
         items:monitorDiminishing,
         collapsed:false,

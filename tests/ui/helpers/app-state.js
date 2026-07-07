@@ -785,6 +785,14 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         visibleCard:{
           visualState:String(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`).dataset && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`).dataset.visualState || ''),
           visualTone:String(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`).dataset && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`).dataset.visualTone || ''),
+          sectionTitle:safeText((() => {
+            const card = document.querySelector(`#results .resultcompact[data-ticker="${ticker}"]`);
+            if(!card) return '';
+            const group = card.closest('.resultsgroup');
+            return group && group.querySelector('.summary strong')
+              ? group.querySelector('.summary strong').textContent
+              : '';
+          })()),
           badgeLabel:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .badge.state-pill`).textContent),
           scoreLabel:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .visual-score, #results .resultcompact[data-ticker="${ticker}"] .score`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .visual-score, #results .resultcompact[data-ticker="${ticker}"] .score`).textContent),
           technicalSummary:safeText(document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`) && document.querySelector(`#results .resultcompact[data-ticker="${ticker}"] .scan-card__technical`).textContent),

@@ -40682,14 +40682,43 @@ function renderScannerResults(){
       source:'scan_grouping',
       mutationSource:'scan_grouping'
     });
+    const authoritativeScan = typeof authoritativeScanSurfaceSnapshot === 'function'
+      ? authoritativeScanSurfaceSnapshot(view.item)
+      : null;
     const scanPresentation = scanPresentationForView({
       ...view,
       simplifiedState
     });
+    const publicScanBucket = normalizeVisualBucketForPairing(
+      authoritativeScan && authoritativeScan.visualBucket
+      || scanPresentation.presentationBucket
+      || scanPresentation.visualBucket
+      || simplifiedState.visualBucket
+      || 'monitor',
+      normalizeGlobalVerdictKey(
+        authoritativeScan && authoritativeScan.canonicalVerdict
+        || simplifiedState.canonicalVerdict
+        || scanPresentation.canonicalVerdict
+        || 'watch'
+      )
+    );
+    const publicScanSection = publicScanBucket === 'entry'
+      ? 'tradeable_entry'
+      : (publicScanBucket === 'near_entry'
+        ? 'near_entry'
+        : (publicScanBucket === 'avoid'
+          ? 'avoid'
+          : (publicScanBucket === 'diminishing' ? 'monitor_diminishing' : 'monitor_watch')));
     return {
       ...view,
       simplifiedState,
-      scanPresentation
+      scanPresentation:{
+        ...scanPresentation,
+        visualBucket:publicScanBucket,
+        presentationBucket:publicScanBucket,
+        tone:publicScanBucket,
+        scanSection:publicScanSection
+      }
     };
   });
   if(resultsToggle){

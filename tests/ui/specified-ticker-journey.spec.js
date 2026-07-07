@@ -413,6 +413,7 @@ test('specified ticker can run scan to review to track without synthetic seeding
     scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.visualTone
     || scanState && scanState.normalized && scanState.normalized.scanVisualBucket
   ).toLowerCase();
+  const scanSectionTitle = normalizeText(scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.sectionTitle);
   const scanBadgeLabel = normalizeText(scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.badgeLabel);
   const scanDecisionSummary = normalizeText(scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.decisionSummary);
   if(scanVisualBucket === 'diminishing'){
@@ -426,6 +427,16 @@ test('specified ticker can run scan to review to track without synthetic seeding
         actual:scanDecisionSummary
       }
     );
+    pushMismatch(
+      mismatchFindings,
+      /Diminishing Watch/i.test(scanSectionTitle),
+      `${JOURNEY_TICKER} diminishing scan card must appear in the Diminishing Watch section.`,
+      {
+        surface:'scan',
+        expected:'Diminishing Watch',
+        actual:scanSectionTitle
+      }
+    );
   }
   if(scanVisualBucket === 'monitor'){
     pushMismatch(
@@ -436,6 +447,16 @@ test('specified ticker can run scan to review to track without synthetic seeding
         surface:'scan',
         expected:'Monitor-aligned summary copy',
         actual:scanDecisionSummary
+      }
+    );
+    pushMismatch(
+      mismatchFindings,
+      /Monitor \/ Watch/i.test(scanSectionTitle),
+      `${JOURNEY_TICKER} monitor scan card must appear in the Monitor / Watch section.`,
+      {
+        surface:'scan',
+        expected:'Monitor / Watch',
+        actual:scanSectionTitle
       }
     );
   }
@@ -458,6 +479,16 @@ test('specified ticker can run scan to review to track without synthetic seeding
         surface:'scan',
         expected:'Avoid',
         actual:scanBadgeLabel
+      }
+    );
+    pushMismatch(
+      mismatchFindings,
+      /^Avoid$/i.test(scanSectionTitle),
+      `${JOURNEY_TICKER} avoid scan card must appear in the Avoid section.`,
+      {
+        surface:'scan',
+        expected:'Avoid',
+        actual:scanSectionTitle
       }
     );
   }
