@@ -8749,7 +8749,7 @@ function hasAuthoritativeStopBreach(record, options = {}){
     && planValidationState === 'valid';
   const breached = Number.isFinite(currentPrice)
     && Number.isFinite(stopPrice)
-    && currentPrice <= (stopPrice * thresholdMultiplier);
+    && currentPrice < (stopPrice * thresholdMultiplier);
   return breached && (
     authoritativePlan
     || invalidatedReviewedPlan
@@ -9833,23 +9833,6 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     || simplifiedState.final_verdict
     || 'watch'
   );
-  const structuralAliveAtRefresh = String(
-    lifecycleSnapshot.structural_alive_at_refresh
-    || watchlistDebug.structural_alive_at_refresh
-    || ''
-  ).trim().toLowerCase() === 'true';
-  const avoidAllowedByStructureGate = String(
-    lifecycleSnapshot.avoid_allowed_by_structure_gate
-    || watchlistDebug.avoid_allowed_by_structure_gate
-    || ''
-  ).trim().toLowerCase() === 'true';
-  const explicitInvalidationReason = String(
-    lifecycleSnapshot.explicit_invalidation_reason
-    || watchlistDebug.explicit_invalidation_reason
-    || globalVerdict.explicit_invalidation_reason
-    || ''
-  ).trim().toLowerCase();
-  const hasExplicitInvalidation = !!(explicitInvalidationReason && explicitInvalidationReason !== '(none)');
   const baseVerdict = normalizeVerdictKey(
     globalVerdict.base_verdict
     || watchlistDebug.baseVerdict
@@ -9860,15 +9843,6 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     || globalVerdict.finalVerdict
     || watchlistDebug.finalVerdict
     || ''
-  );
-  const softTrackedWatchSuppression = !!(
-    item.watchlist
-    && item.watchlist.inWatchlist
-    && simplifiedVerdictForShared === 'avoid'
-    && structuralAliveAtRefresh
-    && !avoidAllowedByStructureGate
-    && !hasExplicitInvalidation
-    && ['watch', 'monitor'].includes(baseVerdict || resolverVerdict)
   );
   const lifecycleVerdict = normalizeVerdictKey(
     lifecycleSnapshot.state
@@ -9939,13 +9913,11 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     || contractCanonicalVerdict,
     contractCanonicalVerdict
   );
-  const effectiveCanonicalVerdict = softTrackedWatchSuppression
-    ? 'watch'
-    : (projectionCanonicalVerdict
-      ? projectionCanonicalVerdict
-      : (preserveTrackedLifecycleCanonicalVerdict
-        ? lifecycleVerdict
-        : contractCanonicalVerdict));
+  const effectiveCanonicalVerdict = projectionCanonicalVerdict
+    ? projectionCanonicalVerdict
+    : (preserveTrackedLifecycleCanonicalVerdict
+      ? lifecycleVerdict
+      : contractCanonicalVerdict);
   const visibleModel = resolveTrackVisibleModelSafe(item, {
     ...simplifiedState,
     canonicalVerdict:effectiveCanonicalVerdict,
@@ -9953,26 +9925,24 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       ? 'entry'
       : (effectiveCanonicalVerdict === 'near_entry'
         ? 'near_entry'
-        : (softTrackedWatchSuppression ? 'diminishing' : simplifiedState.visualBucket)),
+        : simplifiedState.visualBucket),
     tone:effectiveCanonicalVerdict === 'entry'
       ? 'entry'
       : (effectiveCanonicalVerdict === 'near_entry'
         ? 'near_entry'
-        : (softTrackedWatchSuppression ? 'diminishing' : simplifiedState.tone))
+        : simplifiedState.tone)
   });
   const visualBucket = normalizeBucket(
-    softTrackedWatchSuppression
-      ? 'diminishing'
-      : (projectionVisualBucket
-        || (preserveTrackedLifecycleCanonicalVerdict
-          ? (lifecycleVerdict === 'entry'
-            ? 'entry'
-            : (lifecycleVerdict === 'near_entry' ? 'near_entry' : contractVisualBucket))
-          : contractVisualBucket)
-        || visibleModel.visibleBucket
-        || simplifiedState.visualBucket
-        || simplifiedState.presentationBucket
-        || 'monitor'),
+    projectionVisualBucket
+      || (preserveTrackedLifecycleCanonicalVerdict
+        ? (lifecycleVerdict === 'entry'
+          ? 'entry'
+          : (lifecycleVerdict === 'near_entry' ? 'near_entry' : contractVisualBucket))
+        : contractVisualBucket)
+      || visibleModel.visibleBucket
+      || simplifiedState.visualBucket
+      || simplifiedState.presentationBucket
+      || 'monitor',
     effectiveCanonicalVerdict
   );
   const tone = normalizeBucket(visualBucket || 'monitor', effectiveCanonicalVerdict);
@@ -10139,15 +10109,6 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && globalVerdict.contractDiagnostics
     && globalVerdict.contractDiagnostics.softReadinessOnlyDemotion === true
   );
-  const softTrackedWatchSuppression = !!(
-    item.watchlist
-    && item.watchlist.inWatchlist
-    && simplifiedVerdict === 'avoid'
-    && structuralAliveAtRefresh
-    && !avoidAllowedByStructureGate
-    && !hasExplicitInvalidation
-    && ['watch', 'monitor'].includes(baseVerdict || resolverVerdict)
-  );
   const trackedLifecycleHardStructuredBlock = ['invalidated','missed','target_too_close','broken_structure'].includes(explicitInvalidationAuthorityCode)
     || ['invalidated','missed','target_too_close','broken_structure','terminal','expired'].includes(planBlockedReasonCode)
     || globalVerdict.terminal_avoid_applied === true
@@ -10216,12 +10177,9 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     && trackedLifecycleHardStructuredBlock !== true
   );
   const authoritativeProjectionEntry = false;
-  const suppressAvoidForTrackedWatch = softTrackedWatchSuppression;
-  const canonicalVerdict = suppressAvoidForTrackedWatch
-    ? 'watch'
-    : (preserveTrackedEntryAuthority
-      ? 'entry'
-      : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict));
+  const canonicalVerdict = preserveTrackedEntryAuthority
+    ? 'entry'
+    : (preserveTrackedLifecycleCanonicalVerdict ? lifecycleVerdict : simplifiedVerdict);
   const effectiveCanonicalVerdict = preserveReviewSoftDemotionOnWatchlistSeed
     ? 'near_entry'
     : (untrackedSoftReadinessReviewDemotion
@@ -10235,29 +10193,24 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const lifecycleVisualBucket = lifecycleVerdict === 'entry'
     ? 'entry'
     : (lifecycleVerdict === 'near_entry' ? 'near_entry' : '');
-  const visualBucket = suppressAvoidForTrackedWatch
-    ? (simplifiedBucket === 'avoid' ? 'diminishing' : (simplifiedBucket || 'diminishing'))
-    : (preserveReviewSoftDemotionOnWatchlistSeed
-      ? 'near_entry'
-      : (untrackedSoftReadinessReviewDemotion
-      ? 'near_entry'
-      : (preserveTrackedLifecycleCanonicalVerdict
-      ? normalizeVisualBucketForPairing(lifecycleVisualBucket || simplifiedBucket || 'monitor')
-      : simplifiedBucket)));
+  const visualBucket = preserveReviewSoftDemotionOnWatchlistSeed
+    ? 'near_entry'
+    : (untrackedSoftReadinessReviewDemotion
+    ? 'near_entry'
+    : (preserveTrackedLifecycleCanonicalVerdict
+    ? normalizeVisualBucketForPairing(lifecycleVisualBucket || simplifiedBucket || 'monitor')
+    : simplifiedBucket));
   const canonicalTone = effectiveCanonicalVerdict === 'entry'
     ? 'entry'
     : (effectiveCanonicalVerdict === 'near_entry' ? 'near_entry' : '');
-  const tone = suppressAvoidForTrackedWatch
-    ? 'diminishing'
-    : (preserveReviewSoftDemotionOnWatchlistSeed
-      ? 'near_entry'
-      : (untrackedSoftReadinessReviewDemotion
-      ? 'near_entry'
-      : (preserveTrackedLifecycleCanonicalVerdict
-      ? (canonicalTone || String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')
-      : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor'))));
-  const suppressingTrackedAvoid = suppressAvoidForTrackedWatch === true;
-  const preserveTrackedLifecycleLabels = preserveTrackedLifecycleCanonicalVerdict && !suppressingTrackedAvoid;
+  const tone = preserveReviewSoftDemotionOnWatchlistSeed
+    ? 'near_entry'
+    : (untrackedSoftReadinessReviewDemotion
+    ? 'near_entry'
+    : (preserveTrackedLifecycleCanonicalVerdict
+    ? (canonicalTone || String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')
+    : (String(simplifiedState.tone || visualBucket || 'monitor').trim().toLowerCase() || 'monitor')));
+  const preserveTrackedLifecycleLabels = preserveTrackedLifecycleCanonicalVerdict;
   const effectiveTrackVisibleState = {
     ...simplifiedState,
     canonicalVerdict:effectiveCanonicalVerdict || simplifiedState.canonicalVerdict,
@@ -10281,9 +10234,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       planVisible:simplifiedState.planVisible === true,
       planSummary:String(simplifiedState.mainBlocker || '').trim()
     };
-  const mainBlocker = suppressAvoidForTrackedWatch
-    ? 'Trend is extended away from support - keep on monitor until price resets or repairs.'
-    : String(simplifiedState.mainBlocker || '').trim();
+  const mainBlocker = String(simplifiedState.mainBlocker || '').trim();
   const canonicalSoftReadinessLabel = effectiveCanonicalVerdict === 'near_entry'
     ? 'Near Entry'
     : globalVerdictLabel(effectiveCanonicalVerdict || 'watch');

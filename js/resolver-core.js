@@ -1844,7 +1844,7 @@
     }else{
       reason = trackedReason;
     }
-    const avoidAllowedByStructureConsistencyGuard = structurallyBroken || viability.viability === 'reject';
+    const avoidAllowedByStructureConsistencyGuard = structurallyBroken;
     if(!avoidAllowedByStructureConsistencyGuard && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
       finalVerdict = 'monitor';
       reason = 'Setup is weak and not tradeable yet, but not structurally broken.';
