@@ -383,6 +383,32 @@ test('specified ticker can run scan to review to track without synthetic seeding
     trackCardVisible:effectiveTrackCardVisible,
     paperTrade
   });
+  if(JOURNEY_TICKER === 'TROW'){
+    const scanCanonicalVerdict = normalizeText(scanState && scanState.normalized && scanState.normalized.scanCanonicalVerdict).toLowerCase();
+    const scanVisualBucket = normalizeText(scanState && scanState.normalized && scanState.normalized.scanVisualBucket).toLowerCase();
+    const reviewCanonicalVerdict = normalizeText(reviewState && reviewState.normalized && reviewState.normalized.reviewCanonicalVerdict).toLowerCase();
+    const reviewVisualBucket = normalizeText(reviewState && reviewState.normalized && reviewState.normalized.reviewVisualBucket).toLowerCase();
+    pushMismatch(
+      mismatchFindings,
+      scanCanonicalVerdict === reviewCanonicalVerdict,
+      'TROW scan public verdict must align with Review once canonical review authority exists.',
+      {
+        surface:'scan',
+        expected:reviewCanonicalVerdict,
+        actual:scanCanonicalVerdict
+      }
+    );
+    pushMismatch(
+      mismatchFindings,
+      scanVisualBucket === reviewVisualBucket,
+      'TROW scan public bucket must align with Review diminishing state once canonical review authority exists.',
+      {
+        surface:'scan',
+        expected:reviewVisualBucket,
+        actual:scanVisualBucket
+      }
+    );
+  }
   const consoleErrors = consoleEvents.filter(entry => entry.type === 'error' || entry.type === 'pageerror');
   const fatalConsoleErrors = consoleErrors.filter(entry => {
     if(entry.type === 'pageerror') return true;

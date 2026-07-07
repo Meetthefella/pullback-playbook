@@ -21418,6 +21418,27 @@ function authoritativeScanSurfaceSnapshot(record){
       || sharedBundle.canonicalContract.planVerdictContract && sharedBundle.canonicalContract.planVerdictContract.canonicalVerdict
     ) || ''
   );
+  const bundleVisualBucket = bundle => normalizeVisualBucketForPairing(
+    bundle && bundle.renderModels && bundle.renderModels.reviewRenderModel && bundle.renderModels.reviewRenderModel.visualBucket
+    || bundle && bundle.renderModels && bundle.renderModels.trackRenderModel && (
+      bundle.renderModels.trackRenderModel.visibleBucket
+      || bundle.renderModels.trackRenderModel.visualBucket
+    )
+    || bundle && bundle.canonicalContract && (
+      bundle.canonicalContract.bucket
+      || bundle.canonicalContract.canonicalVisualBucket
+      || bundle.canonicalContract.planVerdictContract && bundle.canonicalContract.planVerdictContract.canonicalVisualBucket
+    )
+    || '',
+    normalizeOptionalGlobalVerdictKey(
+      bundle && bundle.canonicalContract && (
+        bundle.canonicalContract.canonicalVerdictKey
+        || bundle.canonicalContract.planVerdictContract && bundle.canonicalContract.planVerdictContract.canonicalVerdict
+      ) || ''
+    )
+  );
+  const cachedVisualBucket = cachedBundleValid ? bundleVisualBucket(cachedBundle) : '';
+  const sharedVisualBucket = sharedBundle ? bundleVisualBucket(sharedBundle) : '';
   const runtimeVerdictLabel = currentRuntimeVerdictForRecord(record);
   const contract = withReviewProjectionSuppressed(() => buildCanonicalPlanVerdictContract(item, {
     surface:'scan',
@@ -21427,9 +21448,18 @@ function authoritativeScanSurfaceSnapshot(record){
   const contractCanonicalVerdict = normalizeOptionalGlobalVerdictKey(
     contract && contract.canonicalVerdict || ''
   );
-  const rawCanonicalVerdict = contractCanonicalVerdict
-    || cachedCanonicalVerdict
-    || sharedBundleCanonicalVerdict
+  const authorityCanonicalVerdict = hasCanonicalReviewAuthority
+    ? (
+      cachedCanonicalVerdict
+      || sharedBundleCanonicalVerdict
+      || contractCanonicalVerdict
+    )
+    : (
+      contractCanonicalVerdict
+      || cachedCanonicalVerdict
+      || sharedBundleCanonicalVerdict
+    );
+  const rawCanonicalVerdict = authorityCanonicalVerdict
     || withReviewProjectionSuppressed(() => normalizeGlobalVerdictKey(runtimeVerdictLabel || ''));
   if(!rawCanonicalVerdict) return null;
   const scoutingOnly = hasCanonicalReviewAuthority === true;
@@ -21445,8 +21475,12 @@ function authoritativeScanSurfaceSnapshot(record){
     || currentRuntimeSummaryForRecord(record)
     || ''
   ).trim();
+  const authoritativeVisualBucket = hasCanonicalReviewAuthority
+    ? (cachedVisualBucket || sharedVisualBucket || '')
+    : '';
   let visualBucket = normalizeVisualBucketForPairing(
-    (sharedBundle && sharedBundle.canonicalContract && sharedBundle.canonicalContract.bucket)
+    authoritativeVisualBucket
+    || (sharedBundle && sharedBundle.canonicalContract && sharedBundle.canonicalContract.bucket)
     || (rawCanonicalVerdict === 'watch'
       ? (contract && contract.canonicalVisualBucket)
       : '')
@@ -21458,21 +21492,22 @@ function authoritativeScanSurfaceSnapshot(record){
   }else{
     visualBucket = normalizeVisualBucketForPairing(visualBucket, canonicalVerdict);
   }
-  const scoutingActionLabel = scoutingOnly
+  const scanUsesScoutingCap = scoutingOnly && ['entry', 'near_entry'].includes(canonicalVerdict);
+  const scoutingActionLabel = scanUsesScoutingCap
     ? 'Scouting only - confirm in Review before treating this as actionable.'
     : (canonicalVerdict === 'entry'
       ? 'Execute only if the trigger remains valid.'
       : (canonicalVerdict === 'near_entry'
         ? 'Close to trigger - confirm in Review.'
         : 'Wait for stronger confirmation before considering an entry.'));
-  const summary = scoutingOnly
+  const summary = scanUsesScoutingCap
     ? (
       rawCanonicalVerdict === 'entry'
         ? 'Scouting only - Review has the final authority before any trade-ready decision.'
         : (authoritySummary || 'Scouting only - use Review for the final decision.')
     )
     : authoritySummary;
-  const intentionalScoutingDivergence = scoutingOnly && (
+  const intentionalScoutingDivergence = scanUsesScoutingCap && (
     rawCanonicalVerdict !== canonicalVerdict
     || visualBucket !== normalizeVisualBucketForPairing(rawCanonicalVerdict, rawCanonicalVerdict)
   );
