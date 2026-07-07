@@ -409,6 +409,58 @@ test('specified ticker can run scan to review to track without synthetic seeding
       }
     );
   }
+  const scanVisualBucket = normalizeText(
+    scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.visualTone
+    || scanState && scanState.normalized && scanState.normalized.scanVisualBucket
+  ).toLowerCase();
+  const scanBadgeLabel = normalizeText(scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.badgeLabel);
+  const scanDecisionSummary = normalizeText(scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.decisionSummary);
+  if(scanVisualBucket === 'diminishing'){
+    pushMismatch(
+      mismatchFindings,
+      /Diminishing/i.test(scanDecisionSummary) && !/Developing Watch/i.test(scanDecisionSummary),
+      `${JOURNEY_TICKER} diminishing scan card must use diminishing-aligned summary copy.`,
+      {
+        surface:'scan',
+        expected:'Diminishing-aligned summary copy',
+        actual:scanDecisionSummary
+      }
+    );
+  }
+  if(scanVisualBucket === 'monitor'){
+    pushMismatch(
+      mismatchFindings,
+      !/Diminishing Watch|^Avoid\b/i.test(scanDecisionSummary),
+      `${JOURNEY_TICKER} monitor scan card must not render diminishing or avoid summary copy.`,
+      {
+        surface:'scan',
+        expected:'Monitor-aligned summary copy',
+        actual:scanDecisionSummary
+      }
+    );
+  }
+  if(scanVisualBucket === 'avoid'){
+    pushMismatch(
+      mismatchFindings,
+      /Avoid/i.test(scanDecisionSummary),
+      `${JOURNEY_TICKER} avoid scan card must use avoid-aligned summary copy.`,
+      {
+        surface:'scan',
+        expected:'Avoid-aligned summary copy',
+        actual:scanDecisionSummary
+      }
+    );
+    pushMismatch(
+      mismatchFindings,
+      scanBadgeLabel === 'Avoid',
+      `${JOURNEY_TICKER} avoid scan card must render an Avoid badge.`,
+      {
+        surface:'scan',
+        expected:'Avoid',
+        actual:scanBadgeLabel
+      }
+    );
+  }
   const consoleErrors = consoleEvents.filter(entry => entry.type === 'error' || entry.type === 'pageerror');
   const fatalConsoleErrors = consoleErrors.filter(entry => {
     if(entry.type === 'pageerror') return true;

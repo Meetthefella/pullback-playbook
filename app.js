@@ -18791,7 +18791,12 @@ function renderCompactResultCardFromView(view){
       ).trim()
     }
     : scanPresentation;
-  const visualBucket = normalizeVisualBucketForPairing(
+  const renderedScanPresentationBucket = String(
+    effectiveScanPresentation.presentationBucket
+    || effectiveScanPresentation.visualBucket
+    || ''
+  ).trim().toLowerCase();
+  const publicScanPresentationBucket = normalizeVisualBucketForPairing(
     authoritativeScan && authoritativeScan.visualBucket
     || effectiveScanPresentation.presentationBucket
     || effectiveScanPresentation.visualBucket
@@ -18799,6 +18804,7 @@ function renderCompactResultCardFromView(view){
     || 'monitor',
     canonicalVerdict
   );
+  const visualBucket = publicScanPresentationBucket;
   const tone = normalizeVisualBucketForPairing(visualBucket || 'monitor', canonicalVerdict);
   const badgeClass = simplifiedVisualBadgeClass(visualBucket);
   const cardClass = simplifiedVisualCardClass(visualBucket);
@@ -18855,8 +18861,25 @@ function renderCompactResultCardFromView(view){
     displayStage:globalVerdictLabel(canonicalVerdict),
     finalVerdict:globalVerdictLabel(canonicalVerdict)
   };
+  const finalScanPresentationBucket = String(
+    publicScanPresentationBucket
+    || renderedScanPresentationBucket
+    || visualBucket
+    || ''
+  ).trim().toLowerCase();
+  const forceBucketSummaryIntoNarrative = ['diminishing', 'avoid'].includes(finalScanPresentationBucket);
+  const scanNarrativeState = {
+    ...simplifiedState,
+    canonicalVerdict:effectiveScanPresentation.canonicalVerdict || canonicalVerdict || simplifiedState.canonicalVerdict,
+    visualBucket:publicScanPresentationBucket || effectiveScanPresentation.presentationBucket || effectiveScanPresentation.visualBucket || visualBucket || simplifiedState.visualBucket,
+    presentationBucket:publicScanPresentationBucket || effectiveScanPresentation.presentationBucket || effectiveScanPresentation.visualBucket || visualBucket || simplifiedState.presentationBucket,
+    tone:effectiveScanPresentation.tone || tone || simplifiedState.tone,
+    badgeLabel:effectiveScanPresentation.badgeLabel || simplifiedState.badgeLabel,
+    actionLabel:forceBucketSummaryIntoNarrative ? (effectiveScanPresentation.summary || simplifiedState.actionLabel) : simplifiedState.actionLabel,
+    mainBlocker:forceBucketSummaryIntoNarrative ? (effectiveScanPresentation.summary || simplifiedState.mainBlocker) : simplifiedState.mainBlocker
+  };
   const sharedNarrative = buildSharedSetupNarrative({
-    simplifiedState,
+    simplifiedState:scanNarrativeState,
     resolvedState:simplifiedState.debug && simplifiedState.debug.resolvedState,
     derivedStates:setupStates,
     globalVerdict:scanLegacyState
@@ -18864,13 +18887,60 @@ function renderCompactResultCardFromView(view){
   const secondaryUiMarkup = renderScanCardSecondaryUi(renderView);
   const companyLine = [item && item.meta && item.meta.companyName || '', item && item.meta && item.meta.exchange || ''].filter(Boolean).join(' | ');
   const technicalSummary = scanCardTechnicalSummaryForView(view);
-  const decisionSummary = String(
-    sharedNarrative.stateLabel && !sameVisibleCopy(sharedNarrative.stateLabel, simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || '')
-      ? `${sharedNarrative.stateLabel} - ${sharedNarrative.primaryReason || effectiveScanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || ''}`
-      : (sharedNarrative.primaryReason || effectiveScanPresentation.summary || simplifiedState.mainBlocker || simplifiedState.actionLabel || '')
+  const scanPresentationSummary = String(effectiveScanPresentation.summary || '').trim();
+  const scanPublicSummaryForPresentation = (() => {
+    if(finalScanPresentationBucket === 'diminishing'){
+      const diminishingReason = String(sharedNarrative.primaryReason || '').trim();
+      if(diminishingReason && /diminishing|losing quality|weakening|stabilis/i.test(diminishingReason)){
+        return `Diminishing Watch - ${diminishingReason}`;
+      }
+      return 'Diminishing Watch - The setup is losing quality, so wait for the chart to stabilise before considering an entry.';
+    }
+    if(finalScanPresentationBucket === 'avoid'){
+      const avoidReason = String(sharedNarrative.primaryReason || '').trim();
+      if(avoidReason && /avoid|not tradable|not actionable|broken|failed|blocking issue/i.test(avoidReason)){
+        return `Avoid - ${avoidReason}`;
+      }
+      return 'Avoid - A blocking issue is active, so the setup is not tradable.';
+    }
+    return '';
+  })();
+  const sharedNarrativeStateLabel = String(sharedNarrative.stateLabel || '').trim();
+  const sharedNarrativePrimaryReason = String(sharedNarrative.primaryReason || '').trim();
+  const monitorNarrativeMismatched = finalScanPresentationBucket === 'monitor'
+    && (
+      /Diminishing Watch|^Avoid\b/i.test(sharedNarrativeStateLabel)
+      || /losing quality|not tradable|blocking issue|structure rebuilds|avoid until/i.test(sharedNarrativePrimaryReason)
+    );
+  const monitorSafePrimaryReason = monitorNarrativeMismatched
+    ? (scanPresentationSummary || simplifiedState.mainBlocker || simplifiedState.actionLabel || '')
+    : sharedNarrativePrimaryReason;
+  const monitorSafeStateLabel = monitorNarrativeMismatched
+    ? 'Developing Watch'
+    : sharedNarrativeStateLabel;
+  let decisionSummary = String(
+    scanPublicSummaryForPresentation
+      ? scanPublicSummaryForPresentation
+      : (
+        monitorSafeStateLabel && !sameVisibleCopy(monitorSafeStateLabel, simplifiedState.badgeLabel || effectiveScanPresentation.badgeLabel || globalVerdictLabel(canonicalVerdict) || '')
+          ? `${monitorSafeStateLabel} - ${monitorSafePrimaryReason || scanPresentationSummary || simplifiedState.mainBlocker || simplifiedState.actionLabel || ''}`
+          : (monitorSafePrimaryReason || scanPresentationSummary || simplifiedState.mainBlocker || simplifiedState.actionLabel || '')
+      )
   ).trim()
     || compactReasonLineForView(view, 3)
     || scanCardPrimaryActionLabel(view);
+  if(
+    tone === 'monitor'
+    && /Diminishing Watch|^Avoid\b/i.test(String(decisionSummary || ''))
+  ){
+    const monitorSummary = String(
+      scanPresentationSummary
+      || simplifiedState.mainBlocker
+      || simplifiedState.actionLabel
+      || 'Wait for stronger confirmation before considering an entry.'
+    ).trim();
+    decisionSummary = `Developing Watch - ${monitorSummary}`.trim();
+  }
   if(typeof console !== 'undefined' && console.info){
     console.info('[SCAN_PRESENTATION_GROUP]', {
       ticker:item.ticker || '',
