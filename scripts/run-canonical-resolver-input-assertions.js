@@ -47,12 +47,18 @@ function assertResolveGlobalVerdictContractAlignment(){
     'js/resolver-core.js must accept the Review-only soft-readiness canonical preservation override'
   );
   assert.ok(
-    resolverSource.includes("const canonicalSoftReadinessOverrideAllowed = !isTracked || preserveReviewCanonicalForSoftReadiness;"),
-    'js/resolver-core.js must allow Review-only canonical soft-readiness preservation even after watchlist add'
+    resolverSource.includes("const canonicalSoftReadinessOverrideAllowed = !isTracked")
+      && resolverSource.includes("|| preserveReviewCanonicalForSoftReadiness")
+      && resolverSource.includes("|| preserveScanAuthorityCanonicalPath;"),
+    'js/resolver-core.js must allow review-only and preserved scan-authority canonical soft-readiness paths without conflating them'
   );
   assert.ok(
     simplifiedTradeStateSource.includes("preserveReviewCanonicalForSoftReadiness:surface === 'review'"),
     'simplified-trade-state must inject the Review-only soft-readiness preservation override'
+  );
+  assert.ok(
+    simplifiedTradeStateSource.includes("const preferPreservedCanonicalAuthorityVerdict = preferExplicitReviewCanonical\n        || preserveTrackedScanAuthorityPath;"),
+    'simplified-trade-state must preserve canonical verdict selection for unchanged scan-authority Track paths'
   );
   assert.ok(
     appSource.includes("const derivedProjection = projection.derived_states && typeof projection.derived_states === 'object'"),
@@ -63,8 +69,8 @@ function assertResolveGlobalVerdictContractAlignment(){
     'app.js scanner projection extraction must fall back to nested derived_states values when top-level fields are absent'
   );
   assert.ok(
-    appSource.includes("const resolvedContract = resolverDeps.resolveFinalStateContract(item, {\n    context:'global',\n    derivedStates,\n    displayedPlan\n  });"),
-    'app.js resolveGlobalVerdict must preserve the upstream global contract instead of overriding it with the already-demoted final verdict'
+    appSource.includes("const authorityResolvedContract = typeof selectedAuthorityContractForGlobalVerdict === 'function'"),
+    'app.js resolveGlobalVerdict must source diagnostics and decision summaries from the selected authority contract'
   );
   assert.ok(
     appSource.includes("const riskOnlyFxEstimatedTradeability = tradeability === 'risk_only'"),
@@ -75,16 +81,16 @@ function assertResolveGlobalVerdictContractAlignment(){
     'app.js soft-readiness alignment must allow the narrowed FX-estimated risk_only tradeability case'
   );
   assert.ok(
-    simplifiedTradeStateSource.includes("const canonicalPresentationVerdict = (resolvedState && (\n        (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')\n        || resolvedState.final_verdict_rendered\n        || resolvedState.final_verdict\n        || resolvedState.canonical_final_verdict\n      )) || 'watch';"),
-    'simplified-trade-state must seed the presentation contract from canonical resolved verdict fields'
+    simplifiedTradeStateSource.includes("const canonicalPresentationVerdict = (resolvedState && (\n        (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')\n        || resolvedState.final_verdict_rendered\n        || resolvedState.final_verdict\n        || resolvedState.canonical_final_verdict\n      )) || 'watch';"),
+    'simplified-trade-state must seed the presentation contract from canonical resolved verdict fields for preserved authority paths'
   );
   assert.ok(
-    simplifiedTradeStateSource.includes("final_verdict:(resolvedState && (\n          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n          || resolvedState.canonical_final_verdict\n        )) || 'watch'"),
-    'simplified-trade-state must pass canonical final_verdict into ResolverPresentation'
+    simplifiedTradeStateSource.includes("final_verdict:(resolvedState && (\n          (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n          || resolvedState.canonical_final_verdict\n        )) || 'watch'"),
+    'simplified-trade-state must pass canonical final_verdict into ResolverPresentation for preserved authority paths'
   );
   assert.ok(
-    simplifiedTradeStateSource.includes("final_verdict_rendered:(resolvedState && (\n          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n          || resolvedState.canonical_final_verdict\n        )) || 'watch'"),
-    'simplified-trade-state must pass canonical final_verdict_rendered into ResolverPresentation'
+    simplifiedTradeStateSource.includes("final_verdict_rendered:(resolvedState && (\n          (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n          || resolvedState.canonical_final_verdict\n        )) || 'watch'"),
+    'simplified-trade-state must pass canonical final_verdict_rendered into ResolverPresentation for preserved authority paths'
   );
 }
 
@@ -610,6 +616,182 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
   );
 }
 
+function assertTrackedScanAuthorityPreservesCanonicalVerdict(){
+  const sandbox = {
+    window:{},
+    console,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval
+  };
+  sandbox.globalThis = sandbox.window;
+  sandbox.window.setTimeout = setTimeout;
+  sandbox.window.clearTimeout = clearTimeout;
+  sandbox.window.setInterval = setInterval;
+  sandbox.window.clearInterval = clearInterval;
+
+  const runModule = relativePath => {
+    const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
+    vm.runInNewContext(source, sandbox, {filename:relativePath});
+  };
+
+  runModule('js/plan-math.js');
+  runModule('js/tradeability.js');
+  runModule('js/domain/simplified-plan-state.js');
+  runModule('js/presentation/simplified-presentation-model.js');
+  runModule('js/domain/simplified-trade-state.js');
+
+  sandbox.window.ResolverCore = {
+    shouldPreserveScanAuthorityCanonicalPath(record){
+      return !!(record && record.watchlist && record.watchlist.inWatchlist);
+    },
+    resolveGlobalVerdict(){
+      return {
+        final_verdict:'watch',
+        canonical_final_verdict:'near_entry',
+        canonical_visual_bucket:'near_entry',
+        canonical_priceability_state:'provisional',
+        canonical_soft_readiness_alignment_applied:false,
+        selected_authority_contract_source:'scan_authority_preserved',
+        canonical_soft_readiness_alignment_source:'scan_authority_preserved',
+        main_blocker:'RR or credible RR must be at least 1.5.',
+        reason:'RR or credible RR must be at least 1.5.',
+        contractDiagnostics:{
+          authorityContract:'pre_lifecycle',
+          authoritySelectionSource:'scan_authority_preserved',
+          canonicalAuthoritySelectionSource:'scan_authority_preserved'
+        }
+      };
+    },
+    globalVerdictLabel(value){
+      const safe = String(value || '').trim().toLowerCase();
+      if(safe === 'entry') return 'Entry';
+      if(safe === 'near_entry') return 'Near Entry';
+      if(safe === 'avoid') return 'Avoid';
+      return 'Watch';
+    },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    },
+    normalizeVerdict(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    },
+    getBadge(){ return {text:'Near Entry'}; },
+    getActions(){ return {label:'WAIT'}; }
+  };
+  sandbox.window.ResolverPresentation = {
+    resolveVisualState(unusedRecord, unusedSurface, options){
+      const resolvedContract = options && options.resolvedContract || {};
+      return {
+        canonicalVerdict:resolvedContract.final_verdict || 'watch',
+        finalVerdict:resolvedContract.final_verdict || 'watch',
+        visualBucket:resolvedContract.final_verdict === 'near_entry' ? 'near_entry' : 'monitor',
+        tone:resolvedContract.final_verdict === 'near_entry' ? 'near_entry' : 'monitor',
+        badge:{text:resolvedContract.final_verdict === 'near_entry' ? 'Near Entry' : 'Watch'},
+        priceabilityState:'provisional'
+      };
+    }
+  };
+
+  const deps = {
+    effectivePlanForRecord(){
+      return {entry:249.76, stop:228.76, firstTarget:252.16, source:'scanner_estimate'};
+    },
+    riskSettingsProvider(){
+      return {accountSize:4000, riskPercent:1, maxLoss:40, wholeSharesOnly:true};
+    },
+    analysisDerivedStatesFromRecord(){
+      return {
+        structureState:'strong',
+        trendState:'strong',
+        bounceState:'improving',
+        stabilisationState:'clear',
+        volumeState:'supportive',
+        pullbackZone:'near_20ma',
+        setupLocationState:'usable_pullback',
+        priceabilityState:'provisional'
+      };
+    },
+    applySetupConfirmationPlanGate(unusedRecord, displayedPlan){
+      return displayedPlan;
+    },
+    baseVerdictFromResolvedContract(resolved){
+      return String(resolved && resolved.baseVerdict || 'watch').toLowerCase();
+    },
+    resolvePreLifecycleStateContract(){
+      return {
+        finalVerdict:'Near Entry',
+        final_verdict:'near_entry',
+        structuralState:'near_entry',
+        actionStateKey:'wait_for_confirmation',
+        planStatusKey:'valid',
+        tradeabilityVerdict:'Near Entry',
+        blockerReason:'RR or credible RR must be at least 1.5.',
+        reasonSummary:'The setup is close, but confirmation still needs to improve.',
+        terminal:false,
+        baseVerdict:'near_entry',
+        canonical_final_verdict:'near_entry',
+        canonical_visual_bucket:'near_entry'
+      };
+    },
+    resolveFinalStateContract(){
+      return {
+        finalVerdict:'Watch',
+        final_verdict:'watch',
+        structuralState:'developing',
+        actionStateKey:'wait_for_confirmation',
+        planStatusKey:'invalid',
+        tradeabilityVerdict:'Watch',
+        blockerReason:'Confirmation is still developing, so the setup stays on watch.',
+        reasonSummary:'Confirmation is still developing, so the setup stays on watch.',
+        terminal:false,
+        baseVerdict:'watch',
+        canonical_final_verdict:'near_entry',
+        canonical_visual_bucket:'near_entry',
+        canonical_priceability_state:'provisional'
+      };
+    },
+    evaluatePlanRealism(){
+      return {credible_rr:0.11};
+    },
+    setupScoreForRecord(){
+      return 10;
+    },
+    isHostileMarketStatus(){
+      return false;
+    },
+    scannerScoreGradientClass(){
+      return '';
+    },
+    state:{marketStatus:'supportive'}
+  };
+
+  const record = {
+    ticker:'AXSM',
+    marketData:{price:249.76, currency:'USD'},
+    authority:{version:1, source:'scan', reason:'scanner_workflow'},
+    watchlist:{inWatchlist:true},
+    plan:{
+      entry:249.76,
+      stop:228.76,
+      firstTarget:252.16,
+      source:'scanner_estimate',
+      authoritySource:'applyPlanCandidateToRecord',
+      authorityVersion:'trade_plan_v1'
+    }
+  };
+  const result = sandbox.window.SimplifiedTradeState.resolveRecordState(record, {
+    surface:'track',
+    log:false,
+    deps
+  });
+  assert.strictEqual(result.canonicalVerdict, 'near_entry', 'track simplified state must preserve canonical near_entry for unchanged scan authority');
+  assert.strictEqual(result.visualBucket, 'near_entry', 'track simplified state must preserve canonical near_entry bucket for unchanged scan authority');
+}
+
 function deepClone(value){
   return JSON.parse(JSON.stringify(value));
 }
@@ -806,6 +988,7 @@ function run(){
 
   assertSimplifiedPipelineResolverInjection();
   assertFxEstimatedRiskOnlyPriceabilityReconciliation();
+  assertTrackedScanAuthorityPreservesCanonicalVerdict();
 
   console.log('run-canonical-resolver-input-assertions: ok');
 }

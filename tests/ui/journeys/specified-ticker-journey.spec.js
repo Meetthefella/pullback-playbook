@@ -70,6 +70,97 @@ function pushMismatch(findings, condition, message, details = {}){
   }
 }
 
+function extractAuthorityParitySnapshot(state){
+  const authority = state && state.authority && state.authority.journey || null;
+  const reviewHealth = state && state.review && state.review.stateHealth || null;
+  const globalVerdict = state && state.review && state.review.globalVerdict || null;
+  const canonicalContract = state && state.authority && state.authority.canonicalContract || null;
+  const contractDiagnostics = canonicalContract && canonicalContract.contractDiagnostics || null;
+  const plan = state && state.plan || null;
+  return {
+    authoritySource:normalizeVerdict(authority && authority.source),
+    authorityVersion:Number(authority && authority.version || 0),
+    authorityReason:normalizeText(authority && authority.reason),
+    canonicalVerdict:normalizeVerdict(reviewHealth && reviewHealth.canonicalVerdict),
+    visualBucket:normalizeVisualBucket(reviewHealth && reviewHealth.visualBucket),
+    planStatus:normalizeVerdict(reviewHealth && reviewHealth.planStatus),
+    tradeability:normalizeVerdict(globalVerdict && globalVerdict.tradeability)
+      || normalizeVerdict(plan && plan.tradeability),
+    allowWatchlist:!!(globalVerdict && globalVerdict.allowWatchlist),
+    allowPlan:!!(globalVerdict && globalVerdict.allowPlan),
+    blockerSource:normalizeVerdict(globalVerdict && globalVerdict.primaryBlockerSource),
+    contractAuthority:normalizeVerdict(
+      globalVerdict && globalVerdict.contractAuthority
+      || contractDiagnostics && contractDiagnostics.authorityContract
+    ),
+    selectedContractSource:normalizeVerdict(
+      globalVerdict && globalVerdict.contractSelectionSource
+      || contractDiagnostics && contractDiagnostics.authoritySelectionSource
+    ),
+    canonicalContractSource:normalizeVerdict(
+      globalVerdict && globalVerdict.canonicalSelectionSource
+      || contractDiagnostics && contractDiagnostics.canonicalAuthoritySelectionSource
+    ),
+    canonicalAlignmentApplied:!!(globalVerdict && globalVerdict.canonicalAlignmentApplied)
+  };
+}
+
+function assertContractPathConsistency(findings, snapshot, context = {}){
+  if(!snapshot) return;
+  if(snapshot.selectedContractSource === 'scan_authority_preserved'){
+    const exposesPreLifecyclePath = snapshot.contractAuthority === 'pre_lifecycle'
+      || snapshot.selectedContractSource === 'scan_authority_preserved'
+      || snapshot.canonicalContractSource === 'scan_authority_preserved';
+    pushMismatch(
+      findings,
+      exposesPreLifecyclePath,
+      'Preserved scan authority must resolve through the pre-lifecycle contract.',
+      {
+        ...context,
+        expected:'pre_lifecycle-compatible path',
+        actual:snapshot.contractAuthority || snapshot.selectedContractSource
+      }
+    );
+  }
+  if(snapshot.canonicalContractSource === 'scan_authority_preserved'){
+    const exposesPreLifecyclePath = snapshot.contractAuthority === 'pre_lifecycle'
+      || snapshot.selectedContractSource === 'pre_lifecycle_contract'
+      || snapshot.selectedContractSource === 'scan_authority_preserved';
+    pushMismatch(
+      findings,
+      exposesPreLifecyclePath,
+      'Canonical scan-authority preservation must stay on the pre-lifecycle/scan-preserved path.',
+      {
+        ...context,
+        expected:'pre_lifecycle-compatible path',
+        actual:snapshot.contractAuthority || snapshot.selectedContractSource
+      }
+    );
+    pushMismatch(
+      findings,
+      snapshot.canonicalAlignmentApplied === false,
+      'Scan-authority preservation must not masquerade as a soft-readiness override.',
+      {
+        ...context,
+        expected:false,
+        actual:snapshot.canonicalAlignmentApplied
+      }
+    );
+  }
+  if(snapshot.canonicalContractSource === 'review_soft_readiness_override'){
+    pushMismatch(
+      findings,
+      snapshot.canonicalAlignmentApplied === true,
+      'Review soft-readiness override provenance must align with an applied canonical override.',
+      {
+        ...context,
+        expected:true,
+        actual:snapshot.canonicalAlignmentApplied
+      }
+    );
+  }
+}
+
 function createPhaseRecorder(ticker){
   const phases = [];
   return {
@@ -236,6 +327,7 @@ function appendVisualParityFindings(findings, ticker, scanState, reviewState, tr
 function buildMismatchFindings({
   scanState,
   reviewState,
+  postAddReviewState,
   trackState,
   rescanTrackState,
   reviewFromTrackState,
@@ -244,6 +336,8 @@ function buildMismatchFindings({
   paperTrade
 }){
   const findings = [];
+  const preAddParity = extractAuthorityParitySnapshot(reviewState);
+  const postAddParity = postAddReviewState ? extractAuthorityParitySnapshot(postAddReviewState) : null;
   const reviewCanonicalVerdict = normalizeVerdict(reviewState && reviewState.normalized && reviewState.normalized.reviewCanonicalVerdict);
   const reviewVisualBucket = normalizeVisualBucket(reviewState && reviewState.normalized && reviewState.normalized.reviewVisualBucket);
   const scanScore = extractScoreValue(scanState && scanState.scan && scanState.scan.visibleCard && scanState.scan.visibleCard.scoreLabel);
@@ -255,8 +349,15 @@ function buildMismatchFindings({
   const reviewFromTrackBadge = normalizeText(effectiveReviewFromTrackState && effectiveReviewFromTrackState.review && effectiveReviewFromTrackState.review.visible && effectiveReviewFromTrackState.review.visible.badgeLabel);
   const trackRenderedCanonicalVerdict = normalizeVerdict(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackCanonicalVerdict);
   const trackRenderedVisualBucket = normalizeVisualBucket(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackRenderedBucket);
+  const trackDiagnosticCanonicalVerdict = normalizeVerdict(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackDiagnosticCanonicalVerdict);
+  const trackDiagnosticBucket = normalizeVisualBucket(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackDiagnosticVisualBucket);
   const trackAuthorityCanonicalVerdict = normalizeVerdict(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackAuthorityCanonicalVerdict);
   const trackAuthorityBucket = normalizeVisualBucket(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackAuthorityBucket);
+  const trackContractCanonicalVerdict = normalizeVerdict(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackContractCanonicalVerdict);
+  const trackContractBucket = normalizeVisualBucket(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackContractBucket);
+  const trackPresentationSourceOfTruth = normalizeText(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackPresentationSourceOfTruth).toLowerCase();
+  const trackDiagnosticContractAuthority = normalizeText(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackDiagnosticContractAuthority).toLowerCase();
+  const trackDiagnosticContractSource = normalizeText(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackDiagnosticContractSource).toLowerCase();
   const trackRenderedVsAuthorityMismatch = !!(effectiveTrackState && effectiveTrackState.normalized && effectiveTrackState.normalized.trackRenderedVsAuthorityMismatch);
   const trackBadge = normalizeText(effectiveTrackState && effectiveTrackState.track && effectiveTrackState.track.visible && effectiveTrackState.track.visible.badgeLabel);
   const trackScore = extractScoreValue(effectiveTrackState && effectiveTrackState.track && effectiveTrackState.track.visible && effectiveTrackState.track.visible.scoreLabel);
@@ -274,6 +375,38 @@ function buildMismatchFindings({
     'Review did not expose canonical state health.',
     {surface:'review'}
   );
+
+  if(watchlistAddSucceeded && postAddParity){
+    assertContractPathConsistency(findings, preAddParity, {surface:'review_add_watchlist_pre'});
+    assertContractPathConsistency(findings, postAddParity, {surface:'review_add_watchlist_post'});
+    [
+      ['authoritySource', 'Add to Watchlist changed authority source without a new authoritative stamp.'],
+      ['authorityVersion', 'Add to Watchlist changed authority version without a new authoritative stamp.'],
+      ['authorityReason', 'Add to Watchlist changed authority reason without a new authoritative stamp.'],
+      ['canonicalVerdict', 'Add to Watchlist changed canonical verdict for the same authority snapshot.'],
+      ['visualBucket', 'Add to Watchlist changed visual bucket for the same authority snapshot.'],
+      ['planStatus', 'Add to Watchlist changed plan status for the same authority snapshot.'],
+      ['tradeability', 'Add to Watchlist changed tradeability for the same authority snapshot.'],
+      ['allowWatchlist', 'Add to Watchlist changed watchlist eligibility for the same authority snapshot.'],
+      ['allowPlan', 'Add to Watchlist changed plan eligibility for the same authority snapshot.'],
+      ['blockerSource', 'Add to Watchlist changed primary blocker source for the same authority snapshot.'],
+      ['contractAuthority', 'Add to Watchlist changed contract authority for the same authority snapshot.'],
+      ['canonicalContractSource', 'Add to Watchlist changed canonical contract provenance for the same authority snapshot.'],
+      ['canonicalAlignmentApplied', 'Add to Watchlist changed canonical override application for the same authority snapshot.']
+    ].forEach(([field, message]) => {
+      pushMismatch(
+        findings,
+        preAddParity[field] === postAddParity[field],
+        message,
+        {
+          surface:'review_add_watchlist',
+          field,
+          expected:preAddParity[field],
+          actual:postAddParity[field]
+        }
+      );
+    });
+  }
 
   if(watchlistAddSucceeded){
     pushMismatch(
@@ -297,6 +430,12 @@ function buildMismatchFindings({
       );
       pushMismatch(
         findings,
+        !!trackContractCanonicalVerdict,
+        'Track canonical contract verdict was empty.',
+        {surface:'trackContract'}
+      );
+      pushMismatch(
+        findings,
         trackAuthorityCanonicalVerdict === reviewFromTrackCanonicalVerdict,
         'Track authority contradicts Review canonical verdict after reopen from Track.',
         {
@@ -314,6 +453,50 @@ function buildMismatchFindings({
             surface:'trackAuthority',
             expected:reviewFromTrackVisualBucket,
             actual:trackAuthorityBucket
+          }
+        );
+      }
+      pushMismatch(
+        findings,
+        trackDiagnosticCanonicalVerdict === trackContractCanonicalVerdict,
+        'Track simplified diagnostic verdict diverged from the canonical contract.',
+        {
+          surface:'trackContract',
+          expected:trackContractCanonicalVerdict,
+          actual:trackDiagnosticCanonicalVerdict
+        }
+      );
+      if(trackContractBucket){
+        pushMismatch(
+          findings,
+          trackDiagnosticBucket === trackContractBucket,
+          'Track simplified diagnostic bucket diverged from the canonical contract.',
+          {
+            surface:'trackContract',
+            expected:trackContractBucket,
+            actual:trackDiagnosticBucket
+          }
+        );
+      }
+      pushMismatch(
+        findings,
+        trackPresentationSourceOfTruth !== 'watchlist_persisted_presentation',
+        'Track authority verdict/bucket is still sourced from persisted shared presentation.',
+        {
+          surface:'trackAuthority',
+          expected:'canonical resolver-derived source',
+          actual:trackPresentationSourceOfTruth
+        }
+      );
+      if(trackDiagnosticContractSource === 'scan_authority_preserved'){
+        pushMismatch(
+          findings,
+          trackDiagnosticContractAuthority === 'pre_lifecycle',
+          'Track diagnostics reported scan-authority preservation without a pre-lifecycle contract.',
+          {
+            surface:'trackContract',
+            expected:'pre_lifecycle',
+            actual:trackDiagnosticContractAuthority
           }
         );
       }
@@ -454,8 +637,11 @@ async function runSpecifiedTickerJourney(page, testInfo, ticker){
 
   phaseRecorder.start('track');
   const watchlistAddSucceeded = await addActiveReviewToWatchlistIfEligible(page);
+  let postAddReviewState = null;
   if(watchlistAddSucceeded){
     await waitForUiTransitionSettle(page);
+    await captureStage(page, testInfo, 'specified-ticker-review-post-add');
+    postAddReviewState = await extractAppTickerState(page, ticker, consoleEvents);
   }
 
   await openTrackTab(page);
@@ -519,6 +705,7 @@ async function runSpecifiedTickerJourney(page, testInfo, ticker){
   const mismatchFindings = buildMismatchFindings({
     scanState,
     reviewState,
+    postAddReviewState,
     trackState,
     rescanTrackState,
     reviewFromTrackState,
@@ -661,6 +848,7 @@ async function runSpecifiedTickerJourney(page, testInfo, ticker){
     },
     scan:scanState,
     review:reviewState,
+    reviewPostAdd:postAddReviewState,
     track:trackState,
     rescanTrack:rescanTrackState,
     reviewFromTrack:reviewFromTrackState,

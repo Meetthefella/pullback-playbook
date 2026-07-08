@@ -4091,6 +4091,74 @@ function currentTickerJourneyAuthority(record){
   });
 }
 
+function shouldPreserveScanAuthorityCanonicalPath(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const authority = currentTickerJourneyAuthority(item);
+  if(authority.source !== 'scan' || authority.version <= 0) return false;
+  const review = item.review && typeof item.review === 'object' ? item.review : {};
+  const hasReviewAuthority = !!(
+    (review.manualReview && typeof review.manualReview === 'object')
+    || String(review.savedVerdict || '').trim()
+  );
+  if(hasReviewAuthority) return false;
+  const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+  const planSource = String(plan.source || '').trim().toLowerCase();
+  const planIntroducesNewAuthority = !!(
+    String(plan.authorityVersion || '').trim()
+    && String(plan.authoritySource || '').trim()
+    && planSource
+    && planSource !== 'scanner_estimate'
+  );
+  return !planIntroducesNewAuthority;
+}
+
+function selectedAuthorityContractForGlobalVerdict(record, deps = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const isTracked = !!(
+    item.in_watchlist
+    || item.watchlist_entry_exists
+    || (item.watchlist && item.watchlist.inWatchlist)
+  );
+  const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true;
+  if(isTracked && !preserveScanAuthorityCanonicalPath){
+    return deps.resolveFinalStateContract(item, {context:'global'});
+  }
+  return deps.resolvePreLifecycleStateContract(item);
+}
+
+function selectedAuthorityContractSource(record, deps = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const isTracked = !!(
+    item.in_watchlist
+    || item.watchlist_entry_exists
+    || (item.watchlist && item.watchlist.inWatchlist)
+  );
+  const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true;
+  if(isTracked && preserveScanAuthorityCanonicalPath){
+    return 'scan_authority_preserved';
+  }
+  if(isTracked){
+    return 'final_state_contract';
+  }
+  if(deps.preserveReviewCanonicalForSoftReadiness === true){
+    return 'review_soft_readiness_override';
+  }
+  return 'pre_lifecycle_contract';
+}
+
+function canonicalVerdictAuthoritySource(record, deps = {}){
+  if(deps.preserveScanAuthorityCanonicalPath === true){
+    return 'scan_authority_preserved';
+  }
+  if(deps.canonicalSoftReadinessAlignmentApplied === true){
+    if(deps.preserveReviewCanonicalForSoftReadiness === true){
+      return 'review_soft_readiness_override';
+    }
+    return 'non_tracked_soft_readiness';
+  }
+  return selectedAuthorityContractSource(record, deps);
+}
+
 function authorityStampSourceCanReplaceTrackedAuthority(source){
   const normalizedSource = String(source || '').trim().toLowerCase();
   return ['watchlist_refresh', 'review_save', 'manual'].includes(normalizedSource);
@@ -37094,10 +37162,12 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     || visualBucket
     || 'monitor'
   ).trim().toLowerCase() || 'monitor';
-  const resolvedSectionKey = resolveTrackSectionKey(
-    watchlistRenderGroupForBucket(visualBucket) || visualBucket || '',
-    visualBucket
-  );
+  const resolvedSectionKey = typeof resolveTrackSectionKey === 'function'
+    ? resolveTrackSectionKey(
+      watchlistRenderGroupForBucket(visualBucket) || visualBucket || '',
+      visualBucket
+    )
+    : String(watchlistRenderGroupForBucket(visualBucket) || visualBucket || 'monitor').trim().toLowerCase();
   return {
     ticker,
     context:String(context || 'watchlist_add_projection'),
@@ -38140,13 +38210,21 @@ function buildResolvedStateBundleFromRecord(record, options = {}){
   );
   const qualityAdjustments = evaluateSetupQualityAdjustments(item, {displayedPlan, derivedStates});
   const warningState = evaluateWarningState(item);
-  const resolvedContract = resolveFinalStateContract(item, {
-    context,
-    derivedStates,
-    displayedPlan,
-    qualityAdjustments,
-    warningState
-  });
+  const preserveScanAuthorityPath = shouldPreserveScanAuthorityCanonicalPath(item);
+  const resolvedContract = preserveScanAuthorityPath
+    ? resolvePreLifecycleStateContract(item, {
+      context,
+      derivedStates,
+      effectivePlan,
+      displayedPlan
+    })
+    : resolveFinalStateContract(item, {
+      context,
+      derivedStates,
+      displayedPlan,
+      qualityAdjustments,
+      warningState
+    });
   const setupScore = setupScoreForRecord(item);
   const globalVerdict = resolveGlobalVerdict(item);
   const visualState = resolveVisualState(item, 'watchlist', {
@@ -49268,26 +49346,57 @@ function resolveGlobalVerdict(record, deps = {}){
     buildCumulativePenaltyTrace:deps.buildCumulativePenaltyTrace || cumulativePenaltyTraceForRecord,
     isHostileMarketStatus:deps.isHostileMarketStatus || isHostileMarketStatus,
     state:deps.state || state,
-    scannerScoreGradientClass:deps.scannerScoreGradientClass || scannerScoreGradientClass
+    scannerScoreGradientClass:deps.scannerScoreGradientClass || scannerScoreGradientClass,
+    preserveReviewCanonicalForSoftReadiness:deps.preserveReviewCanonicalForSoftReadiness === true,
+    preserveScanAuthorityCanonicalPath:deps.preserveScanAuthorityCanonicalPath === true
   };
+  const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true
+    || (
+      typeof shouldPreserveScanAuthorityCanonicalPath === 'function'
+      && shouldPreserveScanAuthorityCanonicalPath(item)
+    );
+  resolverDeps.preserveReviewCanonicalForSoftReadiness = deps.preserveReviewCanonicalForSoftReadiness === true;
+  resolverDeps.preserveScanAuthorityCanonicalPath = preserveScanAuthorityCanonicalPath;
   const verdict = resolveGlobalVerdictImpl(record, resolverDeps);
-  const resolvedContract = resolverDeps.resolveFinalStateContract(item, {
-    context:'global',
-    derivedStates,
-    displayedPlan
-  });
-  verdict.contractDiagnostics = resolvedContract && resolvedContract.contractDiagnostics && typeof resolvedContract.contractDiagnostics === 'object'
-    ? {...resolvedContract.contractDiagnostics}
-    : {};
+  const authorityResolvedContract = typeof selectedAuthorityContractForGlobalVerdict === 'function'
+    ? selectedAuthorityContractForGlobalVerdict(item, resolverDeps)
+    : (
+      item.in_watchlist
+      || item.watchlist_entry_exists
+      || (item.watchlist && item.watchlist.inWatchlist)
+    ) && !preserveScanAuthorityCanonicalPath
+      ? resolverDeps.resolveFinalStateContract(item, {context:'global'})
+      : resolverDeps.resolvePreLifecycleStateContract(item);
+  const selectedAuthoritySource = typeof selectedAuthorityContractSource === 'function'
+    ? selectedAuthorityContractSource(item, resolverDeps)
+    : (preserveScanAuthorityCanonicalPath ? 'scan_authority_preserved' : 'final_state_contract');
+  const canonicalAuthoritySource = typeof canonicalVerdictAuthoritySource === 'function'
+    ? canonicalVerdictAuthoritySource(item, {
+      ...resolverDeps,
+      canonicalSoftReadinessAlignmentApplied:verdict.canonical_soft_readiness_alignment_applied === true
+    })
+    : selectedAuthoritySource;
+  verdict.selected_authority_contract_source = verdict.selected_authority_contract_source || selectedAuthoritySource;
+  verdict.canonical_soft_readiness_alignment_source = verdict.canonical_soft_readiness_alignment_source || canonicalAuthoritySource;
+  verdict.contractDiagnostics = authorityResolvedContract && authorityResolvedContract.contractDiagnostics && typeof authorityResolvedContract.contractDiagnostics === 'object'
+    ? {
+      ...authorityResolvedContract.contractDiagnostics,
+      authoritySelectionSource:selectedAuthoritySource,
+      canonicalAuthoritySelectionSource:canonicalAuthoritySource
+    }
+    : {
+      authoritySelectionSource:selectedAuthoritySource,
+      canonicalAuthoritySelectionSource:canonicalAuthoritySource
+    };
   verdict.decision_summary = buildDecisionSummary({
     finalVerdict:verdict.final_verdict,
     displayedPlan,
-    resolvedContract,
+    resolvedContract:authorityResolvedContract,
     derivedStates
   });
   if(!verdict.cumulativePenaltyTrace || !Array.isArray(verdict.cumulativePenaltyTrace.sources)){
     verdict.cumulativePenaltyTrace = resolverDeps.buildCumulativePenaltyTrace(item, {
-      analysis:resolvedContract,
+      analysis:authorityResolvedContract,
       derivedStates,
       displayedPlan,
       displayStage:globalVerdictLabel(verdict.final_verdict || '')

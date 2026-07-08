@@ -49,6 +49,78 @@
     return normalizeGlobalVerdictKey(verdict);
   }
 
+  function shouldPreserveScanAuthorityCanonicalPath(record){
+    const item = record && typeof record === 'object' ? record : {};
+    const authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
+    const authorityVersion = Number(authority.version);
+    const authoritySource = String(authority.source || '').trim().toLowerCase();
+    if(authoritySource !== 'scan' || !Number.isFinite(authorityVersion) || authorityVersion <= 0){
+      return false;
+    }
+    const review = item.review && typeof item.review === 'object' ? item.review : {};
+    const hasReviewAuthority = !!(
+      (review.manualReview && typeof review.manualReview === 'object')
+      || String(review.savedVerdict || '').trim()
+    );
+    if(hasReviewAuthority) return false;
+    const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+    const planSource = String(plan.source || '').trim().toLowerCase();
+    const planIntroducesNewAuthority = !!(
+      String(plan.authorityVersion || '').trim()
+      && String(plan.authoritySource || '').trim()
+      && planSource
+      && planSource !== 'scanner_estimate'
+    );
+    return !planIntroducesNewAuthority;
+  }
+
+  function selectedAuthorityContractForGlobalVerdict(record, deps = {}){
+    const item = record && typeof record === 'object' ? record : {};
+    const isTracked = !!(
+      item.in_watchlist
+      || item.watchlist_entry_exists
+      || (item.watchlist && item.watchlist.inWatchlist)
+    );
+    const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true;
+    if(isTracked && !preserveScanAuthorityCanonicalPath){
+      return deps.resolveFinalStateContract(item, {context:'global'});
+    }
+    return deps.resolvePreLifecycleStateContract(item);
+  }
+
+  function selectedAuthorityContractSource(record, deps = {}){
+    const item = record && typeof record === 'object' ? record : {};
+    const isTracked = !!(
+      item.in_watchlist
+      || item.watchlist_entry_exists
+      || (item.watchlist && item.watchlist.inWatchlist)
+    );
+    const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true;
+    if(isTracked && preserveScanAuthorityCanonicalPath){
+      return 'scan_authority_preserved';
+    }
+    if(isTracked){
+      return 'final_state_contract';
+    }
+    if(deps.preserveReviewCanonicalForSoftReadiness === true){
+      return 'review_soft_readiness_override';
+    }
+    return 'pre_lifecycle_contract';
+  }
+
+  function canonicalVerdictAuthoritySource(record, deps = {}){
+    if(deps.preserveScanAuthorityCanonicalPath === true){
+      return 'scan_authority_preserved';
+    }
+    if(deps.canonicalSoftReadinessAlignmentApplied === true){
+      if(deps.preserveReviewCanonicalForSoftReadiness === true){
+        return 'review_soft_readiness_override';
+      }
+      return 'non_tracked_soft_readiness';
+    }
+    return selectedAuthorityContractSource(record, deps);
+  }
+
   function globalVerdictLabel(finalVerdict){
     return ({
       entry:'Entry',
@@ -1386,14 +1458,17 @@
     const item = record && typeof record === 'object' ? record : {};
     const preLifecycleResolved = deps.resolvePreLifecycleStateContract(item);
     const preserveReviewCanonicalForSoftReadiness = deps.preserveReviewCanonicalForSoftReadiness === true;
+    const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true
+      || shouldPreserveScanAuthorityCanonicalPath(item);
     const isTracked = !!(
       item.in_watchlist
       || item.watchlist_entry_exists
       || (item.watchlist && item.watchlist.inWatchlist)
     );
-    const resolved = isTracked
-      ? deps.resolveFinalStateContract(item, {context:'global'})
-      : preLifecycleResolved;
+    const resolved = selectedAuthorityContractForGlobalVerdict(item, {
+      ...deps,
+      preserveScanAuthorityCanonicalPath
+    });
     const baseVerdict = deps.baseVerdictFromResolvedContract(preLifecycleResolved);
     const derivedStates = deps.analysisDerivedStatesFromRecord(item);
     const effectivePlan = typeof deps.effectivePlanForRecord === 'function'
@@ -1412,7 +1487,9 @@
     const displayedPlan = typeof deps.applySetupConfirmationPlanGate === 'function'
       ? deps.applySetupConfirmationPlanGate(item, rawDisplayedPlan, derivedStates)
       : rawDisplayedPlan;
-    const canonicalSoftReadinessOverrideAllowed = !isTracked || preserveReviewCanonicalForSoftReadiness;
+    const canonicalSoftReadinessOverrideAllowed = !isTracked
+      || preserveReviewCanonicalForSoftReadiness
+      || preserveScanAuthorityCanonicalPath;
     const nonTrackedCanonicalContract = canonicalSoftReadinessOverrideAllowed && typeof deps.resolveFinalStateContract === 'function'
       ? deps.resolveFinalStateContract(item, {
         context:'global',
@@ -1733,6 +1810,7 @@
     const reclaimDirectSignalCount = Number.isFinite(Number(nearEntryGateChecks.reclaim_direct_signal_count))
       ? Number(nearEntryGateChecks.reclaim_direct_signal_count)
       : (Number.isFinite(Number(entryGateChecks.reclaim_direct_signal_count)) ? Number(entryGateChecks.reclaim_direct_signal_count) : 0);
+    const applyTrackedLifecycleVerdict = isTracked && !preserveScanAuthorityCanonicalPath;
     let trackedVerdict = normalizeVerdict(guardedVerdict.final_verdict);
     let trackedReason = guardedVerdict.reason || reason;
     const viability = resolveWatchlistViability({
@@ -1776,7 +1854,7 @@
       perf1w:item && item.marketData && item.marketData.perf1w,
       perf1m:item && item.marketData && item.marketData.perf1m
     });
-    if(trackedVerdict !== 'entry' && trackedVerdict !== 'near_entry'){
+    if(applyTrackedLifecycleVerdict && trackedVerdict !== 'entry' && trackedVerdict !== 'near_entry'){
       if(viability.viability === 'reject'){
         trackedVerdict = 'avoid';
       }else{
@@ -1830,12 +1908,12 @@
     const trackedAvoidTriggerSource = (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
       ? (structurallyBroken ? 'structure_broken' : (trackedVerdict !== baseVerdict ? 'lifecycle' : null))
       : null;
-    const lifecycleDowngradeSuppressed = !isTracked
+    const lifecycleDowngradeSuppressed = !applyTrackedLifecycleVerdict
       && (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
       && trackedAvoidTriggerSource === 'lifecycle';
-    const nonTrackedSoftenedReject = !isTracked && trackedVerdict === 'avoid' && !structurallyBroken;
-    finalVerdict = normalizeVerdict(isTracked ? trackedVerdict : baseVerdict);
-    if(isTracked){
+    const nonTrackedSoftenedReject = !applyTrackedLifecycleVerdict && trackedVerdict === 'avoid' && !structurallyBroken;
+    finalVerdict = normalizeVerdict(applyTrackedLifecycleVerdict ? trackedVerdict : baseVerdict);
+    if(applyTrackedLifecycleVerdict){
       reason = trackedReason;
     }else if(lifecycleDowngradeSuppressed){
       reason = 'Pre-watchlist lifecycle downgrade suppressed.';
@@ -1890,6 +1968,11 @@
       && typeof nonTrackedCanonicalContract.contractDiagnostics === 'object'
         ? nonTrackedCanonicalContract.contractDiagnostics
         : null;
+    const resolvedContractDiagnostics = resolved
+      && resolved.contractDiagnostics
+      && typeof resolved.contractDiagnostics === 'object'
+        ? resolved.contractDiagnostics
+        : null;
     const nonTrackedCanonicalVerdict = normalizeVerdict(
       nonTrackedCanonicalContract && (
         nonTrackedCanonicalContract.canonical_final_verdict
@@ -1935,6 +2018,15 @@
       && ['entry','near_entry'].includes(nonTrackedCanonicalVerdict)
       && nonTrackedCanonicalPriceabilityState === 'priceable'
     );
+    const selectedAuthoritySource = selectedAuthorityContractSource(item, {
+      preserveReviewCanonicalForSoftReadiness,
+      preserveScanAuthorityCanonicalPath
+    });
+    const canonicalAuthoritySource = canonicalVerdictAuthoritySource(item, {
+      preserveReviewCanonicalForSoftReadiness,
+      preserveScanAuthorityCanonicalPath,
+      canonicalSoftReadinessAlignmentApplied:nonTrackedCanonicalAlignmentApplied
+    });
     const canonicalReviewVerdict = nonTrackedCanonicalAlignmentApplied
       ? nonTrackedCanonicalVerdict
       : canonicalFinalVerdict;
@@ -2013,6 +2105,11 @@
         ? 'Buyers in control, but price is stretched away from support'
         : '',
       final_state_reason:guardedVerdict.reason || reason || 'resolved from gate contract',
+      contractDiagnostics:{
+        ...(resolvedContractDiagnostics ? {...resolvedContractDiagnostics} : {}),
+        authoritySelectionSource:selectedAuthoritySource,
+        canonicalAuthoritySelectionSource:canonicalAuthoritySource
+      },
       avoid_trigger_source:avoidTriggerSource,
       dead_trigger_source:deadTriggerSource,
       downgrade_applied:baseVerdict !== trackedVerdict,
@@ -2058,12 +2155,9 @@
         ? 'diminishing'
         : canonicalVisualBucketForVerdict(canonicalReviewVerdict),
       canonical_priceability_state:canonicalReviewPriceabilityState,
+      selected_authority_contract_source:selectedAuthoritySource,
       canonical_soft_readiness_alignment_applied:nonTrackedCanonicalAlignmentApplied,
-      canonical_soft_readiness_alignment_source:nonTrackedCanonicalAlignmentApplied
-        ? (isTracked && preserveReviewCanonicalForSoftReadiness
-          ? 'resolveFinalStateContract(review_soft_readiness_override)'
-          : 'resolveFinalStateContract(non_tracked_soft_readiness)')
-        : '',
+      canonical_soft_readiness_alignment_source:canonicalAuthoritySource,
       setup_location_state:setupLocationState,
       market_severity:trendGateChecks.market_severity || marketSeverity,
       buyer_control_state:buyerControlGateChecks.meaningful_reversal === true
@@ -3073,6 +3167,182 @@
         }
       },
       {
+        id:'tracked-unchanged-scan-authority-does-not-flip-to-plan-state-avoid',
+        record:{
+          ticker:'KEYS',
+          watchlist_entry_exists:true,
+          authority:{
+            version:1,
+            source:'scan',
+            reason:'scanner_workflow'
+          },
+          plan:{
+            source:'scanner_estimate',
+            authoritySource:'applyPlanCandidateToRecord',
+            authorityVersion:'trade_plan_v1'
+          },
+          derivedStates:{
+            structureState:'weak',
+            trendState:'acceptable',
+            setupLocationState:'off_level',
+            priceabilityState:'priceable',
+            stabilisationState:'none',
+            bounceState:'none',
+            pullbackZone:'extended',
+            volumeState:'weak'
+          },
+          effectivePlan:{entry:341.689, stop:309.12, firstTarget:373.34},
+          displayedPlan:{
+            status:'valid',
+            entry:341.689,
+            stop:309.12,
+            target:373.34,
+            tradeability:'risk_only',
+            rewardRisk:{rrRatio:0.97},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'unknown',
+            capitalFit:{capital_fit:'unknown', capital_note:'Capital check: fx estimated', fx_status:'estimated'}
+          },
+          preLifecycleResolved:{
+            finalVerdict:'Watch',
+            structuralState:'developing',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Watch',
+            blockerReason:'Structure is weak and viability rejected the setup.',
+            reasonSummary:'Structure is broken.',
+            terminal:false,
+            baseVerdict:'watch',
+            primaryBlockerSource:'setup_location',
+            contractDiagnostics:{
+              authorityContract:'pre_lifecycle',
+              blockerSource:'setup_location',
+              softReadinessOnlyDemotion:false,
+              planStatus:'valid',
+              tradeability:'risk_only'
+            }
+          },
+          resolvedContract:{
+            finalVerdict:'Avoid',
+            final_verdict:'avoid',
+            structuralState:'avoid',
+            actionStateKey:'blocked',
+            planStatusKey:'invalid',
+            tradeabilityVerdict:'Avoid',
+            blockerReason:'Structure is weak and viability rejected the setup.',
+            reasonSummary:'Structure is broken.',
+            terminal:false,
+            baseVerdict:'avoid',
+            primaryBlockerSource:'plan_state',
+            contractDiagnostics:{
+              authorityContract:'tracked_final',
+              blockerSource:'plan_state',
+              softReadinessOnlyDemotion:false,
+              planStatus:'invalid',
+              tradeability:'invalid'
+            }
+          }
+        },
+        assert(result){
+          return result.tracked === true
+            && result.final_verdict === 'watch'
+            && result.canonical_final_verdict === 'watch'
+            && result.canonical_visual_bucket === 'diminishing'
+            && result.contractDiagnostics
+            && result.contractDiagnostics.authorityContract === 'pre_lifecycle'
+            && result.contractDiagnostics.blockerSource === 'setup_location'
+            && result.contractDiagnostics.canonicalAuthoritySelectionSource === 'scan_authority_preserved'
+            && result.canonical_soft_readiness_alignment_source === 'scan_authority_preserved';
+        }
+      },
+      {
+        id:'tracked-unchanged-scan-authority-without-scanner-estimate-plan-source-still-preserves-watch-contract',
+        record:{
+          ticker:'NOSOURCE',
+          watchlist_entry_exists:true,
+          authority:{
+            version:1,
+            source:'scan',
+            reason:'scanner_workflow'
+          },
+          plan:{
+            source:'',
+            authoritySource:'applyPlanCandidateToRecord',
+            authorityVersion:'trade_plan_v1'
+          },
+          derivedStates:{
+            structureState:'weak',
+            trendState:'acceptable',
+            setupLocationState:'off_level',
+            priceabilityState:'priceable',
+            stabilisationState:'none',
+            bounceState:'none',
+            pullbackZone:'extended',
+            volumeState:'weak'
+          },
+          effectivePlan:{entry:50, stop:45, firstTarget:53},
+          displayedPlan:{
+            status:'valid',
+            entry:50,
+            stop:45,
+            target:53,
+            tradeability:'risk_only',
+            rewardRisk:{rrRatio:0.6},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'unknown',
+            capitalFit:{capital_fit:'unknown', capital_note:'Capital check: fx estimated', fx_status:'estimated'}
+          },
+          preLifecycleResolved:{
+            finalVerdict:'Watch',
+            structuralState:'developing',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Watch',
+            blockerReason:'Conditions are not strong enough for active focus.',
+            reasonSummary:'Pre-watchlist setup.',
+            terminal:false,
+            baseVerdict:'watch',
+            primaryBlockerSource:'setup_location',
+            contractDiagnostics:{
+              authorityContract:'pre_lifecycle',
+              blockerSource:'setup_location',
+              planStatus:'valid',
+              tradeability:'risk_only'
+            }
+          },
+          resolvedContract:{
+            finalVerdict:'Avoid',
+            final_verdict:'avoid',
+            structuralState:'avoid',
+            actionStateKey:'blocked',
+            planStatusKey:'invalid',
+            tradeabilityVerdict:'Avoid',
+            blockerReason:'Plan invalid after tracking.',
+            reasonSummary:'Tracked path invalidated the plan.',
+            terminal:false,
+            baseVerdict:'avoid',
+            primaryBlockerSource:'plan_state',
+            contractDiagnostics:{
+              authorityContract:'tracked_final',
+              blockerSource:'plan_state',
+              planStatus:'invalid',
+              tradeability:'invalid'
+            }
+          }
+        },
+        assert(result){
+          return result.tracked === true
+            && result.final_verdict === 'watch'
+            && result.canonical_final_verdict === 'watch'
+            && result.canonical_visual_bucket === 'diminishing'
+            && result.contractDiagnostics
+            && result.contractDiagnostics.authorityContract === 'pre_lifecycle'
+            && result.contractDiagnostics.blockerSource === 'setup_location'
+            && result.contractDiagnostics.canonicalAuthoritySelectionSource === 'scan_authority_preserved'
+            && result.canonical_soft_readiness_alignment_source === 'scan_authority_preserved';
+        }
+      },
+      {
         id:'broken-extended-without-hard-invalidation-viability-branch',
         viability:{
           structureEligibility:'broken',
@@ -3281,6 +3551,7 @@
     canPromoteToEntry,
     canPromoteToNearEntry,
     applyPromotionGuards,
+    shouldPreserveScanAuthorityCanonicalPath,
     resolveStructureEligibility,
     resolveWatchlistViability,
     resolveGlobalVerdict,

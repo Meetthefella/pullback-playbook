@@ -6543,6 +6543,12 @@ function runPlanSemanticsAssertions(){
     'capVerdictByBlockingFactors',
     'legacyResolveFinalStateContract',
     'resolveFinalStateContract',
+    'normalizeTickerJourneyAuthority',
+    'currentTickerJourneyAuthority',
+    'shouldPreserveScanAuthorityCanonicalPath',
+    'selectedAuthorityContractForGlobalVerdict',
+    'selectedAuthorityContractSource',
+    'canonicalVerdictAuthoritySource',
     'resolveGlobalVerdict',
     'applyGlobalVerdictGates',
     'executionDowngradeVerdictForRecord',
@@ -6686,6 +6692,236 @@ function runPlanSemanticsAssertions(){
   }
   if(liveLikeResolvedVerdict.contractDiagnostics.structuredBlockersPresent === true){
     throw new Error('Stale persisted plan-owned blocker metadata must not count as a current structured blocker in soft-readiness protection.');
+  }
+  const preservedScanAuthorityRecord = {
+    ticker:'MIXED_DIAGNOSTICS',
+    authority:{version:1, source:'scan', reason:'scanner_workflow'},
+    watchlist:{inWatchlist:true, debug:{}},
+    marketData:{price:100, currency:'USD'},
+    plan:{
+      entry:100,
+      stop:95,
+      firstTarget:108,
+      source:'',
+      authoritySource:'applyPlanCandidateToRecord',
+      authorityVersion:'trade_plan_v1'
+    },
+    setup:{
+      structureState:'weak',
+      trendState:'acceptable',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      stabilisationState:'none',
+      bounceState:'none',
+      pullbackZone:'extended',
+      volumeState:'weak'
+    }
+  };
+  const originalAnalysisDerivedStatesFromRecord = sandbox.analysisDerivedStatesFromRecord;
+  sandbox.analysisDerivedStatesFromRecord = () => ({
+    structureState:'weak',
+    trendState:'acceptable',
+    setupLocationState:'off_level',
+    priceabilityState:'priceable',
+    stabilisationState:'none',
+    bounceState:'none',
+    pullbackZone:'extended',
+    volumeState:'weak'
+  });
+  const originalResolvePreLifecycleStateContract = sandbox.resolvePreLifecycleStateContract;
+  const originalResolveFinalStateContract = sandbox.resolveFinalStateContract;
+  sandbox.resolvePreLifecycleStateContract = () => ({
+    finalVerdict:'Watch',
+    final_verdict:'watch',
+    structuralState:'developing',
+    actionStateKey:'wait_for_confirmation',
+    planStatusKey:'valid',
+    tradeabilityVerdict:'Watch',
+    blockerReason:'Pre-lifecycle authority.',
+    reasonSummary:'Pre-lifecycle authority.',
+    terminal:false,
+    baseVerdict:'watch',
+    primaryBlockerSource:'setup_location',
+    contractDiagnostics:{
+      authorityContract:'pre_lifecycle',
+      blockerSource:'setup_location',
+      planStatus:'valid',
+      tradeability:'risk_only',
+      softReadinessOnlyDemotion:false
+    }
+  });
+  sandbox.resolveFinalStateContract = () => ({
+    finalVerdict:'Avoid',
+    final_verdict:'avoid',
+    structuralState:'avoid',
+    actionStateKey:'blocked',
+    planStatusKey:'invalid',
+    tradeabilityVerdict:'Avoid',
+    blockerReason:'Tracked authority.',
+    reasonSummary:'Tracked authority.',
+    terminal:false,
+    baseVerdict:'avoid',
+    primaryBlockerSource:'plan_state',
+    contractDiagnostics:{
+      authorityContract:'tracked_final',
+      blockerSource:'plan_state',
+      planStatus:'invalid',
+      tradeability:'invalid',
+      softReadinessOnlyDemotion:false
+    }
+  });
+  const mixedDiagnosticsVerdict = sandbox.resolveGlobalVerdict(preservedScanAuthorityRecord, {
+    preserveScanAuthorityCanonicalPath:true
+  });
+  sandbox.analysisDerivedStatesFromRecord = originalAnalysisDerivedStatesFromRecord;
+  sandbox.resolvePreLifecycleStateContract = originalResolvePreLifecycleStateContract;
+  sandbox.resolveFinalStateContract = originalResolveFinalStateContract;
+  if(!mixedDiagnosticsVerdict.contractDiagnostics || mixedDiagnosticsVerdict.contractDiagnostics.authorityContract !== 'pre_lifecycle'){
+    throw new Error('resolveGlobalVerdict must source contractDiagnostics from the same preserved authority contract as final_verdict.');
+  }
+  if(mixedDiagnosticsVerdict.contractDiagnostics.blockerSource !== 'setup_location'){
+    throw new Error('Preserved watch verdict must not expose tracked plan_state diagnostics.');
+  }
+  if(mixedDiagnosticsVerdict.canonical_soft_readiness_alignment_source !== 'scan_authority_preserved'){
+    throw new Error('Unchanged scan-authority preservation must report scan_authority_preserved provenance.');
+  }
+  if(mixedDiagnosticsVerdict.contractDiagnostics.canonicalAuthoritySelectionSource !== 'scan_authority_preserved'){
+    throw new Error('Preserved scan-authority diagnostics must expose scan_authority_preserved as canonical provenance.');
+  }
+  if(mixedDiagnosticsVerdict.contractDiagnostics.authoritySelectionSource !== 'scan_authority_preserved'){
+    throw new Error('Preserved scan-authority diagnostics must expose scan_authority_preserved as the selected contract path.');
+  }
+  if(mixedDiagnosticsVerdict.canonical_soft_readiness_alignment_source === 'review_soft_readiness_override'){
+    throw new Error('Unchanged scan-authority preservation must not report review_soft_readiness_override.');
+  }
+  const originalResolveGlobalVerdictImpl = sandbox.resolveGlobalVerdictImpl;
+  sandbox.resolveGlobalVerdictImpl = () => ({
+    final_verdict:'watch',
+    canonical_final_verdict:'entry',
+    canonical_visual_bucket:'entry',
+    canonical_soft_readiness_alignment_applied:true,
+    allow_plan:true,
+    allow_watchlist:true,
+    priceability_state:'priceable',
+    plan_status:'valid',
+    contractDiagnostics:{
+      authorityContract:'tracked_final',
+      blockerSource:'setup_location',
+      planStatus:'valid',
+      tradeability:'tradable',
+      softReadinessOnlyDemotion:true,
+      structuredBlockersPresent:false,
+      finalPriceabilityState:'priceable'
+    }
+  });
+  const reviewSoftReadinessVerdict = sandbox.resolveGlobalVerdict({
+    ticker:'REVIEW_OVERRIDE',
+    watchlist_entry_exists:true,
+    marketData:{price:100, currency:'USD'},
+    derivedStates:{
+      structureState:'strong',
+      trendState:'intact',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      stabilisationState:'none',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'supportive'
+    },
+    effectivePlan:{entry:100, stop:96, firstTarget:112},
+    displayedPlan:{
+      status:'valid',
+      entry:100,
+      stop:96,
+      target:112,
+      tradeability:'tradable',
+      rewardRisk:{rrRatio:3},
+      riskFit:{risk_status:'acceptable'},
+      affordability:'acceptable',
+      capitalFit:{capital_fit:'acceptable'}
+    }
+  }, {
+    preserveReviewCanonicalForSoftReadiness:true,
+    analysisDerivedStatesFromRecord:() => ({
+      structureState:'strong',
+      trendState:'intact',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      stabilisationState:'none',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma',
+      volumeState:'supportive'
+    }),
+    effectivePlanForRecord:() => ({entry:100, stop:96, firstTarget:112}),
+    deriveCurrentPlanState:() => ({
+      status:'valid',
+      entry:100,
+      stop:96,
+      target:112,
+      tradeability:'tradable',
+      rewardRisk:{rrRatio:3},
+      riskFit:{risk_status:'acceptable'},
+      affordability:'acceptable',
+      capitalFit:{capital_fit:'acceptable'}
+    }),
+    resolvePreLifecycleStateContract:() => ({
+      finalVerdict:'Watch',
+      final_verdict:'watch',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Needs stronger confirmation.',
+      reasonSummary:'Needs stronger confirmation.',
+      terminal:false,
+      baseVerdict:'watch',
+      primaryBlockerSource:'setup_location',
+      contractDiagnostics:{
+        authorityContract:'pre_lifecycle',
+        blockerSource:'setup_location',
+        planStatus:'valid',
+        tradeability:'tradable',
+        softReadinessOnlyDemotion:false
+      }
+    }),
+    resolveFinalStateContract:() => ({
+      finalVerdict:'Watch',
+      final_verdict:'watch',
+      canonical_final_verdict:'entry',
+      canonical_visual_bucket:'entry',
+      canonical_priceability_state:'priceable',
+      structuralState:'developing',
+      actionStateKey:'wait_for_confirmation',
+      planStatusKey:'valid',
+      tradeabilityVerdict:'Watch',
+      blockerReason:'Needs stronger confirmation.',
+      reasonSummary:'Needs stronger confirmation.',
+      terminal:false,
+      baseVerdict:'watch',
+      primaryBlockerSource:'setup_location',
+      contractDiagnostics:{
+        authorityContract:'tracked_final',
+        blockerSource:'setup_location',
+        planStatus:'valid',
+        tradeability:'tradable',
+        softReadinessOnlyDemotion:true,
+        structuredBlockersPresent:false,
+        finalPriceabilityState:'priceable'
+      }
+    })
+  });
+  sandbox.resolveGlobalVerdictImpl = originalResolveGlobalVerdictImpl;
+  if(reviewSoftReadinessVerdict.canonical_final_verdict !== 'entry'){
+    throw new Error('Review soft-readiness override must preserve the canonical entry verdict.');
+  }
+  if(reviewSoftReadinessVerdict.canonical_soft_readiness_alignment_source !== 'review_soft_readiness_override'){
+    throw new Error('Review soft-readiness override must report review_soft_readiness_override provenance.');
+  }
+  if(reviewSoftReadinessVerdict.contractDiagnostics.canonicalAuthoritySelectionSource !== 'review_soft_readiness_override'){
+    throw new Error('Review soft-readiness diagnostics must expose review_soft_readiness_override as canonical provenance.');
+  }
+  if(reviewSoftReadinessVerdict.canonical_soft_readiness_alignment_source === 'scan_authority_preserved'){
+    throw new Error('Review soft-readiness override must not report scan_authority_preserved.');
   }
   const trowLikeGlobalVerdict = {
     allow_plan:false,

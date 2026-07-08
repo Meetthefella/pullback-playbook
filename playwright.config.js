@@ -1,6 +1,7 @@
 const {defineConfig} = require('@playwright/test');
 
 const baseURL = process.env.PP_BASE_URL || 'http://127.0.0.1:4173';
+const reuseExistingServer = process.env.PP_REUSE_EXISTING_SERVER === 'true';
 
 module.exports = defineConfig({
   testDir:'./tests/ui',
@@ -15,7 +16,7 @@ module.exports = defineConfig({
   webServer:{
     command:'node scripts/playwright-static-server.js',
     url:baseURL,
-    reuseExistingServer:true,
+    reuseExistingServer,
     timeout:30000,
     gracefulShutdown:{
       signal:'SIGTERM',

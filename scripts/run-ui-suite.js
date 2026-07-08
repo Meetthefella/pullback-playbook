@@ -2,7 +2,7 @@ const path = require('path');
 const {spawnSync} = require('child_process');
 
 const root = path.resolve(__dirname, '..');
-const playwrightCli = path.join(root, 'node_modules', '@playwright', 'test', 'cli.js');
+const freshPortRunner = path.join(root, 'scripts', 'run-playwright-fresh-port.js');
 
 const suites = {
   all:[
@@ -37,7 +37,7 @@ function requestedMode(){
 
 function runPlaywrightGroup(group){
   console.log(`\n[ui] Running ${group.label}`);
-  const result = spawnSync(process.execPath, [playwrightCli, 'test', ...group.paths], {
+  const result = spawnSync(process.execPath, [freshPortRunner, 'test', ...group.paths], {
     cwd:root,
     stdio:'inherit'
   });

@@ -361,6 +361,36 @@
     return `fp_${(hash >>> 0).toString(16).padStart(8, '0')}_${input.length}`;
   }
 
+  function shouldPreserveTrackedScanAuthorityPath(record, explicitReviewAuthorityInput){
+    const item = record && typeof record === 'object' ? record : {};
+    if(!(item.watchlist && item.watchlist.inWatchlist)) return false;
+    if(explicitReviewAuthorityInput) return false;
+    if(global.ResolverCore && typeof global.ResolverCore.shouldPreserveScanAuthorityCanonicalPath === 'function'){
+      return global.ResolverCore.shouldPreserveScanAuthorityCanonicalPath(item);
+    }
+    const authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
+    const authoritySource = String(authority.source || '').trim().toLowerCase();
+    const authorityVersion = Number(authority.version || 0);
+    if(authoritySource !== 'scan' || !Number.isFinite(authorityVersion) || authorityVersion <= 0){
+      return false;
+    }
+    const review = item.review && typeof item.review === 'object' ? item.review : {};
+    const hasReviewAuthority = !!(
+      (review.manualReview && typeof review.manualReview === 'object')
+      || String(review.savedVerdict || '').trim()
+    );
+    if(hasReviewAuthority) return false;
+    const plan = item.plan && typeof item.plan === 'object' ? item.plan : {};
+    const planSource = String(plan.source || '').trim().toLowerCase();
+    const planIntroducesNewAuthority = !!(
+      String(plan.authorityVersion || '').trim()
+      && String(plan.authoritySource || '').trim()
+      && planSource
+      && planSource !== 'scanner_estimate'
+    );
+    return !planIntroducesNewAuthority;
+  }
+
   function persistedSharedPresentationForRecord(record){
     const item = record && typeof record === 'object' ? record : {};
     const watchlist = item.watchlist && typeof item.watchlist === 'object' ? item.watchlist : null;
@@ -596,12 +626,15 @@
         : fallbackDerivedStates(item);
       const derivedStates = reconcileDerivedPriceabilityState(rawDerivedStates, planState);
       const validation = global.SimplifiedPlanState.validateCurrentPlan(item, planState, {derivedStates, deps});
+      const preserveTrackedScanAuthorityPath = surface === 'track'
+        && shouldPreserveTrackedScanAuthorityPath(item, explicitReviewAuthorityInput);
       const resolverDeps = {
         ...deps,
         // Surface alone must not grant stronger authority. Only explicit
         // review-authority inputs in the record may preserve review-side
         // soft-readiness semantics.
         preserveReviewCanonicalForSoftReadiness:surface === 'review' && explicitReviewAuthorityInput,
+        preserveScanAuthorityCanonicalPath:preserveTrackedScanAuthorityPath,
         analysisDerivedStatesFromRecord:() => derivedStates,
         effectivePlanForRecord:() => effectivePlan,
         deriveCurrentPlanState:() => planState,
@@ -621,13 +654,17 @@
         scannerScoreGradientClass:deps.scannerScoreGradientClass || (() => '')
       };
       const resolvedState = global.ResolverCore.resolveGlobalVerdict(item, resolverDeps);
-      const basePresentationContract = resolverDeps.resolveFinalStateContract(item, {context:surface, derivedStates, displayedPlan:planState});
+      const basePresentationContract = preserveTrackedScanAuthorityPath
+        ? resolverDeps.resolvePreLifecycleStateContract(item, {context:surface, derivedStates, displayedPlan:planState})
+        : resolverDeps.resolveFinalStateContract(item, {context:surface, derivedStates, displayedPlan:planState});
       const preferExplicitReviewCanonical = surface === 'review'
         && explicitReviewAuthorityInput
         && resolvedState
         && resolvedState.canonical_soft_readiness_alignment_applied === true;
+      const preferPreservedCanonicalAuthorityVerdict = preferExplicitReviewCanonical
+        || preserveTrackedScanAuthorityPath;
       const canonicalPresentationVerdict = (resolvedState && (
-        (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')
+        (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')
         || resolvedState.final_verdict_rendered
         || resolvedState.final_verdict
         || resolvedState.canonical_final_verdict
@@ -639,13 +676,13 @@
         ...(basePresentationContract && typeof basePresentationContract === 'object' ? basePresentationContract : {}),
         finalVerdict:resolvedVerdictLabel,
         final_verdict:(resolvedState && (
-          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')
+          (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')
           || resolvedState.final_verdict_rendered
           || resolvedState.final_verdict
           || resolvedState.canonical_final_verdict
         )) || 'watch',
         final_verdict_rendered:(resolvedState && (
-          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')
+          (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')
           || resolvedState.final_verdict_rendered
           || resolvedState.final_verdict
           || resolvedState.canonical_final_verdict
@@ -657,7 +694,7 @@
       const presentationResolvedState = {
         ...(resolvedState && typeof resolvedState === 'object' ? resolvedState : {}),
         canonical_final_verdict:(resolvedState && (
-          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')
+          (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')
           || resolvedState.final_verdict_rendered
           || resolvedState.final_verdict
           || resolvedState.canonical_final_verdict

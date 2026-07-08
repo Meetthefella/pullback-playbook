@@ -834,7 +834,22 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
           mainBlocker:String(globalVerdict.main_blocker || globalVerdict.reason || ''),
           tradeability:String(globalVerdict.tradeabilityVerdict || globalVerdict.tradeability || ''),
           reasonCode:String(globalVerdict.semantic_blocker_code || globalVerdict.reason_code || ''),
-          planStatus:String(globalVerdict.planStateKey || globalVerdict.plan_status || '')
+          planStatus:String(globalVerdict.planStateKey || globalVerdict.plan_status || ''),
+          allowWatchlist:globalVerdict.allow_watchlist === true,
+          allowPlan:globalVerdict.allow_plan === true,
+          primaryBlockerSource:String(globalVerdict.primary_blocker_source || ''),
+          contractAuthority:String(globalVerdict.contractDiagnostics && globalVerdict.contractDiagnostics.authorityContract || ''),
+          contractSelectionSource:String(
+            globalVerdict.selected_authority_contract_source
+            || globalVerdict.contractDiagnostics && globalVerdict.contractDiagnostics.authoritySelectionSource
+            || ''
+          ),
+          canonicalSelectionSource:String(
+            globalVerdict.canonical_soft_readiness_alignment_source
+            || globalVerdict.contractDiagnostics && globalVerdict.contractDiagnostics.canonicalAuthoritySelectionSource
+            || ''
+          ),
+          canonicalAlignmentApplied:globalVerdict.canonical_soft_readiness_alignment_applied === true
         } : null
       },
       paperTrade:{
@@ -1059,6 +1074,40 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       || trackAuthorityPresentation.renderedBucket
     )
   );
+  const trackContract = appState.authority && appState.authority.canonicalContract && typeof appState.authority.canonicalContract === 'object'
+    ? appState.authority.canonicalContract
+    : null;
+  const trackContractCanonicalVerdict = normalizeVerdictKey(
+    trackContract && (
+      trackContract.canonicalVerdict
+      || trackContract.canonicalVerdictKey
+    )
+  );
+  const trackContractBucket = normalizeVerdictKey(
+    trackContract && (
+      trackContract.canonicalVisualBucket
+      || trackContract.bucket
+    )
+  );
+  const trackPresentationSourceOfTruth = normalizeCopyText(
+    trackAuthorityPresentation && trackAuthorityPresentation.sourceOfTruth
+  ).toLowerCase();
+  const trackDiagnosticContractAuthority = normalizeCopyText(
+    appState.track
+    && appState.track.simplifiedState
+    && appState.track.simplifiedState.contractDiagnostics
+    && appState.track.simplifiedState.contractDiagnostics.authorityContract
+  ).toLowerCase();
+  const trackDiagnosticContractSource = normalizeCopyText(
+    appState.track
+    && appState.track.simplifiedState
+    && (
+      appState.track.simplifiedState.selected_authority_contract_source
+      || appState.track.simplifiedState.canonical_soft_readiness_alignment_source
+      || appState.track.simplifiedState.contractDiagnostics
+      && appState.track.simplifiedState.contractDiagnostics.canonicalAuthoritySelectionSource
+    )
+  ).toLowerCase();
   appState.normalized = {
     reviewCanonicalVerdict:normalizeVerdictKey(appState.review && appState.review.stateHealth && appState.review.stateHealth.canonicalVerdict),
     reviewVisualBucket:normalizeVerdictKey(appState.review && appState.review.stateHealth && appState.review.stateHealth.visualBucket),
@@ -1068,6 +1117,11 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
     trackDiagnosticBucket:trackDiagnosticVisualBucket,
     trackAuthorityCanonicalVerdict,
     trackAuthorityBucket,
+    trackContractCanonicalVerdict,
+    trackContractBucket,
+    trackPresentationSourceOfTruth,
+    trackDiagnosticContractAuthority,
+    trackDiagnosticContractSource,
     trackRenderedVsAuthorityMismatch:!!(
       (trackRenderedCanonicalVerdict && trackAuthorityCanonicalVerdict && trackRenderedCanonicalVerdict !== trackAuthorityCanonicalVerdict)
       || (trackRenderedVisualBucket && trackAuthorityBucket && trackRenderedVisualBucket !== trackAuthorityBucket)

@@ -5,6 +5,7 @@ const path = require('path');
 const rootDir = path.resolve(__dirname, '..');
 const host = process.env.PP_PLAYWRIGHT_HOST || '127.0.0.1';
 const port = Number(process.env.PP_PLAYWRIGHT_PORT || 4173);
+const allowExistingServer = process.env.PP_ALLOW_EXISTING_SERVER === 'true';
 
 const mimeTypes = {
   '.html':'text/html; charset=utf-8',
@@ -86,6 +87,12 @@ function shutdown(exitCode = 0){
 
 server.on('error', error => {
   if(error && error.code === 'EADDRINUSE'){
+    if(!allowExistingServer){
+      process.stderr.write(
+        `Port ${port} is already in use. Start Playwright with a fresh port or set PP_ALLOW_EXISTING_SERVER=true only when intentional.\n`
+      );
+      process.exit(1);
+    }
     const probe = http.get({host, port, path:'/'}, response => {
       response.resume();
       process.stdout.write(`Playwright static server already listening on http://${host}:${port}\n`);
