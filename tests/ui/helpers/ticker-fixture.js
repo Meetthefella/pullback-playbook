@@ -6,6 +6,13 @@ function normalizeTicker(value){
 }
 
 function loadTickerFixture(){
+  const overridePath = path.join(__dirname, '..', 'fixtures', 'tickers.override.json');
+  if(fs.existsSync(overridePath)){
+    const parsedOverride = JSON.parse(fs.readFileSync(overridePath, 'utf8'));
+    return (Array.isArray(parsedOverride.tickers) ? parsedOverride.tickers : [])
+      .map(normalizeTicker)
+      .filter(Boolean);
+  }
   const envTickers = String(process.env.PP_TICKERS || '').trim();
   if(envTickers){
     return envTickers

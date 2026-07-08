@@ -135,8 +135,8 @@ function run(){
 
   const contract = buildPlanVerdictContract(record);
   assert.strictEqual(contract.ticker, 'TROW');
-  assert.strictEqual(contract.canonicalVerdict, 'entry');
-  assert.strictEqual(contract.canonicalVisualBucket, 'entry');
+  assert.strictEqual(contract.canonicalVerdict, 'near_entry');
+  assert.strictEqual(contract.canonicalVisualBucket, 'near_entry');
   assert.strictEqual(contract.derivedStates.setupScore, 8);
   assert.strictEqual(contract.planAuthority.stamped, true);
   assert.ok(Array.isArray(contract.paperTradeAuthority.submittedTrades), 'submitted paper trades should be exposed as historical authority inputs');
@@ -146,17 +146,17 @@ function run(){
   assert.strictEqual(contractFingerprint(contract), contractFingerprint(contractCopy), 'equivalent contracts should fingerprint the same');
 
   const reviewModel = buildReviewRenderModel(contract, {draftVerdict:'watch'});
-  assert.strictEqual(reviewModel.canonicalVerdict, 'entry');
-  assert.strictEqual(reviewModel.visualBucket, 'entry');
+  assert.strictEqual(reviewModel.canonicalVerdict, 'near_entry');
+  assert.strictEqual(reviewModel.visualBucket, 'near_entry');
   assert.strictEqual(reviewModel.contractFingerprint, contract.contractFingerprint);
 
   const trackModel = buildTrackRenderModel(contract);
   assert.strictEqual(trackModel.inWatchlist, true);
-  assert.strictEqual(trackModel.canonicalVerdict, 'entry');
+  assert.strictEqual(trackModel.canonicalVerdict, 'near_entry');
 
   const longPressModel = buildTrackLongPressModel(contract);
-  assert.strictEqual(longPressModel.header, 'Entry Ready');
-  assert.strictEqual(longPressModel.actionable, true);
+  assert.strictEqual(longPressModel.header, 'Near Entry');
+  assert.strictEqual(longPressModel.actionable, false);
 
   assert.ok(
     appSource.includes('const planVerdictContract = buildCanonicalPlanVerdictContract(item, {'),

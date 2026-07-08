@@ -1,0 +1,104 @@
+const path = require('path');
+const {spawnSync} = require('child_process');
+
+const root = path.resolve(__dirname, '..', '..');
+
+const cases = [
+  {
+    id:'resolver-gates',
+    label:'Resolver gate assertions',
+    script:'scripts/run-resolver-gate-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
+    id:'canonical-resolver-input',
+    label:'Canonical resolver input assertions',
+    script:'scripts/run-canonical-resolver-input-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
+    id:'normalization-read-write',
+    label:'Normalization read/write assertions',
+    script:'scripts/run-normalization-read-write-assertions.js',
+    groups:['all', 'resolver', 'pure', 'persistence']
+  },
+  {
+    id:'plan-verdict-contract',
+    label:'Plan verdict contract assertions',
+    script:'scripts/run-plan-verdict-contract-assertions.js',
+    groups:['all', 'contracts']
+  },
+  {
+    id:'review-draft-authority',
+    label:'Review draft authority assertions',
+    script:'scripts/run-review-draft-authority-assertions.js',
+    groups:['all', 'contracts']
+  },
+  {
+    id:'trade-plan-authority',
+    label:'Trade plan authority assertions',
+    script:'scripts/run-trade-plan-authority-assertions.js',
+    groups:['all', 'contracts']
+  },
+  {
+    id:'storage-persistence',
+    label:'Storage persistence assertions',
+    script:'scripts/run-storage-persistence-assertions.js',
+    groups:['all', 'persistence']
+  },
+  {
+    id:'lifecycle-hygiene',
+    label:'Lifecycle hygiene assertions',
+    script:'scripts/run-lifecycle-hygiene-assertions.js',
+    groups:['all', 'contracts', 'persistence']
+  },
+  {
+    id:'trade-execution',
+    label:'Trade execution handler tests',
+    script:'scripts/run-trade-execution-handler-tests.js',
+    groups:['all', 'execution']
+  }
+];
+
+function parseRequestedGroup(argv){
+  const explicit = argv.find(arg => arg.startsWith('--group='));
+  if(explicit) return explicit.slice('--group='.length).trim().toLowerCase() || 'all';
+  const positional = argv.find(arg => !arg.startsWith('--'));
+  return String(positional || 'all').trim().toLowerCase() || 'all';
+}
+
+function runCase(testCase){
+  const relativeScript = String(testCase.script || '');
+  const scriptPath = path.resolve(root, relativeScript);
+  console.log(`\n[unit] ${testCase.label}`);
+  const result = spawnSync(process.execPath, [scriptPath], {
+    cwd:root,
+    stdio:'inherit'
+  });
+  if(result.error) throw result.error;
+  return Number(result.status || 0);
+}
+
+function main(){
+  const requestedGroup = parseRequestedGroup(process.argv.slice(2));
+  const selectedCases = cases.filter(testCase => testCase.groups.includes(requestedGroup));
+
+  if(!selectedCases.length){
+    console.error(`[unit] Unknown group "${requestedGroup}". Available groups: all, resolver, pure, contracts, persistence, execution.`);
+    process.exit(1);
+  }
+
+  console.log(`[unit] Running group "${requestedGroup}" with ${selectedCases.length} case(s).`);
+
+  for(const testCase of selectedCases){
+    const status = runCase(testCase);
+    if(status !== 0){
+      console.error(`\n[unit] Failed: ${testCase.id}`);
+      process.exit(status);
+    }
+  }
+
+  console.log(`\n[unit] Group "${requestedGroup}" passed.`);
+}
+
+main();

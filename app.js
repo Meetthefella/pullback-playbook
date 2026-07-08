@@ -15668,7 +15668,7 @@ function renderWatchlistCardElement(record, options = {}){
     ? ''
     : String(trackVisibleModel.primaryReason || '').trim();
   const compactNextAction = String(trackVisibleModel.nextAction || '').trim();
-  const resolvedSectionKey = parentSectionKey || watchlistState || visualBucket || '';
+  const resolvedSectionKey = resolveTrackSectionKey(parentSectionKey || watchlistState || visualBucket || '', visualBucket);
   const renderedBucket = visualBucket;
   const clickedCardProjectionSnapshot = {
     ticker:entry.ticker,
@@ -16205,6 +16205,17 @@ function watchlistRenderGroupForBucket(bucket){
   if(normalizedBucket === 'diminishing') return 'diminishing';
   if(['avoid','avoid_dead','low_priority_avoid','lower_priority','dead','inactive'].includes(normalizedBucket)) return 'avoid_dead';
   return 'active';
+}
+
+function resolveTrackSectionKey(sectionHint, bucket){
+  const normalizedBucket = String(bucket || '').trim().toLowerCase();
+  const derivedSectionKey = String(watchlistRenderGroupForBucket(normalizedBucket) || 'active').trim().toLowerCase() || 'active';
+  const normalizedHint = String(sectionHint || '').trim().toLowerCase();
+  if(!normalizedHint) return derivedSectionKey;
+  if(normalizedHint === 'diminishing' && normalizedBucket !== 'diminishing') return derivedSectionKey;
+  if(normalizedHint === 'avoid_dead' && !['avoid', 'avoid_dead', 'dead', 'inactive'].includes(normalizedBucket)) return derivedSectionKey;
+  if(normalizedHint === 'active' && ['avoid', 'avoid_dead', 'dead', 'inactive'].includes(normalizedBucket)) return derivedSectionKey;
+  return normalizedHint;
 }
 
 function watchlistRenderGroups(showExpired = false){
@@ -29699,6 +29710,7 @@ function buildCanonicalReviewPresentationModel(record, options = {}){
   return {
     ticker:normalizeTicker(item.ticker || ''),
     record:item,
+    canonicalVerdict:verdictKey,
     verdictKey,
     visualBucket,
     tone,
@@ -36942,12 +36954,13 @@ function buildStableReviewProjectionSnapshot(record, context = 'review_open_duri
     || effectiveSimplifiedState.actionLabel
     || ''
   ).trim();
-  const resolvedSectionKey = String(
+  const resolvedSectionKey = resolveTrackSectionKey(
     effectiveSimplifiedState.sectionKey
     || effectiveSimplifiedState.renderedBucket
     || visualBucket
-    || ''
-  ).trim().toLowerCase();
+    || '',
+    visualBucket
+  );
   const projectionSnapshot = {
     ticker,
     context:String(context || 'review_open_during_refresh'),
@@ -37081,7 +37094,10 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     || visualBucket
     || 'monitor'
   ).trim().toLowerCase() || 'monitor';
-  const resolvedSectionKey = String(watchlistRenderGroupForBucket(visualBucket) || visualBucket || '').trim().toLowerCase();
+  const resolvedSectionKey = resolveTrackSectionKey(
+    watchlistRenderGroupForBucket(visualBucket) || visualBucket || '',
+    visualBucket
+  );
   return {
     ticker,
     context:String(context || 'watchlist_add_projection'),
@@ -45370,16 +45386,18 @@ function renderReviewWorkspace(options = {}){
   });
   applyCanonicalReviewPresentationModelToDom(liveCanonicalReviewPresentation);
   if(liveCanonicalReviewPresentation){
+    const liveCanonicalReviewVerdict = normalizeGlobalVerdictKey(
+      liveCanonicalReviewPresentation.canonicalVerdict
+      || liveCanonicalReviewPresentation.verdictKey
+      || box.dataset.visualState
+      || 'watch'
+    );
     box.dataset.visualTone = String(
       liveCanonicalReviewPresentation.tone
       || box.dataset.visualTone
       || ''
     ).trim().toLowerCase();
-    box.dataset.visualState = normalizeVisualBucketForPairing(
-      liveCanonicalReviewPresentation.visualBucket
-      || box.dataset.visualState
-      || 'monitor'
-    );
+    box.dataset.visualState = presentationVisualStateForVerdict(liveCanonicalReviewVerdict || 'watch');
     box.dataset.reviewPresentationState = box.dataset.visualState;
   }
   if(!reviewSnapshotAuthority && isPersistedDisplayProjectionSource(reviewProjectionSource)){

@@ -163,6 +163,10 @@ The frontend uses:
 - `/api/analyse-setup` for AI analysis
 - `/api/market-data` for provider-backed market data
 
+## Testing
+
+See [TEST_SUITE.md](/C:/Users/a_daveg/Documents/pullback-playbook/TEST_SUITE.md) for the canonical testing architecture and test-running guide.
+
 ## Deployment
 
 ### Single Netlify deployment

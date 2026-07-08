@@ -32,7 +32,7 @@ function run(){
     'write-capable normalization must route through normalizeTickerRecordInternal(..., {readOnly:false})'
   );
   assert.ok(
-    recordsSource.includes("return normalizeTickerRecordInternal(safeRecord, deps, { readOnly:true });"),
+    recordsSource.includes("return normalizeTickerRecordInternal(record, deps, { readOnly:true });"),
     'read-only normalization must route through normalizeTickerRecordInternal(..., {readOnly:true})'
   );
 

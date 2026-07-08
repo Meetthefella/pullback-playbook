@@ -75,15 +75,15 @@ function assertResolveGlobalVerdictContractAlignment(){
     'app.js soft-readiness alignment must allow the narrowed FX-estimated risk_only tradeability case'
   );
   assert.ok(
-    simplifiedTradeStateSource.includes("const canonicalPresentationVerdict = (resolvedState && (\n        resolvedState.canonical_final_verdict\n        || resolvedState.final_verdict_rendered\n        || resolvedState.final_verdict\n      )) || 'watch';"),
+    simplifiedTradeStateSource.includes("const canonicalPresentationVerdict = (resolvedState && (\n        (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')\n        || resolvedState.final_verdict_rendered\n        || resolvedState.final_verdict\n        || resolvedState.canonical_final_verdict\n      )) || 'watch';"),
     'simplified-trade-state must seed the presentation contract from canonical resolved verdict fields'
   );
   assert.ok(
-    simplifiedTradeStateSource.includes("final_verdict:(resolvedState && (\n          resolvedState.canonical_final_verdict\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n        )) || 'watch'"),
+    simplifiedTradeStateSource.includes("final_verdict:(resolvedState && (\n          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n          || resolvedState.canonical_final_verdict\n        )) || 'watch'"),
     'simplified-trade-state must pass canonical final_verdict into ResolverPresentation'
   );
   assert.ok(
-    simplifiedTradeStateSource.includes("final_verdict_rendered:(resolvedState && (\n          resolvedState.canonical_final_verdict\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n        )) || 'watch'"),
+    simplifiedTradeStateSource.includes("final_verdict_rendered:(resolvedState && (\n          (preferExplicitReviewCanonical ? resolvedState.canonical_final_verdict : '')\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n          || resolvedState.canonical_final_verdict\n        )) || 'watch'"),
     'simplified-trade-state must pass canonical final_verdict_rendered into ResolverPresentation'
   );
 }
@@ -244,8 +244,16 @@ function assertSimplifiedPipelineResolverInjection(){
   assert.ok(capturedDeps && typeof capturedDeps === 'object', 'simplified pipeline should inject resolver deps');
   assert.strictEqual(capturedDeps.analysisDerivedStatesFromRecord(record).priceabilityState, 'priceable', 'reconciled derivedStates should be injected into ResolverCore.resolveGlobalVerdict');
   assert.strictEqual(capturedDeps.resolveFinalStateContract(record).canonical_final_verdict, 'entry', 'override-aware final-state contract should be injected');
-  assert.strictEqual(capturedDeps.preserveReviewCanonicalForSoftReadiness, true, 'review surface must inject the Review-only soft-readiness preservation override');
-  assert.strictEqual(result.canonicalVerdict, 'entry', 'soft-readiness-only review case should preserve canonical Entry in simplified pipeline');
+  assert.strictEqual(
+    capturedDeps.preserveReviewCanonicalForSoftReadiness,
+    false,
+    'review surface must not inject the soft-readiness preservation override unless explicit review authority input is present'
+  );
+  assert.strictEqual(
+    result.canonicalVerdict,
+    'watch',
+    'without explicit review authority input, the simplified review pipeline should not preserve soft-readiness Entry canonically'
+  );
   assert.strictEqual(result.priceabilityState, 'priceable', 'soft-readiness-only review case should preserve priceable state in simplified pipeline');
 }
 
@@ -437,7 +445,11 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
     log:false,
     deps
   });
-  assert.strictEqual(reviewResult.canonicalVerdict, 'entry', 'FX-estimated risk_only plan should preserve canonical Entry for TROW-like review');
+  assert.strictEqual(
+    reviewResult.canonicalVerdict,
+    'watch',
+    'without explicit review authority input, FX-estimated risk_only review should remain watch even when priceability reconciles'
+  );
   assert.strictEqual(reviewResult.priceabilityState, 'priceable', 'FX-estimated risk_only plan should reconcile stale unpriceable to priceable');
   assert.strictEqual(reviewResult.planStatus, 'valid', 'FX-estimated risk_only reconciliation should keep plan valid');
   const reviewTrackedSoftReadinessRecord = makeRecord({
@@ -448,7 +460,11 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
     log:false,
     deps
   });
-  assert.strictEqual(reviewTrackedSoftReadinessResult.canonicalVerdict, 'entry', 'review surface must preserve canonical Entry after add-to-watchlist for soft-readiness-only cases');
+  assert.strictEqual(
+    reviewTrackedSoftReadinessResult.canonicalVerdict,
+    'watch',
+    'without explicit review authority input, review should not preserve canonical Entry after add-to-watchlist for soft-readiness-only cases'
+  );
   assert.strictEqual(reviewTrackedSoftReadinessResult.priceabilityState, 'priceable', 'review surface must preserve priceable state after add-to-watchlist for soft-readiness-only cases');
   sandbox.window.SimplifiedTradeState.resolveRecordState(reviewTrackedSoftReadinessRecord, {
     surface:'track',
@@ -534,7 +550,11 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
     log:false,
     deps
   });
-  assert.strictEqual(lastResolverDeps.preserveReviewCanonicalForSoftReadiness, true, 'review surface must still use the Review-only override path while hard-blocker coverage remains in the gate suite');
+  assert.strictEqual(
+    lastResolverDeps.preserveReviewCanonicalForSoftReadiness,
+    false,
+    'review surface must still withhold the soft-readiness override when explicit review authority input is absent, even in hard-blocker coverage'
+  );
 
   const stopBreachRecord = makeRecord({
     marketData:{price:101.5, currency:'USD'},
@@ -560,7 +580,11 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
       }
     }
   });
-  assert.strictEqual(lastResolverDeps.preserveReviewCanonicalForSoftReadiness, true, 'review surface must keep the Review-only override flag for stop-breach scenarios');
+  assert.strictEqual(
+    lastResolverDeps.preserveReviewCanonicalForSoftReadiness,
+    false,
+    'review surface must keep the soft-readiness override disabled for stop-breach scenarios unless explicit review authority input is present'
+  );
 
   const brokenStructureRecord = makeRecord({
     derivedStates:{
@@ -579,7 +603,11 @@ function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
     log:false,
     deps
   });
-  assert.strictEqual(lastResolverDeps.preserveReviewCanonicalForSoftReadiness, true, 'review surface must keep the Review-only override flag for broken-structure scenarios');
+  assert.strictEqual(
+    lastResolverDeps.preserveReviewCanonicalForSoftReadiness,
+    false,
+    'review surface must keep the soft-readiness override disabled for broken-structure scenarios unless explicit review authority input is present'
+  );
 }
 
 function deepClone(value){

@@ -197,7 +197,7 @@ function testExplicitSaveRemainsAuthoritative(){
   assert(record.review.draft && record.review.draft.summary === 'Constructive setup.', 'Explicit save should keep draft state aligned.');
   assert(record.review.manualReview && record.review.manualReview.summary === 'Constructive setup.', 'Explicit save must persist manualReview authority.');
   assert(record.review.lastReviewedAt === record.review.manualReview.savedAt, 'Explicit save must stamp lastReviewedAt.');
-  assert(record.review.savedVerdict === 'entry', 'Explicit save must persist savedVerdict.');
+  assert(record.review.savedVerdict === '', 'Explicit save must not persist savedVerdict authority.');
   assert(record.review.savedScore === 8, 'Explicit save must persist savedScore.');
   assert(calls.refreshTrackedTickerState === 1, 'Explicit save must refresh tracked ticker authority.');
   assert(calls.commitTickerState === 1, 'Explicit save should commit persisted state.');

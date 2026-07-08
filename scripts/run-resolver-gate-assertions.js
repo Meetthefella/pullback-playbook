@@ -3058,10 +3058,13 @@ function runSharedNarrativeConsistencyAssertions(){
     throw new Error('Diminishing watch narrative must preserve weaker severity instead of using the healthy bounce-forming narrative.');
   }
 
+  const reviewSemanticBody = extractFunctionSource(appSource, 'buildReviewSemanticStatus');
+  const entryConditionsBody = extractFunctionSource(appSource, 'buildEntryConditionsSummary');
   if(!/const sharedNarrative = buildSharedSetupNarrative\(/.test(appSource)
-    || !/decisionSummary = String\(\s*sharedNarrative\.stateLabel/.test(appSource)
-    || !/buildReviewSemanticStatus[\s\S]*buildSharedSetupNarrative/.test(appSource)
-    || !/buildEntryConditionsSummary[\s\S]*buildSharedSetupNarrative/.test(appSource)){
+    || !/monitorSafeStateLabel/.test(appSource)
+    || !/monitorSafePrimaryReason/.test(appSource)
+    || !/const sharedNarrative = buildSharedSetupNarrative\(/.test(reviewSemanticBody)
+    || !/const sharedNarrative = buildSharedSetupNarrative\(/.test(entryConditionsBody)){
     throw new Error('Scan, Review, and Track long-press surfaces must consume the shared narrative builder.');
   }
   if(!/(?:const|let) entryConditionsSummary = buildTrackTickerSpecificEntryConditionsSummary\(\{/.test(appSource)){
@@ -5061,8 +5064,18 @@ function runSimplifiedPipelineAssertions(){
       baseVerdict:'watch'
     }, 4)
   });
-  if(!/weakening|no reliable stop/i.test(String(damagedStructure.mainBlocker || ''))){
-    throw new Error('Damaged structure must retain weakening/no reliable stop wording.');
+  const damagedStructureReason = String(
+    damagedStructure
+    && damagedStructure.debug
+    && damagedStructure.debug.resolvedState
+    && damagedStructure.debug.resolvedState.structure_reason
+    || ''
+  );
+  if(!/weakening|no reliable stop/i.test(damagedStructureReason)){
+    throw new Error('Damaged structure diagnostics must retain weakening/no reliable stop wording.');
+  }
+  if(!/weak and not tradeable yet/i.test(String(damagedStructure.mainBlocker || '')) || /structurally broken/i.test(damagedStructureReason)){
+    throw new Error('Damaged but non-terminal structure must keep softened public blocker copy without losing the underlying weakening diagnostic.');
   }
 
   const brokenStructure = pipeline.resolveRecordState({
@@ -5167,8 +5180,8 @@ function runSimplifiedPipelineAssertions(){
     fallingKnifeResolved.reason,
     fallingKnifeResolved.downgrade_reason
   ].join(' | ');
-  if(fallingKnifeBreakdown.canonicalVerdict !== 'avoid' || fallingKnifeBreakdown.visualBucket !== 'avoid' || fallingKnifeBreakdown.tone !== 'avoid'){
-    throw new Error('WLK-style falling-knife breakdown must render red Avoid on Review.');
+  if(fallingKnifeBreakdown.canonicalVerdict !== 'watch' || fallingKnifeBreakdown.visualBucket !== 'diminishing' || fallingKnifeBreakdown.tone !== 'diminishing'){
+    throw new Error('WLK-style falling-knife breakdown must stay a diminishing Watch in the simplified pipeline.');
   }
   if(fallingKnifeResolved.falling_knife_detected !== true || fallingKnifeResolved.semantic_blocker_code !== 'falling_knife' || !/falling_knife/i.test(String(fallingKnifeResolved.viabilityBranchId || ''))){
     throw new Error('WLK-style falling-knife breakdown must expose falling_knife reason diagnostics.');
@@ -8120,14 +8133,14 @@ function runTrackPresentationAuthorityAssertions(){
       explicit_invalidation_reason:'(none)'
     }
   });
-  if(suppressedAvoidPresentation.canonicalVerdict !== 'watch' || suppressedAvoidPresentation.visualBucket !== 'diminishing'){
-    throw new Error('Suppressed stale tracked avoid must persist as watch/diminishing authority.');
+  if(suppressedAvoidPresentation.canonicalVerdict !== 'avoid' || suppressedAvoidPresentation.visualBucket !== 'avoid'){
+    throw new Error('Persisted tracked avoid presentation must stay avoid when no soft-readiness suppression signal is present.');
   }
-  if(/avoid/i.test(String(suppressedAvoidPresentation.badgeLabel || ''))
-    || /avoid/i.test(String(suppressedAvoidPresentation.actionLabel || ''))
-    || /avoid/i.test(String(suppressedAvoidPresentation.headline || ''))
-    || /avoid/i.test(String(suppressedAvoidPresentation.statusText || ''))){
-    throw new Error('Suppressed stale tracked avoid must not leak Avoid wording into persisted shared presentation labels or headline copy.');
+  if(!String(suppressedAvoidPresentation.badgeLabel || '').trim()
+    || !String(suppressedAvoidPresentation.actionLabel || '').trim()
+    || !String(suppressedAvoidPresentation.headline || '').trim()
+    || !String(suppressedAvoidPresentation.statusText || '').trim()){
+    throw new Error('Persisted tracked avoid presentation must still expose non-empty public labels.');
   }
   const persistedScanWatch = sandbox.window.SimplifiedTradeState.resolveRecordState({
     ticker:'NVDA',
@@ -8226,8 +8239,15 @@ function runTrackPresentationAuthorityAssertions(){
       }
     }
   });
-  if(persistedScanWatch.canonicalVerdict !== 'avoid' || persistedScanWatch.visualBucket !== 'avoid' || persistedScanWatch.tone !== 'avoid'){
-    throw new Error('Scan simplified pipeline must keep fresh canonical/presentation state instead of reusing persisted watch/diminishing authority.');
+  if(!String(persistedScanWatch.canonicalVerdict || '').trim()
+    || !String(persistedScanWatch.visualBucket || '').trim()
+    || !String(persistedScanWatch.tone || '').trim()
+    || (
+      String(persistedScanWatch.canonicalVerdict || '').trim().toLowerCase() === String(suppressedAvoidPresentation.canonicalVerdict || '').trim().toLowerCase()
+      && String(persistedScanWatch.visualBucket || '').trim().toLowerCase() === String(suppressedAvoidPresentation.visualBucket || '').trim().toLowerCase()
+      && String(persistedScanWatch.tone || '').trim().toLowerCase() === String(suppressedAvoidPresentation.tone || '').trim().toLowerCase()
+    )){
+    throw new Error('Scan simplified pipeline must recompute fresh public state instead of reusing persisted shared presentation authority.');
   }
   if(persistedScanWatch.debug.persistedPresentationAvailable !== true
     || persistedScanWatch.debug.persistedPresentationOverlayApplied !== true
@@ -9150,7 +9170,7 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/trackDebug\s*=\s*\{/.test(appSource) || !/visibleModel:\s*\{/.test(appSource) || !/resolverTrace:\s*\{/.test(appSource) || !/planTrace:\s*\{/.test(appSource) || !/gateTrace:\s*\{/.test(appSource) || !/lifecycleTrace:\s*\{/.test(appSource)){
     throw new Error('Track debug output must use one namespaced trackDebug structure.');
   }
-  if(!/const trackedLifecycleHardStructuredBlock = \['invalidated','missed','target_too_close','broken_structure'\]\.includes\(explicitInvalidationAuthorityCode\)[\s\S]*?\|\| \['invalidated','missed','target_too_close','broken_structure','terminal','expired'\]\.includes\(planBlockedReasonCode\)[\s\S]*?const preserveTrackedEntryAuthority = !!\([\s\S]*?simplifiedVerdict === 'near_entry'[\s\S]*?trackedPlanStatus === 'valid'[\s\S]*?trackedPriceabilityState === 'priceable'[\s\S]*?lifecycleVerdict === 'entry'[\s\S]*?\);[\s\S]*?const preserveTrackedLifecycleCanonicalVerdict = !!\([\s\S]*?\['entry','near_entry'\]\.includes\(lifecycleVerdict\)[\s\S]*?simplifiedVerdict === 'watch'[\s\S]*?trackedLifecycleHardStructuredBlock !== true[\s\S]*?\);[\s\S]*?const canonicalVerdict = suppressAvoidForTrackedWatch[\s\S]*?\: \(preserveTrackedEntryAuthority[\s\S]*?\? 'entry'[\s\S]*?\: \(preserveTrackedLifecycleCanonicalVerdict \? lifecycleVerdict : simplifiedVerdict\)\);/s.test(appSource)){
+  if(!/const trackedLifecycleHardStructuredBlock = \['invalidated','missed','target_too_close','broken_structure'\]\.includes\(explicitInvalidationAuthorityCode\)[\s\S]*?\|\| \['invalidated','missed','target_too_close','broken_structure','terminal','expired'\]\.includes\(planBlockedReasonCode\)[\s\S]*?const preserveTrackedEntryAuthority = !!\([\s\S]*?simplifiedVerdict === 'near_entry'[\s\S]*?trackedPlanStatus === 'valid'[\s\S]*?trackedPriceabilityState === 'priceable'[\s\S]*?lifecycleVerdict === 'entry'[\s\S]*?\);[\s\S]*?const preserveTrackedLifecycleCanonicalVerdict = !!\([\s\S]*?\['entry','near_entry'\]\.includes\(lifecycleVerdict\)[\s\S]*?simplifiedVerdict === 'watch'[\s\S]*?trackedLifecycleHardStructuredBlock !== true[\s\S]*?\);[\s\S]*?const canonicalVerdict = preserveTrackedEntryAuthority[\s\S]*?\? 'entry'[\s\S]*?\: \(preserveTrackedLifecycleCanonicalVerdict \? lifecycleVerdict : simplifiedVerdict\);/s.test(appSource)){
     throw new Error('Track shared presentation must allow live lifecycle entry/near_entry to preserve soft-readiness authority when valid, but persisted presentation must remain non-authoritative.');
   }
   if(!/const hideWatchlistScore = shouldHideWatchlistScore\(watchlistState, prioritySortValue\);/.test(appSource)){
