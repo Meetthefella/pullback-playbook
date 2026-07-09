@@ -6,9 +6,9 @@ const assert = require('assert');
 const root = path.resolve(__dirname, '..');
 const appPath = path.join(root, 'app.js');
 const appSource = fs.readFileSync(appPath, 'utf8');
-const fixturePath = path.join(root, 'tests', 'fixtures', 'chart-guru-event-first-cases.json');
-const fixtures = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
 const analyseSetupModule = require(path.join(root, 'netlify', 'functions', 'analyse-setup.js'));
+const {loadBenchmarkCases} = require(path.join(root, 'tests', 'fixtures', 'chart-guru-benchmark-library.js'));
+const fixtures = loadBenchmarkCases();
 
 function extractConstAssignment(name){
   const marker = `const ${name} = `;

@@ -1,0 +1,120 @@
+{
+  "id": "CAT_event_first_failed_bounce",
+  "ticker": "CAT",
+  "benchmark": {
+    "dominantEvent": "Failed first bounce from 20MA",
+    "eventSequence": [
+      "strong uptrend",
+      "pullback to the 20-day average",
+      "buyers tried to bounce",
+      "that bounce failed quickly"
+    ],
+    "expectedTraderInterpretation": "The first defence attempt at the 20-day average did not hold, so the pullback is still under pressure rather than cleanly resuming.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "Failed first bounce from 20MA"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "20MA",
+  "setupStates": {
+    "trendState": "strong",
+    "pullbackZone": "near_20ma",
+    "structureState": "weakening",
+    "stabilisationState": "early",
+    "bounceState": "attempt",
+    "volumeState": "weak"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "failed_bounce",
+      "label": "Chart Story",
+      "icon": "\ud83d\udcc9",
+      "text": "The bounce attempt faded quickly, which suggests sellers are still pushing back.",
+      "evidenceFactIds": ["failed_bounce", "trend_context", "weakness_signal"],
+      "confidence": 0.88,
+      "rankReason": "failed_bounce_is_primary_story"
+    },
+    "recentStory": {
+      "key": "failed_first_bounce_from_20ma",
+      "bias": "cautious",
+      "toneMode": "deterministic",
+      "confidenceMode": "recent_event_sequence",
+      "trendLabel": "First pullback to 20MA failed to bounce cleanly",
+      "supportLabel": "Near the 20-day average",
+      "steps": [
+        "strong_uptrend",
+        "pullback_to_20ma",
+        "bounce_attempt",
+        "failed_bounce",
+        "between_20ma_and_50ma"
+      ],
+      "stepDetails": [
+        {
+          "key": "pullback_to_20ma",
+          "evidenceFactIds": ["support_short_term_average"],
+          "derivedFromSteps": ["pullback_to_20ma"],
+          "derivedFromConditions": ["near_20ma"]
+        },
+        {
+          "key": "failed_bounce",
+          "evidenceFactIds": ["failed_bounce", "weakness_signal"],
+          "derivedFromSteps": ["bounce_attempt", "failed_bounce"],
+          "derivedFromConditions": ["bounce_attempt", "structure_weakening"]
+        }
+      ],
+      "evidenceFactIds": ["failed_bounce", "support_short_term_average", "weakness_signal"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "CAT",
+    "timeframe": "1D",
+    "currentPrice": 41.32,
+    "ma20": 41.8,
+    "ma50": 39.4,
+    "ma200": 33.1,
+    "volume": 2500000,
+    "latestCandleOHLC": {
+      "open": 41.75,
+      "high": 41.9,
+      "low": 41.1,
+      "close": 41.32
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "20MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "Failed first bounce from 20MA",
+    "eventSequence": [
+      "strong uptrend",
+      "pullback to the 20-day average",
+      "buyers tried to bounce",
+      "that bounce failed quickly"
+    ],
+    "traderInterpretation": "The first defence attempt at the 20-day average did not hold, so the pullback is still under pressure rather than cleanly resuming.",
+    "currentRisk": "Sellers can keep control if price stays trapped below the 20-day average and starts making lower highs again.",
+    "nextSignal": "The next useful signal is a firmer reclaim of the 20-day average with follow-through instead of another weak bounce."
+  },
+  "finalProse": {
+    "chartStory": "The main event is that CAT tried to bounce from the 20-day average, but that first bounce failed quickly.",
+    "whyItMatters": "A failed first bounce usually means the pullback is not ready to resume higher yet, so traders should treat support as unproven.",
+    "setupLocation": "Price is sitting between the 20-day and 50-day averages after a failed support defence.",
+    "learningPoint": "A touch of the 20-day average matters less than the quality of the first buyer response that follows it.",
+    "whatNext": "Watch for a stronger reclaim of the 20-day average with better follow-through before trusting the pullback again."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["failed", "bounce", "20-day"],
+    "eventSequenceTokens": ["pullback", "bounce", "failed"],
+    "traderTokens": ["pressure", "sellers", "reclaim"],
+    "tutorTokens": ["failed", "support", "watch"],
+    "forbiddenTokens": ["rsi", "macd", "entry ready"]
+  }
+}

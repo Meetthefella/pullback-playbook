@@ -1,0 +1,113 @@
+{
+  "id": "UPS_event_first_constructive_pullback",
+  "ticker": "UPS",
+  "benchmark": {
+    "dominantEvent": "Constructive pullback awaiting confirmation",
+    "eventSequence": [
+      "the uptrend stayed intact",
+      "price pulled back in a controlled way toward the 20-day average",
+      "the location is constructive",
+      "buyers still have not confirmed the bounce"
+    ],
+    "expectedTraderInterpretation": "UPS is pulling back in a healthy area, but the setup is still early because buyers have not produced convincing follow-through yet.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "Constructive pullback awaiting confirmation"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "20MA",
+  "setupStates": {
+    "trendState": "strong",
+    "pullbackZone": "near_20ma",
+    "structureState": "intact",
+    "stabilisationState": "early",
+    "bounceState": "none",
+    "volumeState": "neutral"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "constructive_pullback_near_20ma",
+      "label": "Chart Story",
+      "icon": "\ud83d\udfe2",
+      "text": "The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but buyers still need to defend this support area.",
+      "evidenceFactIds": ["trend_context", "support_short_term_average"],
+      "confidence": 0.91,
+      "rankReason": "trend_intact_pullback_into_20ma_support"
+    },
+    "recentStory": {
+      "key": "constructive_pullback_awaiting_confirmation",
+      "bias": "constructive",
+      "toneMode": "deterministic",
+      "confidenceMode": "recent_event_sequence",
+      "trendLabel": "Constructive pullback waiting for confirmation",
+      "supportLabel": "Near the 20-day average",
+      "steps": [
+        "uptrend_intact",
+        "controlled_pullback_to_20ma",
+        "support_area_reached",
+        "buyers_not_confirmed"
+      ],
+      "stepDetails": [
+        {
+          "key": "controlled_pullback_to_20ma",
+          "evidenceFactIds": ["support_short_term_average"],
+          "derivedFromSteps": ["controlled_pullback_to_20ma"],
+          "derivedFromConditions": ["near_20ma"]
+        }
+      ],
+      "evidenceFactIds": ["trend_context", "support_short_term_average"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "UPS",
+    "timeframe": "1D",
+    "currentPrice": 148.4,
+    "ma20": 147.9,
+    "ma50": 142.6,
+    "ma200": 133.3,
+    "volume": 1900000,
+    "latestCandleOHLC": {
+      "open": 149.1,
+      "high": 149.4,
+      "low": 147.8,
+      "close": 148.4
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "20MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "Constructive pullback awaiting confirmation",
+    "eventSequence": [
+      "the uptrend stayed intact",
+      "price pulled back in a controlled way toward the 20-day average",
+      "the location is constructive",
+      "buyers still have not confirmed the bounce"
+    ],
+    "traderInterpretation": "UPS is pulling back in a healthy area, but the setup is still early because buyers have not produced convincing follow-through yet.",
+    "currentRisk": "If support around the 20-day average starts failing, this can shift from a constructive pause into a weaker pullback.",
+    "nextSignal": "The next useful signal is a cleaner bounce that holds the 20-day average and starts building follow-through."
+  },
+  "finalProse": {
+    "chartStory": "The main event is a constructive pullback toward the 20-day average, but buyers still have not confirmed the bounce.",
+    "whyItMatters": "Constructive pullbacks can become useful setups, but they are easier to trust after buyers prove they can defend support.",
+    "setupLocation": "Price is sitting near the 20-day average inside an intact uptrend.",
+    "learningPoint": "Good location helps, but traders still care about the response that happens after price reaches support.",
+    "whatNext": "Watch for buyers to hold the 20-day average and add better follow-through before treating the setup as stronger."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["constructive", "pullback", "confirmation"],
+    "eventSequenceTokens": ["uptrend", "pullback", "buyers"],
+    "traderTokens": ["healthy", "follow-through", "support"],
+    "tutorTokens": ["support", "buyers", "watch"],
+    "forbiddenTokens": ["rsi", "macd", "entry ready"]
+  }
+}

@@ -1,0 +1,113 @@
+{
+  "id": "GEV_event_first_early_constructive",
+  "ticker": "GEV",
+  "benchmark": {
+    "dominantEvent": "Early constructive pullback",
+    "eventSequence": [
+      "the broader trend still looks constructive",
+      "price has only started pulling back",
+      "support is nearby but not fully tested yet",
+      "buyers still need to prove themselves"
+    ],
+    "expectedTraderInterpretation": "GEV is in an early-stage pullback that still looks constructive, but the setup is not mature because buyers have not yet shown a meaningful defence.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "Early constructive pullback"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "20MA",
+  "setupStates": {
+    "trendState": "strong",
+    "pullbackZone": "near_20ma",
+    "structureState": "intact",
+    "stabilisationState": "early",
+    "bounceState": "none",
+    "volumeState": "neutral"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "constructive_pullback_near_20ma",
+      "label": "Chart Story",
+      "icon": "\ud83d\udfe2",
+      "text": "The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but buyers still need to defend this support area.",
+      "evidenceFactIds": ["trend_context", "support_short_term_average"],
+      "confidence": 0.9,
+      "rankReason": "trend_intact_pullback_into_20ma_support"
+    },
+    "recentStory": {
+      "key": "early_constructive_pullback",
+      "bias": "constructive",
+      "toneMode": "deterministic",
+      "confidenceMode": "recent_event_sequence",
+      "trendLabel": "Early constructive pullback",
+      "supportLabel": "Near the 20-day average",
+      "steps": [
+        "constructive_trend_backdrop",
+        "early_pullback_starting",
+        "support_not_fully_tested",
+        "buyers_not_fully_shown"
+      ],
+      "stepDetails": [
+        {
+          "key": "early_pullback_starting",
+          "evidenceFactIds": ["trend_context"],
+          "derivedFromSteps": ["early_pullback_starting"],
+          "derivedFromConditions": ["near_20ma"]
+        }
+      ],
+      "evidenceFactIds": ["trend_context", "support_short_term_average"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "GEV",
+    "timeframe": "1D",
+    "currentPrice": 309.4,
+    "ma20": 304.8,
+    "ma50": 291.2,
+    "ma200": 248.6,
+    "volume": 1200000,
+    "latestCandleOHLC": {
+      "open": 311.5,
+      "high": 312.8,
+      "low": 307.9,
+      "close": 309.4
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "20MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "Early constructive pullback",
+    "eventSequence": [
+      "the broader trend still looks constructive",
+      "price has only started pulling back",
+      "support is nearby but not fully tested yet",
+      "buyers still need to prove themselves"
+    ],
+    "traderInterpretation": "GEV is in an early-stage pullback that still looks constructive, but the setup is not mature because buyers have not yet shown a meaningful defence.",
+    "currentRisk": "If the pullback keeps drifting without a buyer response, the setup can lose timing quality before it becomes actionable.",
+    "nextSignal": "The next useful signal is a cleaner support test followed by a visible buyer response instead of more aimless drift."
+  },
+  "finalProse": {
+    "chartStory": "The main event is an early constructive pullback, but buyers have not shown a real defence yet.",
+    "whyItMatters": "Early pullbacks can become good setups later, but right now the chart is still in the stage where support needs to prove itself.",
+    "setupLocation": "Price is easing back toward support inside a constructive trend, but the test is still developing.",
+    "learningPoint": "A chart can be constructive and still too early at the same time. Traders care about both location and timing.",
+    "whatNext": "Watch for a cleaner support test and a more convincing buyer response before expecting the setup to improve."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["early", "constructive", "pullback"],
+    "eventSequenceTokens": ["constructive", "support", "buyers"],
+    "traderTokens": ["early-stage", "defence", "timing"],
+    "tutorTokens": ["early", "support", "watch"],
+    "forbiddenTokens": ["rsi", "macd", "entry ready"]
+  }
+}

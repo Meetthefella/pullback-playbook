@@ -1,0 +1,113 @@
+{
+  "id": "ALLY_event_first_50ma_test",
+  "ticker": "ALLY",
+  "benchmark": {
+    "dominantEvent": "First meaningful 50MA support test",
+    "eventSequence": [
+      "broader uptrend held up",
+      "price pulled back into the 50-day average",
+      "this is the first meaningful test of that support",
+      "buyers have not confirmed the defence yet"
+    ],
+    "expectedTraderInterpretation": "ALLY is testing medium-term support for the first time, so the location is constructive but the chart still needs proof that buyers will actually defend it.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "First meaningful 50MA support test"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "50MA",
+  "setupStates": {
+    "trendState": "strong",
+    "pullbackZone": "near_50ma",
+    "structureState": "intact",
+    "stabilisationState": "none",
+    "bounceState": "none",
+    "volumeState": "neutral"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "constructive_pullback_near_50ma",
+      "label": "Chart Story",
+      "icon": "\ud83d\udfe2",
+      "text": "The main clue is a constructive pullback into the 50-day average while the wider uptrend is still intact, but buyers still need to defend this support area.",
+      "evidenceFactIds": ["trend_context", "support_medium_term_average"],
+      "confidence": 0.89,
+      "rankReason": "trend_intact_pullback_into_50ma_support"
+    },
+    "recentStory": {
+      "key": "first_test_of_50ma",
+      "bias": "constructive",
+      "toneMode": "deterministic",
+      "confidenceMode": "recent_event_sequence",
+      "trendLabel": "First meaningful test of the 50-day average",
+      "supportLabel": "Near the 50-day average",
+      "steps": [
+        "broader_uptrend_intact",
+        "deeper_pullback_to_50ma",
+        "first_test_of_50ma",
+        "buyers_not_confirmed"
+      ],
+      "stepDetails": [
+        {
+          "key": "first_test_of_50ma",
+          "evidenceFactIds": ["support_medium_term_average"],
+          "derivedFromSteps": ["deeper_pullback_to_50ma", "first_test_of_50ma"],
+          "derivedFromConditions": ["near_50ma"]
+        }
+      ],
+      "evidenceFactIds": ["trend_context", "support_medium_term_average"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "ALLY",
+    "timeframe": "1D",
+    "currentPrice": 37.84,
+    "ma20": 40.25,
+    "ma50": 37.72,
+    "ma200": 31.44,
+    "volume": 4100000,
+    "latestCandleOHLC": {
+      "open": 38.05,
+      "high": 38.3,
+      "low": 37.45,
+      "close": 37.84
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "50MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "First meaningful 50MA support test",
+    "eventSequence": [
+      "broader uptrend held up",
+      "price pulled back into the 50-day average",
+      "this is the first meaningful test of that support",
+      "buyers have not confirmed the defence yet"
+    ],
+    "traderInterpretation": "ALLY is testing medium-term support for the first time, so the location is constructive but the chart still needs proof that buyers will actually defend it.",
+    "currentRisk": "If the 50-day average fails to hold cleanly, the pullback can deepen and the constructive context will weaken.",
+    "nextSignal": "The next useful signal is a clear buyer response from the 50-day average rather than price just hovering there."
+  },
+  "finalProse": {
+    "chartStory": "The main event is that ALLY has pulled back into its first meaningful test of the 50-day average.",
+    "whyItMatters": "First tests of medium-term support can become useful pullback spots, but only if buyers actually show up there.",
+    "setupLocation": "Price is sitting right around the 50-day average with support still being tested.",
+    "learningPoint": "A good support area is only the starting point. Traders still need to see the response that comes after price gets there.",
+    "whatNext": "Watch for a clearer buyer reaction from the 50-day average before treating this as a stronger pullback setup."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["50-day", "test", "support"],
+    "eventSequenceTokens": ["pullback", "50-day", "buyers"],
+    "traderTokens": ["constructive", "defend", "buyers"],
+    "tutorTokens": ["support", "buyers", "watch"],
+    "forbiddenTokens": ["rsi", "macd", "entry ready"]
+  }
+}

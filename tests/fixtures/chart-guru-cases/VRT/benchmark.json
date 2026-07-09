@@ -1,0 +1,113 @@
+{
+  "id": "VRT_event_first_momentum_fading",
+  "ticker": "VRT",
+  "benchmark": {
+    "dominantEvent": "Momentum fading after extension",
+    "eventSequence": [
+      "the trend had run hard first",
+      "momentum started slowing down",
+      "recent pullbacks became messier",
+      "the structure now needs repair instead of immediate continuation"
+    ],
+    "expectedTraderInterpretation": "VRT is no longer in the clean acceleration phase. The move looks more tired now, so traders should think in terms of repair risk rather than easy continuation.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "Momentum fading after extension"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "20MA",
+  "setupStates": {
+    "trendState": "weakening",
+    "pullbackZone": "off_level",
+    "structureState": "weakening",
+    "stabilisationState": "none",
+    "bounceState": "failed",
+    "volumeState": "neutral"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "extended_after_run",
+      "label": "Chart Story",
+      "icon": "\ud83d\udcc8",
+      "text": "The trend is still strong, but price is stretched after the run and would look healthier after a calmer pullback.",
+      "evidenceFactIds": ["trend_context", "price_accelerating_higher"],
+      "confidence": 0.82,
+      "rankReason": "trend_is_extended_above_support"
+    },
+    "recentStory": {
+      "key": "momentum_fading_after_extension",
+      "bias": "cautious",
+      "toneMode": "deterministic",
+      "confidenceMode": "recent_event_sequence",
+      "trendLabel": "Momentum fading after extension",
+      "supportLabel": "Above nearby support but losing urgency",
+      "steps": [
+        "prior_run_became_extended",
+        "upside_momentum_slowed",
+        "pullbacks_got_messier",
+        "structure_needs_repair"
+      ],
+      "stepDetails": [
+        {
+          "key": "upside_momentum_slowed",
+          "evidenceFactIds": ["price_accelerating_higher"],
+          "derivedFromSteps": ["prior_run_became_extended", "upside_momentum_slowed"],
+          "derivedFromConditions": ["off_level"]
+        }
+      ],
+      "evidenceFactIds": ["trend_context", "price_accelerating_higher", "weakness_signal"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "VRT",
+    "timeframe": "1D",
+    "currentPrice": 96.1,
+    "ma20": 94.8,
+    "ma50": 88.2,
+    "ma200": 71.4,
+    "volume": 3500000,
+    "latestCandleOHLC": {
+      "open": 97.3,
+      "high": 98.0,
+      "low": 95.7,
+      "close": 96.1
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "20MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "Momentum fading after extension",
+    "eventSequence": [
+      "the trend had run hard first",
+      "momentum started slowing down",
+      "recent pullbacks became messier",
+      "the structure now needs repair instead of immediate continuation"
+    ],
+    "traderInterpretation": "VRT is no longer in the clean acceleration phase. The move looks more tired now, so traders should think in terms of repair risk rather than easy continuation.",
+    "currentRisk": "If the chart keeps losing momentum without rebuilding structure, late buyers can get trapped in a weakening move.",
+    "nextSignal": "The next useful signal is either a cleaner repair sequence or a calmer reset back toward support instead of more sloppy action."
+  },
+  "finalProse": {
+    "chartStory": "The main event is that momentum has started fading after an extended run, so the structure looks less clean now.",
+    "whyItMatters": "When a move gets stretched and then starts losing quality, traders become more careful because continuation is no longer as straightforward.",
+    "setupLocation": "Price is still above bigger support areas, but the recent action looks more tired and less organised.",
+    "learningPoint": "A strong trend can stay bullish overall while still becoming harder to time well in the short term.",
+    "whatNext": "Watch for the chart to repair itself with calmer action or reset closer to support before trusting it more again."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["momentum", "fading", "extended"],
+    "eventSequenceTokens": ["run", "slowing", "repair"],
+    "traderTokens": ["tired", "repair", "continuation"],
+    "tutorTokens": ["quality", "support", "watch"],
+    "forbiddenTokens": ["rsi", "macd", "entry ready"]
+  }
+}

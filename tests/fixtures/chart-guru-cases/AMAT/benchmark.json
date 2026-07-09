@@ -1,0 +1,113 @@
+{
+  "id": "AMAT_event_first_pullback_20ma",
+  "ticker": "AMAT",
+  "benchmark": {
+    "dominantEvent": "First pullback into 20MA",
+    "eventSequence": [
+      "a strong uptrend came first",
+      "price finally pulled back into the 20-day average",
+      "buyers have started to respond",
+      "follow-through still needs to prove itself"
+    ],
+    "expectedTraderInterpretation": "AMAT is testing the first pullback area inside a strong trend, which is often constructive, but traders still want to see the bounce hold up.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "First pullback into 20MA"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "20MA",
+  "setupStates": {
+    "trendState": "strong",
+    "pullbackZone": "near_20ma",
+    "structureState": "intact",
+    "stabilisationState": "early",
+    "bounceState": "attempt",
+    "volumeState": "supportive"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "constructive_pullback_near_20ma",
+      "label": "Chart Story",
+      "icon": "\ud83d\udfe2",
+      "text": "The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but the bounce still needs confirmation.",
+      "evidenceFactIds": ["trend_context", "support_short_term_average", "bounce_attempt"],
+      "confidence": 0.91,
+      "rankReason": "trend_intact_pullback_into_20ma_support"
+    },
+    "recentStory": {
+      "key": "first_pullback_into_20ma",
+      "bias": "constructive",
+      "toneMode": "deterministic",
+      "confidenceMode": "recent_event_sequence",
+      "trendLabel": "First pullback into the 20-day average",
+      "supportLabel": "Near the 20-day average",
+      "steps": [
+        "strong_uptrend",
+        "first_pullback_to_20ma",
+        "buyers_beginning_to_respond",
+        "follow_through_not_confirmed"
+      ],
+      "stepDetails": [
+        {
+          "key": "first_pullback_to_20ma",
+          "evidenceFactIds": ["support_short_term_average"],
+          "derivedFromSteps": ["first_pullback_to_20ma"],
+          "derivedFromConditions": ["near_20ma"]
+        }
+      ],
+      "evidenceFactIds": ["trend_context", "support_short_term_average", "bounce_attempt"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "AMAT",
+    "timeframe": "1D",
+    "currentPrice": 182.6,
+    "ma20": 181.9,
+    "ma50": 174.8,
+    "ma200": 156.8,
+    "volume": 5100000,
+    "latestCandleOHLC": {
+      "open": 181.2,
+      "high": 183.1,
+      "low": 180.9,
+      "close": 182.6
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "20MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "First pullback into 20MA",
+    "eventSequence": [
+      "a strong uptrend came first",
+      "price finally pulled back into the 20-day average",
+      "buyers have started to respond",
+      "follow-through still needs to prove itself"
+    ],
+    "traderInterpretation": "AMAT is testing the first pullback area inside a strong trend, which is often constructive, but traders still want to see the bounce hold up.",
+    "currentRisk": "If the first response around the 20-day average fades quickly, the pullback can deepen and lose its cleaner timing advantage.",
+    "nextSignal": "The next useful signal is another firm buyer response that holds above the 20-day average instead of giving the bounce back."
+  },
+  "finalProse": {
+    "chartStory": "The main event is AMAT reaching its first pullback into the 20-day average and beginning to bounce from there.",
+    "whyItMatters": "First pullbacks in strong trends often matter because they test whether buyers still want to defend the shorter-term trend.",
+    "setupLocation": "Price is sitting around the 20-day average after the first real dip of the move.",
+    "learningPoint": "Early pullbacks can look attractive, but traders still judge them by the quality of the bounce that follows the touch.",
+    "whatNext": "Watch for buyers to keep holding above the 20-day average and add another stronger close."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["first", "pullback", "20-day"],
+    "eventSequenceTokens": ["uptrend", "pullback", "bounce"],
+    "traderTokens": ["constructive", "bounce", "hold"],
+    "tutorTokens": ["first", "trend", "watch"],
+    "forbiddenTokens": ["rsi", "macd", "entry ready"]
+  }
+}

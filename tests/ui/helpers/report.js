@@ -19,7 +19,21 @@ function writeArtifactJson(filename, payload){
   return target;
 }
 
+function writeArtifactFile(relativePath, content){
+  const artifactsDir = path.resolve(__dirname, '..', '..', '..', 'artifacts');
+  const target = path.join(artifactsDir, relativePath);
+  fs.mkdirSync(path.dirname(target), {recursive:true});
+  fs.writeFileSync(target, content);
+  return target;
+}
+
+function writeArtifactMarkdown(relativePath, content){
+  return writeArtifactFile(relativePath, String(content || ''));
+}
+
 module.exports = {
   writeJsonReport,
-  writeArtifactJson
+  writeArtifactJson,
+  writeArtifactFile,
+  writeArtifactMarkdown
 };

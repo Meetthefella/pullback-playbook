@@ -1,8 +1,9 @@
 const {test, expect} = require('@playwright/test');
 const path = require('path');
 
-const fixtures = require('../../fixtures/chart-guru-event-first-cases.json');
+const {loadBenchmarkCases} = require('../../fixtures/chart-guru-benchmark-library.js');
 const analyseSetupModule = require('../../../netlify/functions/analyse-setup.js');
+const fixtures = loadBenchmarkCases();
 
 function buildDeterministicEventPacketFromFixture(chartCoach = {}){
   const primaryStory = chartCoach.primaryStory || {};
