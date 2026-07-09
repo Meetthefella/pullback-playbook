@@ -16308,6 +16308,23 @@ function watchlistRenderGroups(showExpired = false){
   ];
 }
 
+function trackBucketCountsForRecords(records = [], passCache = null){
+  const list = Array.isArray(records) ? records : [];
+  const counts = {
+    total:list.length,
+    byBucket:{},
+    bySection:{}
+  };
+  list.forEach(record => {
+    const bucket = watchlistPresentationBucketForRecord(record, {passCache});
+    const normalizedBucket = normalizeVisualBucketForPairing(bucket || 'monitor');
+    const sectionKey = watchlistRenderGroupForBucket(normalizedBucket);
+    counts.byBucket[normalizedBucket] = Number(counts.byBucket[normalizedBucket] || 0) + 1;
+    counts.bySection[sectionKey] = Number(counts.bySection[sectionKey] || 0) + 1;
+  });
+  return counts;
+}
+
 function logTrackSectionRender(sectionKey, collapsed, itemCount, renderedCardCount, source = 'watchlist_render'){
   if(!PP_PERF_DEBUG) return;
   console.debug('[PP_PERF] track_section_render', {
