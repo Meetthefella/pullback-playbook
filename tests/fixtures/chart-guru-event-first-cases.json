@@ -1,0 +1,597 @@
+[
+  {
+    "id": "CAT_event_first_failed_bounce",
+    "ticker": "CAT",
+    "marketStatus": "S&P above 50 MA",
+    "scanType": "20MA",
+    "setupStates": {
+      "trendState": "strong",
+      "pullbackZone": "near_20ma",
+      "structureState": "weakening",
+      "stabilisationState": "early",
+      "bounceState": "attempt",
+      "volumeState": "weak"
+    },
+    "deterministicChartCoach": {
+      "primaryStory": {
+        "key": "failed_bounce",
+        "label": "Chart Story",
+        "icon": "📉",
+        "text": "The bounce attempt faded quickly, which suggests sellers are still pushing back.",
+        "evidenceFactIds": ["failed_bounce", "trend_context", "weakness_signal"],
+        "confidence": 0.88,
+        "rankReason": "failed_bounce_is_primary_story"
+      },
+      "recentStory": {
+        "key": "failed_first_bounce_from_20ma",
+        "bias": "cautious",
+        "toneMode": "deterministic",
+        "confidenceMode": "recent_event_sequence",
+        "trendLabel": "First pullback to 20MA failed to bounce cleanly",
+        "supportLabel": "Near the 20-day average",
+        "steps": [
+          "strong_uptrend",
+          "pullback_to_20ma",
+          "bounce_attempt",
+          "failed_bounce",
+          "between_20ma_and_50ma"
+        ],
+        "stepDetails": [
+          {
+            "key": "pullback_to_20ma",
+            "evidenceFactIds": ["support_short_term_average"],
+            "derivedFromSteps": ["pullback_to_20ma"],
+            "derivedFromConditions": ["near_20ma"]
+          },
+          {
+            "key": "failed_bounce",
+            "evidenceFactIds": ["failed_bounce", "weakness_signal"],
+            "derivedFromSteps": ["bounce_attempt", "failed_bounce"],
+            "derivedFromConditions": ["bounce_attempt", "structure_weakening"]
+          }
+        ],
+        "evidenceFactIds": ["failed_bounce", "support_short_term_average", "weakness_signal"]
+      }
+    },
+    "trustedMarketContext": {
+      "ticker": "CAT",
+      "timeframe": "1D",
+      "currentPrice": 41.32,
+      "ma20": 41.8,
+      "ma50": 39.4,
+      "ma200": 33.1,
+      "volume": 2500000,
+      "latestCandleOHLC": {
+        "open": 41.75,
+        "high": 41.9,
+        "low": 41.1,
+        "close": 41.32
+      },
+      "currentAppDerivedTradePlan": {
+        "source": "scanner_estimate",
+        "scanType": "20MA",
+        "entry": null,
+        "stop": null,
+        "firstTarget": null,
+        "status": "missing",
+        "riskStatus": "plan_missing"
+      }
+    },
+    "interpreterResponse": {
+      "dominantEvent": "Failed first bounce from 20MA",
+      "eventSequence": [
+        "strong uptrend",
+        "pullback to the 20-day average",
+        "buyers tried to bounce",
+        "that bounce failed quickly"
+      ],
+      "traderInterpretation": "The first defence attempt at the 20-day average did not hold, so the pullback is still under pressure rather than cleanly resuming.",
+      "currentRisk": "Sellers can keep control if price stays trapped below the 20-day average and starts making lower highs again.",
+      "nextSignal": "The next useful signal is a firmer reclaim of the 20-day average with follow-through instead of another weak bounce."
+    },
+    "finalProse": {
+      "chartStory": "The main event is that CAT tried to bounce from the 20-day average, but that first bounce failed quickly.",
+      "whyItMatters": "A failed first bounce usually means the pullback is not ready to resume higher yet, so traders should treat support as unproven.",
+      "setupLocation": "Price is sitting between the 20-day and 50-day averages after a failed support defence.",
+      "learningPoint": "A touch of the 20-day average matters less than the quality of the first buyer response that follows it.",
+      "whatNext": "Watch for a stronger reclaim of the 20-day average with better follow-through before trusting the pullback again."
+    },
+    "semanticExpectations": {
+      "dominantEventTokens": ["failed", "bounce", "20-day"],
+      "eventSequenceTokens": ["pullback", "bounce", "failed"],
+      "traderTokens": ["pressure", "sellers", "reclaim"],
+      "tutorTokens": ["failed", "support", "watch"],
+      "forbiddenTokens": ["rsi", "macd", "entry ready"]
+    }
+  },
+  {
+    "id": "ALLY_event_first_50ma_test",
+    "ticker": "ALLY",
+    "marketStatus": "S&P above 50 MA",
+    "scanType": "50MA",
+    "setupStates": {
+      "trendState": "strong",
+      "pullbackZone": "near_50ma",
+      "structureState": "intact",
+      "stabilisationState": "none",
+      "bounceState": "none",
+      "volumeState": "neutral"
+    },
+    "deterministicChartCoach": {
+      "primaryStory": {
+        "key": "constructive_pullback_near_50ma",
+        "label": "Chart Story",
+        "icon": "🟢",
+        "text": "The main clue is a constructive pullback into the 50-day average while the wider uptrend is still intact, but buyers still need to defend this support area.",
+        "evidenceFactIds": ["trend_context", "support_medium_term_average"],
+        "confidence": 0.89,
+        "rankReason": "trend_intact_pullback_into_50ma_support"
+      },
+      "recentStory": {
+        "key": "first_test_of_50ma",
+        "bias": "constructive",
+        "toneMode": "deterministic",
+        "confidenceMode": "recent_event_sequence",
+        "trendLabel": "First meaningful test of the 50-day average",
+        "supportLabel": "Near the 50-day average",
+        "steps": [
+          "broader_uptrend_intact",
+          "deeper_pullback_to_50ma",
+          "first_test_of_50ma",
+          "buyers_not_confirmed"
+        ],
+        "stepDetails": [
+          {
+            "key": "first_test_of_50ma",
+            "evidenceFactIds": ["support_medium_term_average"],
+            "derivedFromSteps": ["deeper_pullback_to_50ma", "first_test_of_50ma"],
+            "derivedFromConditions": ["near_50ma"]
+          }
+        ],
+        "evidenceFactIds": ["trend_context", "support_medium_term_average"]
+      }
+    },
+    "trustedMarketContext": {
+      "ticker": "ALLY",
+      "timeframe": "1D",
+      "currentPrice": 37.84,
+      "ma20": 40.25,
+      "ma50": 37.72,
+      "ma200": 31.44,
+      "volume": 4100000,
+      "latestCandleOHLC": {
+        "open": 38.05,
+        "high": 38.3,
+        "low": 37.45,
+        "close": 37.84
+      },
+      "currentAppDerivedTradePlan": {
+        "source": "scanner_estimate",
+        "scanType": "50MA",
+        "entry": null,
+        "stop": null,
+        "firstTarget": null,
+        "status": "missing",
+        "riskStatus": "plan_missing"
+      }
+    },
+    "interpreterResponse": {
+      "dominantEvent": "First meaningful 50MA support test",
+      "eventSequence": [
+        "broader uptrend held up",
+        "price pulled back into the 50-day average",
+        "this is the first meaningful test of that support",
+        "buyers have not confirmed the defence yet"
+      ],
+      "traderInterpretation": "ALLY is testing medium-term support for the first time, so the location is constructive but the chart still needs proof that buyers will actually defend it.",
+      "currentRisk": "If the 50-day average fails to hold cleanly, the pullback can deepen and the constructive context will weaken.",
+      "nextSignal": "The next useful signal is a clear buyer response from the 50-day average rather than price just hovering there."
+    },
+    "finalProse": {
+      "chartStory": "The main event is that ALLY has pulled back into its first meaningful test of the 50-day average.",
+      "whyItMatters": "First tests of medium-term support can become useful pullback spots, but only if buyers actually show up there.",
+      "setupLocation": "Price is sitting right around the 50-day average with support still being tested.",
+      "learningPoint": "A good support area is only the starting point. Traders still need to see the response that comes after price gets there.",
+      "whatNext": "Watch for a clearer buyer reaction from the 50-day average before treating this as a stronger pullback setup."
+    },
+    "semanticExpectations": {
+      "dominantEventTokens": ["50-day", "test", "support"],
+      "eventSequenceTokens": ["pullback", "50-day", "buyers"],
+      "traderTokens": ["constructive", "defend", "buyers"],
+      "tutorTokens": ["support", "buyers", "watch"],
+      "forbiddenTokens": ["rsi", "macd", "entry ready"]
+    }
+  },
+  {
+    "id": "UPS_event_first_constructive_pullback",
+    "ticker": "UPS",
+    "marketStatus": "S&P above 50 MA",
+    "scanType": "20MA",
+    "setupStates": {
+      "trendState": "strong",
+      "pullbackZone": "near_20ma",
+      "structureState": "intact",
+      "stabilisationState": "early",
+      "bounceState": "none",
+      "volumeState": "neutral"
+    },
+    "deterministicChartCoach": {
+      "primaryStory": {
+        "key": "constructive_pullback_near_20ma",
+        "label": "Chart Story",
+        "icon": "🟢",
+        "text": "The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but buyers still need to defend this support area.",
+        "evidenceFactIds": ["trend_context", "support_short_term_average"],
+        "confidence": 0.91,
+        "rankReason": "trend_intact_pullback_into_20ma_support"
+      },
+      "recentStory": {
+        "key": "constructive_pullback_awaiting_confirmation",
+        "bias": "constructive",
+        "toneMode": "deterministic",
+        "confidenceMode": "recent_event_sequence",
+        "trendLabel": "Constructive pullback waiting for confirmation",
+        "supportLabel": "Near the 20-day average",
+        "steps": [
+          "uptrend_intact",
+          "controlled_pullback_to_20ma",
+          "support_area_reached",
+          "buyers_not_confirmed"
+        ],
+        "stepDetails": [
+          {
+            "key": "controlled_pullback_to_20ma",
+            "evidenceFactIds": ["support_short_term_average"],
+            "derivedFromSteps": ["controlled_pullback_to_20ma"],
+            "derivedFromConditions": ["near_20ma"]
+          }
+        ],
+        "evidenceFactIds": ["trend_context", "support_short_term_average"]
+      }
+    },
+    "trustedMarketContext": {
+      "ticker": "UPS",
+      "timeframe": "1D",
+      "currentPrice": 148.4,
+      "ma20": 147.9,
+      "ma50": 142.6,
+      "ma200": 133.3,
+      "volume": 1900000,
+      "latestCandleOHLC": {
+        "open": 149.1,
+        "high": 149.4,
+        "low": 147.8,
+        "close": 148.4
+      },
+      "currentAppDerivedTradePlan": {
+        "source": "scanner_estimate",
+        "scanType": "20MA",
+        "entry": null,
+        "stop": null,
+        "firstTarget": null,
+        "status": "missing",
+        "riskStatus": "plan_missing"
+      }
+    },
+    "interpreterResponse": {
+      "dominantEvent": "Constructive pullback awaiting confirmation",
+      "eventSequence": [
+        "the uptrend stayed intact",
+        "price pulled back in a controlled way toward the 20-day average",
+        "the location is constructive",
+        "buyers still have not confirmed the bounce"
+      ],
+      "traderInterpretation": "UPS is pulling back in a healthy area, but the setup is still early because buyers have not produced convincing follow-through yet.",
+      "currentRisk": "If support around the 20-day average starts failing, this can shift from a constructive pause into a weaker pullback.",
+      "nextSignal": "The next useful signal is a cleaner bounce that holds the 20-day average and starts building follow-through."
+    },
+    "finalProse": {
+      "chartStory": "The main event is a constructive pullback toward the 20-day average, but buyers still have not confirmed the bounce.",
+      "whyItMatters": "Constructive pullbacks can become useful setups, but they are easier to trust after buyers prove they can defend support.",
+      "setupLocation": "Price is sitting near the 20-day average inside an intact uptrend.",
+      "learningPoint": "Good location helps, but traders still care about the response that happens after price reaches support.",
+      "whatNext": "Watch for buyers to hold the 20-day average and add better follow-through before treating the setup as stronger."
+    },
+    "semanticExpectations": {
+      "dominantEventTokens": ["constructive", "pullback", "confirmation"],
+      "eventSequenceTokens": ["uptrend", "pullback", "buyers"],
+      "traderTokens": ["healthy", "follow-through", "support"],
+      "tutorTokens": ["support", "buyers", "watch"],
+      "forbiddenTokens": ["rsi", "macd", "entry ready"]
+    }
+  },
+  {
+    "id": "AMAT_event_first_pullback_20ma",
+    "ticker": "AMAT",
+    "marketStatus": "S&P above 50 MA",
+    "scanType": "20MA",
+    "setupStates": {
+      "trendState": "strong",
+      "pullbackZone": "near_20ma",
+      "structureState": "intact",
+      "stabilisationState": "early",
+      "bounceState": "attempt",
+      "volumeState": "supportive"
+    },
+    "deterministicChartCoach": {
+      "primaryStory": {
+        "key": "constructive_pullback_near_20ma",
+        "label": "Chart Story",
+        "icon": "🟢",
+        "text": "The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but the bounce still needs confirmation.",
+        "evidenceFactIds": ["trend_context", "support_short_term_average", "bounce_attempt"],
+        "confidence": 0.91,
+        "rankReason": "trend_intact_pullback_into_20ma_support"
+      },
+      "recentStory": {
+        "key": "first_pullback_into_20ma",
+        "bias": "constructive",
+        "toneMode": "deterministic",
+        "confidenceMode": "recent_event_sequence",
+        "trendLabel": "First pullback into the 20-day average",
+        "supportLabel": "Near the 20-day average",
+        "steps": [
+          "strong_uptrend",
+          "first_pullback_to_20ma",
+          "buyers_beginning_to_respond",
+          "follow_through_not_confirmed"
+        ],
+        "stepDetails": [
+          {
+            "key": "first_pullback_to_20ma",
+            "evidenceFactIds": ["support_short_term_average"],
+            "derivedFromSteps": ["first_pullback_to_20ma"],
+            "derivedFromConditions": ["near_20ma"]
+          }
+        ],
+        "evidenceFactIds": ["trend_context", "support_short_term_average", "bounce_attempt"]
+      }
+    },
+    "trustedMarketContext": {
+      "ticker": "AMAT",
+      "timeframe": "1D",
+      "currentPrice": 182.6,
+      "ma20": 181.9,
+      "ma50": 174.8,
+      "ma200": 156.8,
+      "volume": 5100000,
+      "latestCandleOHLC": {
+        "open": 181.2,
+        "high": 183.1,
+        "low": 180.9,
+        "close": 182.6
+      },
+      "currentAppDerivedTradePlan": {
+        "source": "scanner_estimate",
+        "scanType": "20MA",
+        "entry": null,
+        "stop": null,
+        "firstTarget": null,
+        "status": "missing",
+        "riskStatus": "plan_missing"
+      }
+    },
+    "interpreterResponse": {
+      "dominantEvent": "First pullback into 20MA",
+      "eventSequence": [
+        "a strong uptrend came first",
+        "price finally pulled back into the 20-day average",
+        "buyers have started to respond",
+        "follow-through still needs to prove itself"
+      ],
+      "traderInterpretation": "AMAT is testing the first pullback area inside a strong trend, which is often constructive, but traders still want to see the bounce hold up.",
+      "currentRisk": "If the first response around the 20-day average fades quickly, the pullback can deepen and lose its cleaner timing advantage.",
+      "nextSignal": "The next useful signal is another firm buyer response that holds above the 20-day average instead of giving the bounce back."
+    },
+    "finalProse": {
+      "chartStory": "The main event is AMAT reaching its first pullback into the 20-day average and beginning to bounce from there.",
+      "whyItMatters": "First pullbacks in strong trends often matter because they test whether buyers still want to defend the shorter-term trend.",
+      "setupLocation": "Price is sitting around the 20-day average after the first real dip of the move.",
+      "learningPoint": "Early pullbacks can look attractive, but traders still judge them by the quality of the bounce that follows the touch.",
+      "whatNext": "Watch for buyers to keep holding above the 20-day average and add another stronger close."
+    },
+    "semanticExpectations": {
+      "dominantEventTokens": ["first", "pullback", "20-day"],
+      "eventSequenceTokens": ["uptrend", "pullback", "bounce"],
+      "traderTokens": ["constructive", "bounce", "hold"],
+      "tutorTokens": ["first", "trend", "watch"],
+      "forbiddenTokens": ["rsi", "macd", "entry ready"]
+    }
+  },
+  {
+    "id": "GEV_event_first_early_constructive",
+    "ticker": "GEV",
+    "marketStatus": "S&P above 50 MA",
+    "scanType": "20MA",
+    "setupStates": {
+      "trendState": "strong",
+      "pullbackZone": "near_20ma",
+      "structureState": "intact",
+      "stabilisationState": "early",
+      "bounceState": "none",
+      "volumeState": "neutral"
+    },
+    "deterministicChartCoach": {
+      "primaryStory": {
+        "key": "constructive_pullback_near_20ma",
+        "label": "Chart Story",
+        "icon": "🟢",
+        "text": "The main clue is a constructive pullback into the rising 20-day average while the larger trend still looks intact, but buyers still need to defend this support area.",
+        "evidenceFactIds": ["trend_context", "support_short_term_average"],
+        "confidence": 0.9,
+        "rankReason": "trend_intact_pullback_into_20ma_support"
+      },
+      "recentStory": {
+        "key": "early_constructive_pullback",
+        "bias": "constructive",
+        "toneMode": "deterministic",
+        "confidenceMode": "recent_event_sequence",
+        "trendLabel": "Early constructive pullback",
+        "supportLabel": "Near the 20-day average",
+        "steps": [
+          "constructive_trend_backdrop",
+          "early_pullback_starting",
+          "support_not_fully_tested",
+          "buyers_not_fully_shown"
+        ],
+        "stepDetails": [
+          {
+            "key": "early_pullback_starting",
+            "evidenceFactIds": ["trend_context"],
+            "derivedFromSteps": ["early_pullback_starting"],
+            "derivedFromConditions": ["near_20ma"]
+          }
+        ],
+        "evidenceFactIds": ["trend_context", "support_short_term_average"]
+      }
+    },
+    "trustedMarketContext": {
+      "ticker": "GEV",
+      "timeframe": "1D",
+      "currentPrice": 309.4,
+      "ma20": 304.8,
+      "ma50": 291.2,
+      "ma200": 248.6,
+      "volume": 1200000,
+      "latestCandleOHLC": {
+        "open": 311.5,
+        "high": 312.8,
+        "low": 307.9,
+        "close": 309.4
+      },
+      "currentAppDerivedTradePlan": {
+        "source": "scanner_estimate",
+        "scanType": "20MA",
+        "entry": null,
+        "stop": null,
+        "firstTarget": null,
+        "status": "missing",
+        "riskStatus": "plan_missing"
+      }
+    },
+    "interpreterResponse": {
+      "dominantEvent": "Early constructive pullback",
+      "eventSequence": [
+        "the broader trend still looks constructive",
+        "price has only started pulling back",
+        "support is nearby but not fully tested yet",
+        "buyers still need to prove themselves"
+      ],
+      "traderInterpretation": "GEV is in an early-stage pullback that still looks constructive, but the setup is not mature because buyers have not yet shown a meaningful defence.",
+      "currentRisk": "If the pullback keeps drifting without a buyer response, the setup can lose timing quality before it becomes actionable.",
+      "nextSignal": "The next useful signal is a cleaner support test followed by a visible buyer response instead of more aimless drift."
+    },
+    "finalProse": {
+      "chartStory": "The main event is an early constructive pullback, but buyers have not shown a real defence yet.",
+      "whyItMatters": "Early pullbacks can become good setups later, but right now the chart is still in the stage where support needs to prove itself.",
+      "setupLocation": "Price is easing back toward support inside a constructive trend, but the test is still developing.",
+      "learningPoint": "A chart can be constructive and still too early at the same time. Traders care about both location and timing.",
+      "whatNext": "Watch for a cleaner support test and a more convincing buyer response before expecting the setup to improve."
+    },
+    "semanticExpectations": {
+      "dominantEventTokens": ["early", "constructive", "pullback"],
+      "eventSequenceTokens": ["constructive", "support", "buyers"],
+      "traderTokens": ["early-stage", "defence", "timing"],
+      "tutorTokens": ["early", "support", "watch"],
+      "forbiddenTokens": ["rsi", "macd", "entry ready"]
+    }
+  },
+  {
+    "id": "VRT_event_first_momentum_fading",
+    "ticker": "VRT",
+    "marketStatus": "S&P above 50 MA",
+    "scanType": "20MA",
+    "setupStates": {
+      "trendState": "weakening",
+      "pullbackZone": "off_level",
+      "structureState": "weakening",
+      "stabilisationState": "none",
+      "bounceState": "failed",
+      "volumeState": "neutral"
+    },
+    "deterministicChartCoach": {
+      "primaryStory": {
+        "key": "extended_after_run",
+        "label": "Chart Story",
+        "icon": "📈",
+        "text": "The trend is still strong, but price is stretched after the run and would look healthier after a calmer pullback.",
+        "evidenceFactIds": ["trend_context", "price_accelerating_higher"],
+        "confidence": 0.82,
+        "rankReason": "trend_is_extended_above_support"
+      },
+      "recentStory": {
+        "key": "momentum_fading_after_extension",
+        "bias": "cautious",
+        "toneMode": "deterministic",
+        "confidenceMode": "recent_event_sequence",
+        "trendLabel": "Momentum fading after extension",
+        "supportLabel": "Above nearby support but losing urgency",
+        "steps": [
+          "prior_run_became_extended",
+          "upside_momentum_slowed",
+          "pullbacks_got_messier",
+          "structure_needs_repair"
+        ],
+        "stepDetails": [
+          {
+            "key": "upside_momentum_slowed",
+            "evidenceFactIds": ["price_accelerating_higher"],
+            "derivedFromSteps": ["prior_run_became_extended", "upside_momentum_slowed"],
+            "derivedFromConditions": ["off_level"]
+          }
+        ],
+        "evidenceFactIds": ["trend_context", "price_accelerating_higher", "weakness_signal"]
+      }
+    },
+    "trustedMarketContext": {
+      "ticker": "VRT",
+      "timeframe": "1D",
+      "currentPrice": 96.1,
+      "ma20": 94.8,
+      "ma50": 88.2,
+      "ma200": 71.4,
+      "volume": 3500000,
+      "latestCandleOHLC": {
+        "open": 97.3,
+        "high": 98.0,
+        "low": 95.7,
+        "close": 96.1
+      },
+      "currentAppDerivedTradePlan": {
+        "source": "scanner_estimate",
+        "scanType": "20MA",
+        "entry": null,
+        "stop": null,
+        "firstTarget": null,
+        "status": "missing",
+        "riskStatus": "plan_missing"
+      }
+    },
+    "interpreterResponse": {
+      "dominantEvent": "Momentum fading after extension",
+      "eventSequence": [
+        "the trend had run hard first",
+        "momentum started slowing down",
+        "recent pullbacks became messier",
+        "the structure now needs repair instead of immediate continuation"
+      ],
+      "traderInterpretation": "VRT is no longer in the clean acceleration phase. The move looks more tired now, so traders should think in terms of repair risk rather than easy continuation.",
+      "currentRisk": "If the chart keeps losing momentum without rebuilding structure, late buyers can get trapped in a weakening move.",
+      "nextSignal": "The next useful signal is either a cleaner repair sequence or a calmer reset back toward support instead of more sloppy action."
+    },
+    "finalProse": {
+      "chartStory": "The main event is that momentum has started fading after an extended run, so the structure looks less clean now.",
+      "whyItMatters": "When a move gets stretched and then starts losing quality, traders become more careful because continuation is no longer as straightforward.",
+      "setupLocation": "Price is still above bigger support areas, but the recent action looks more tired and less organised.",
+      "learningPoint": "A strong trend can stay bullish overall while still becoming harder to time well in the short term.",
+      "whatNext": "Watch for the chart to repair itself with calmer action or reset closer to support before trusting it more again."
+    },
+    "semanticExpectations": {
+      "dominantEventTokens": ["momentum", "fading", "extended"],
+      "eventSequenceTokens": ["run", "slowing", "repair"],
+      "traderTokens": ["tired", "repair", "continuation"],
+      "tutorTokens": ["quality", "support", "watch"],
+      "forbiddenTokens": ["rsi", "macd", "entry ready"]
+    }
+  }
+]

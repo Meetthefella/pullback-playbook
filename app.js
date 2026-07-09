@@ -34603,6 +34603,12 @@ function buildAnalysisPayload(card){
     tradePlan,
     derivedStates
   });
+  const deterministicAuthority = buildChartGuruDeterministicAuthorityPayload(safeCard, {
+    scanType,
+    tradePlan,
+    derivedStates,
+    trustedMarketContext
+  });
   return {
     ticker:safeCard.ticker,
     marketStatus:state.marketStatus,
@@ -34627,6 +34633,7 @@ function buildAnalysisPayload(card){
     stop:safeCard.stop || '',
     target:safeCard.target || '',
     trustedMarketContext,
+    deterministicEventPacket:deterministicAuthority.eventPacket,
     marketData:safeCard.marketData ? {
       price:safeCard.price,
       sma20:safeCard.sma20,
@@ -34643,6 +34650,136 @@ function buildAnalysisPayload(card){
       companyName:safeCard.companyName,
       exchange:safeCard.exchange
     } : null
+  };
+}
+
+const CHART_GURU_EVENT_LABELS = {
+  constructive_pullback_near_20ma:'First pullback to 20MA',
+  bounce_confirmation_pending:'Successful 20MA defence',
+  failed_bounce:'Failed first bounce from 20MA',
+  pullback_still_repairing:'Pullback drifting below 20MA',
+  constructive_pullback_near_50ma:'First test of 50MA',
+  off_level_wait_for_clearer_support:'Deep pullback into 50MA',
+  structure_breaking_down:'Support breakdown',
+  strong_upside_acceleration:'Trend acceleration',
+  sharp_selloff:'Trend damage with sellers in control',
+  extended_after_run:'Momentum fading after extension',
+  bounce_attempt:'Rebound attempt without follow-through',
+  long_lower_wick_support_test:'Structure repair in progress',
+  long_upper_wick_rejection:'Distribution after extension',
+  doji_indecision:'Consolidation after advance',
+  trend_climbing:'Breakout continuation',
+  trend_mixed:'Range-bound pause near highs'
+};
+
+function chartGuruDominantEventLabel(storyKey = ''){
+  const normalized = String(storyKey || '').trim().toLowerCase();
+  return CHART_GURU_EVENT_LABELS[normalized] || 'Market event in progress';
+}
+
+function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
+  const primaryStory = chartCoach && chartCoach.primaryStory && typeof chartCoach.primaryStory === 'object'
+    ? chartCoach.primaryStory
+    : {};
+  const recentStory = chartCoach && chartCoach.recentStory && typeof chartCoach.recentStory === 'object'
+    ? chartCoach.recentStory
+    : {};
+  const dominantEventKey = String(primaryStory.key || recentStory.key || '').trim();
+  const dominantEventLabel = chartGuruDominantEventLabel(dominantEventKey);
+  const eventSequence = Array.isArray(recentStory.steps)
+    ? recentStory.steps.map(step => String(step || '').trim()).filter(Boolean)
+    : [];
+  const evidenceFactIds = [...new Set([
+    ...(Array.isArray(primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds : []),
+    ...(Array.isArray(recentStory.evidenceFactIds) ? recentStory.evidenceFactIds : [])
+  ].map(id => String(id || '').trim()).filter(Boolean))];
+  return {
+    dominantEventKey,
+    dominantEventLabel,
+    dominantEvent:String(primaryStory.text || '').trim(),
+    eventSequence,
+    evidenceFactIds,
+    confidence:Number.isFinite(Number(primaryStory.confidence)) ? Number(primaryStory.confidence) : null,
+    rankReason:String(primaryStory.rankReason || '').trim(),
+    primaryStoryKey:String(primaryStory.key || '').trim(),
+    primaryStoryLabel:String(primaryStory.label || '').trim(),
+    primaryStoryIcon:String(primaryStory.icon || '').trim(),
+    recentStoryKey:String(recentStory.key || '').trim(),
+    recentStoryBias:String(recentStory.bias || '').trim(),
+    recentStoryToneMode:String(recentStory.toneMode || '').trim(),
+    recentStoryConfidenceMode:String(recentStory.confidenceMode || '').trim(),
+    recentStoryTrendLabel:String(recentStory.trendLabel || '').trim(),
+    recentStorySupportLabel:String(recentStory.supportLabel || '').trim(),
+    stepDetails:Array.isArray(recentStory.stepDetails)
+      ? recentStory.stepDetails.map(detail => ({
+        key:String(detail && detail.key || '').trim(),
+        evidenceFactIds:Array.isArray(detail && detail.evidenceFactIds)
+          ? detail.evidenceFactIds.map(id => String(id || '').trim()).filter(Boolean)
+          : [],
+        derivedFromSteps:Array.isArray(detail && detail.derivedFromSteps)
+          ? detail.derivedFromSteps.map(step => String(step || '').trim()).filter(Boolean)
+          : [],
+        derivedFromConditions:Array.isArray(detail && detail.derivedFromConditions)
+          ? detail.derivedFromConditions.map(condition => String(condition || '').trim()).filter(Boolean)
+          : []
+      })).filter(detail => detail.key)
+      : []
+  };
+}
+
+function buildChartGuruDeterministicAuthorityPayload(card, options = {}){
+  const safeCard = normalizeCard(card);
+  const marketData = safeCard.marketData && typeof safeCard.marketData === 'object' ? safeCard.marketData : {};
+  const trustedMarketContext = options.trustedMarketContext && typeof options.trustedMarketContext === 'object'
+    ? options.trustedMarketContext
+    : buildTrustedMarketContextPayload(safeCard, options);
+  const canonicalValues = {
+    ticker:String(trustedMarketContext.ticker || safeCard.ticker || '').trim().toUpperCase(),
+    timeframe:String(trustedMarketContext.timeframe || '1D').trim(),
+    price:numericOrNull(trustedMarketContext.currentPrice),
+    ma20:numericOrNull(trustedMarketContext.ma20),
+    ma50:numericOrNull(trustedMarketContext.ma50),
+    ma200:numericOrNull(trustedMarketContext.ma200),
+    volume:numericOrNull(trustedMarketContext.volume),
+    latestCandleOHLC:trustedMarketContext.latestCandleOHLC && typeof trustedMarketContext.latestCandleOHLC === 'object'
+      ? {...trustedMarketContext.latestCandleOHLC}
+      : null,
+    currentAppDerivedTradePlan:trustedMarketContext.currentAppDerivedTradePlan && typeof trustedMarketContext.currentAppDerivedTradePlan === 'object'
+      ? {...trustedMarketContext.currentAppDerivedTradePlan}
+      : null
+  };
+  const record = {
+    ...safeCard,
+    marketStatus:state.marketStatus,
+    marketData:{
+      ...marketData,
+      price:numericOrNull(marketData.price ?? safeCard.price),
+      ma20:numericOrNull(marketData.ma20 ?? marketData.sma20 ?? safeCard.sma20),
+      ma50:numericOrNull(marketData.ma50 ?? marketData.sma50 ?? safeCard.sma50),
+      ma200:numericOrNull(marketData.ma200 ?? marketData.sma200 ?? safeCard.sma200),
+      volume:numericOrNull(marketData.volume ?? safeCard.volume),
+      avgVolume30d:numericOrNull(marketData.avgVolume30d ?? marketData.avgVolume ?? safeCard.avgVolume30d),
+      history:Array.isArray(marketData.history) ? marketData.history.slice() : []
+    }
+  };
+  const derivedStates = options.derivedStates && typeof options.derivedStates === 'object' ? options.derivedStates : {};
+  const deterministicChartCoach = buildDeterministicChartCoach(record, {
+    marketStatus:state.marketStatus,
+    trustedMarketContext,
+    canonicalValues
+  }, {
+    derivedStates:{
+      structureState:String(derivedStates.structure_state || '').trim(),
+      pullbackZone:String(derivedStates.pullback_zone || '').trim(),
+      bounceState:String(derivedStates.bounce_state || '').trim(),
+      volumeState:String(derivedStates.volume_state || '').trim(),
+      setupLocationState:'',
+      structureEligibility:'',
+      priceabilityState:''
+    }
+  });
+  return {
+    eventPacket:buildDeterministicEventPacketFromChartCoach(deterministicChartCoach)
   };
 }
 

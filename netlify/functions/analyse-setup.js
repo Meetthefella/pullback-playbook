@@ -13,10 +13,10 @@ const CHART_GURU_PRIMARY_STORY_ICON = '🧭';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v1';
 const INTERPRETATION_REQUIRED_FIELDS = [
   'dominantEvent',
-  'whatChanged',
-  'traderRead',
-  'riskToWatch',
-  'nextUsefulSignal'
+  'eventSequence',
+  'traderInterpretation',
+  'currentRisk',
+  'nextSignal'
 ];
 const FINAL_PROSE_REQUIRED_FIELDS = [
   'chartStory',
@@ -31,6 +31,14 @@ const TRADER_INTERPRETATION_SCHEMA = {
   required:INTERPRETATION_REQUIRED_FIELDS,
   properties:{
     dominantEvent:{type:'string'},
+    dominantEventKey:{type:'string'},
+    eventSequence:{
+      type:'array',
+      items:{type:'string'}
+    },
+    traderInterpretation:{type:'string'},
+    currentRisk:{type:'string'},
+    nextSignal:{type:'string'},
     whatChanged:{type:'string'},
     traderRead:{type:'string'},
     riskToWatch:{type:'string'},
@@ -299,14 +307,122 @@ function collectAllowedNumericMentions(value, target = new Set()){
   return target;
 }
 
+function normalizeStringSequence(value){
+  return Array.isArray(value) ? value.map(item => String(item || '').trim()).filter(Boolean) : [];
+}
+
+const CHART_GURU_EVENT_LABELS = {
+  constructive_pullback_near_20ma:'First pullback to 20MA',
+  bounce_confirmation_pending:'Successful 20MA defence',
+  failed_bounce:'Failed first bounce from 20MA',
+  pullback_still_repairing:'Pullback drifting below 20MA',
+  constructive_pullback_near_50ma:'First test of 50MA',
+  off_level_wait_for_clearer_support:'Deep pullback into 50MA',
+  structure_breaking_down:'Support breakdown',
+  strong_upside_acceleration:'Trend acceleration',
+  sharp_selloff:'Trend damage with sellers in control',
+  extended_after_run:'Momentum fading after extension',
+  bounce_attempt:'Rebound attempt without follow-through',
+  long_lower_wick_support_test:'Structure repair in progress',
+  long_upper_wick_rejection:'Distribution after extension',
+  doji_indecision:'Consolidation after advance',
+  trend_climbing:'Breakout continuation',
+  trend_mixed:'Range-bound pause near highs'
+};
+
+function chartGuruDominantEventLabel(storyKey = ''){
+  const normalized = String(storyKey || '').trim().toLowerCase();
+  return CHART_GURU_EVENT_LABELS[normalized] || 'Market event in progress';
+}
+
+function normalizeDeterministicEventPacket(value = {}){
+  const source = safeObject(value);
+  const dominantEventKey = normaliseString(source.dominantEventKey || source.primaryStoryKey, '');
+  const dominantEventLabel = normaliseString(source.dominantEventLabel, '') || chartGuruDominantEventLabel(dominantEventKey);
+  return {
+    dominantEventKey,
+    dominantEventLabel,
+    dominantEvent:normaliseString(source.dominantEvent, ''),
+    eventSequence:normalizeStringSequence(source.eventSequence),
+    evidenceFactIds:normaliseStringArray(source.evidenceFactIds),
+    confidence:normaliseNumber(source.confidence),
+    rankReason:normaliseString(source.rankReason, ''),
+    primaryStoryKey:normaliseString(source.primaryStoryKey || dominantEventKey, ''),
+    primaryStoryLabel:normaliseString(source.primaryStoryLabel, ''),
+    primaryStoryIcon:normaliseString(source.primaryStoryIcon, ''),
+    recentStoryKey:normaliseString(source.recentStoryKey, ''),
+    recentStoryBias:normaliseString(source.recentStoryBias, ''),
+    recentStoryToneMode:normaliseString(source.recentStoryToneMode, ''),
+    recentStoryConfidenceMode:normaliseString(source.recentStoryConfidenceMode, ''),
+    recentStoryTrendLabel:normaliseString(source.recentStoryTrendLabel || dominantEventLabel, ''),
+    recentStorySupportLabel:normaliseString(source.recentStorySupportLabel, ''),
+    stepDetails:Array.isArray(source.stepDetails)
+      ? source.stepDetails.map(detail => {
+        const safe = safeObject(detail);
+        return {
+          key:normaliseString(safe.key, ''),
+          evidenceFactIds:normaliseStringArray(safe.evidenceFactIds),
+          derivedFromSteps:normaliseStringArray(safe.derivedFromSteps),
+          derivedFromConditions:normaliseStringArray(safe.derivedFromConditions)
+        };
+      }).filter(detail => detail.key)
+      : []
+  };
+}
+
+function normalizeTraderInterpretation(value = {}, eventPacket = {}){
+  const source = safeObject(value);
+  const deterministicPacket = normalizeDeterministicEventPacket(eventPacket);
+  const eventSequence = normalizeStringSequence(source.eventSequence);
+  const traderInterpretation = normaliseString(source.traderInterpretation, '') || normaliseString(source.traderRead, '');
+  const currentRisk = normaliseString(source.currentRisk, '') || normaliseString(source.riskToWatch, '');
+  const nextSignal = normaliseString(source.nextSignal, '') || normaliseString(source.nextUsefulSignal, '');
+  return {
+    dominantEvent:normaliseString(source.dominantEvent, '') || deterministicPacket.dominantEventLabel,
+    dominantEventKey:normaliseString(source.dominantEventKey, '') || deterministicPacket.dominantEventKey,
+    eventSequence:eventSequence.length ? eventSequence : deterministicPacket.eventSequence,
+    traderInterpretation,
+    currentRisk,
+    nextSignal,
+    whatChanged:normaliseString(source.whatChanged, '') || ((eventSequence.length ? eventSequence : deterministicPacket.eventSequence).join(' -> ')),
+    traderRead:normaliseString(source.traderRead, '') || traderInterpretation,
+    riskToWatch:normaliseString(source.riskToWatch, '') || currentRisk,
+    nextUsefulSignal:normaliseString(source.nextUsefulSignal, '') || nextSignal
+  };
+}
+
+function buildChartGuruNarrationDiagnostics(value = {}, eventPacket = {}){
+  const interpretation = normalizeTraderInterpretation(value, eventPacket);
+  return {
+    dominantEvent:interpretation.dominantEvent,
+    eventSequence:interpretation.eventSequence.slice(),
+    traderInterpretation:interpretation.traderInterpretation,
+    currentRisk:interpretation.currentRisk,
+    nextSignal:interpretation.nextSignal
+  };
+}
+
 function buildProductionStructuredFacts(payload = {}, analysis = {}){
-  const trustedMarketContext = normalizeObject(analysis.trustedMarketContext || payload.trustedMarketContext);
-  const canonicalValues = normalizeObject(analysis.canonicalValues);
+  const trustedMarketContext = normalizeObject(payload.trustedMarketContext || analysis.trustedMarketContext);
+  const canonicalValues = normalizeObject({
+    ticker:trustedMarketContext.ticker,
+    timeframe:trustedMarketContext.timeframe,
+    price:trustedMarketContext.currentPrice,
+    ma20:trustedMarketContext.ma20,
+    ma50:trustedMarketContext.ma50,
+    ma200:trustedMarketContext.ma200,
+    volume:trustedMarketContext.volume,
+    latestCandleOHLC:trustedMarketContext.latestCandleOHLC,
+    currentAppDerivedTradePlan:trustedMarketContext.currentAppDerivedTradePlan
+  });
+  const deterministicEventPacket = normalizeDeterministicEventPacket(payload.deterministicEventPacket);
   return {
     ticker:normaliseString(payload.ticker, ''),
     marketStatus:normaliseString(payload.marketStatus, ''),
     scanType:normaliseString(payload.scanType, ''),
     notes:normaliseString(payload.notes, ''),
+    accountSize:normaliseNumber(payload.accountSize),
+    maxRisk:normaliseNumber(payload.maxRisk),
     setupStates:{
       trendState:normaliseString(payload.trendState, ''),
       pullbackZone:normaliseString(payload.pullbackZone, ''),
@@ -320,12 +436,17 @@ function buildProductionStructuredFacts(payload = {}, analysis = {}){
     },
     trustedMarketContext,
     canonicalValues,
-    candleStructureAnalysis:normalizeObject(analysis.candleStructureAnalysis),
-    tradePlanCommentary:normalizeObject(analysis.tradePlanCommentary),
-    constructiveEvidence:normaliseStringArray(analysis.constructive_evidence),
-    riskEvidence:normaliseStringArray(analysis.risk_evidence),
-    whatNeedsToImprove:normaliseStringArray(analysis.what_needs_to_improve),
-    confidenceWarnings:normaliseStringArray(analysis.confidenceWarnings)
+    deterministicEventPacket,
+    eventSequence:deterministicEventPacket.eventSequence,
+    deterministicEvidence:{
+      evidenceFactIds:deterministicEventPacket.evidenceFactIds.slice(),
+      stepDetails:deterministicEventPacket.stepDetails.map(detail => ({
+        key:detail.key,
+        evidenceFactIds:detail.evidenceFactIds.slice(),
+        derivedFromSteps:detail.derivedFromSteps.slice(),
+        derivedFromConditions:detail.derivedFromConditions.slice()
+      }))
+    }
   };
 }
 
@@ -366,8 +487,10 @@ function buildProductionAnalysisInstructionLines(){
 function buildProductionChartGuruInterpretationInstructions(){
   return [
     'You are an internal trader interpreter for Chart Guru.',
-    'Read the structured chart facts and explain what just happened in trader terms before any beginner-friendly narration is written.',
-    'Stay concise, factual, and sequence-aware.',
+    'Read deterministic chart evidence plus the deterministic event packet and explain what just happened in trader terms before any beginner-friendly narration is written.',
+    'Treat the deterministic event packet as the only event-classification authority.',
+    'Stay concise, factual, sequence-aware, and trader-focused.',
+    'Do not write beginner prose.',
     'Do not invent prices, new indicators, or unsupported chart facts.',
     'Return only the JSON fields defined by the schema.'
   ].join('\n');
@@ -385,31 +508,24 @@ function buildProductionChartGuruInterpretationPrompt(structuredFacts, originalP
 
 function buildProductionChartGuruFinalInstructions(){
   return [
-    'Analyse a Quality Pullback chart as Chart Guru, an observation-only educational feature.',
+    'You are the Chart Guru tutor layer.',
     'Use plain English for a novice retail trader.',
-    'Be honest about uncertainty.',
-    'Do not invent chart details that are not provided.',
-    'Do not issue buy/sell advice.',
-    'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
-    'The deterministic app resolver will decide final state.',
-    'The app has already determined the setup context and story order before you respond.',
-    'Use the supplied chart evidence to explain the app-determined primary story first, then supporting evidence, then one learning point, then What next?.',
-    'Keep the language plain-English and beginner-friendly.',
+    'Translate the supplied trader interpretation into beginner-friendly teaching copy.',
+    'Do not inspect raw chart evidence.',
+    'Do not classify the event or invent new chart facts.',
+    'Do not issue buy/sell advice or app verdicts.',
     'Return exactly one JSON object.',
     'Return only these fields as JSON strings: chartStory, whyItMatters, setupLocation, learningPoint, whatNext.',
     'If a field is unknown, return an empty string.'
   ].join('\n');
 }
 
-function buildProductionChartGuruFinalPrompt(structuredFacts, traderInterpretation, originalPrompt = ''){
+function buildProductionChartGuruFinalPrompt(traderInterpretation, originalPrompt = ''){
   return [
     String(originalPrompt || '').trim(),
     '',
-    'Internal trader interpretation for the final Chart Guru prose:',
-    JSON.stringify(safeObject(traderInterpretation), null, 2),
-    '',
-    'Structured chart facts for the same chart review:',
-    JSON.stringify(safeObject(structuredFacts), null, 2)
+    'Trader interpretation to translate into Chart Guru teaching prose:',
+    JSON.stringify(safeObject(traderInterpretation), null, 2)
   ].join('\n');
 }
 
@@ -435,14 +551,21 @@ function normalizeRecentStoryStep(step = ''){
 
 function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, structuredFacts = {}){
   const prose = normalizeFlatStringFields(finalResponse, FINAL_PROSE_REQUIRED_FIELDS);
-  const interpretation = normalizeFlatStringFields(traderInterpretation, INTERPRETATION_REQUIRED_FIELDS);
   const facts = safeObject(structuredFacts);
-  const eventSequence = Array.isArray(facts.eventSequence)
-    ? facts.eventSequence.map(step => normalizeRecentStoryStep(step)).filter(Boolean)
-    : [];
+  const eventPacket = normalizeDeterministicEventPacket(facts.deterministicEventPacket || facts.eventPacket);
+  const interpretation = normalizeTraderInterpretation(traderInterpretation, eventPacket);
+  const eventSequence = interpretation.eventSequence.map(step => normalizeRecentStoryStep(step)).filter(Boolean);
+  const evidenceFactIds = [...new Set([
+    'openai_two_step_narrative',
+    ...eventPacket.evidenceFactIds
+  ].map(id => String(id || '').trim()).filter(Boolean))];
+  const primaryStoryKey = String(eventPacket.primaryStoryKey || eventPacket.dominantEventKey || 'openai_two_step_primary_story').trim();
+  const primaryStoryLabel = String(eventPacket.primaryStoryLabel || 'Chart Story').trim();
+  const primaryStoryIcon = String(eventPacket.primaryStoryIcon || CHART_GURU_PRIMARY_STORY_ICON).trim();
+  const recentStoryKey = String(eventPacket.recentStoryKey || 'openai_two_step_narrative').trim();
   const storyStepDetails = eventSequence.map(step => ({
     key:step,
-    evidenceFactIds:['openai_two_step_narrative'],
+    evidenceFactIds:evidenceFactIds.slice(),
     derivedFromSteps:[step],
     derivedFromConditions:[]
   }));
@@ -456,24 +579,24 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
   const summaryText = sections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n');
   return {
     primaryStory:{
-      key:'openai_two_step_primary_story',
-      label:'Chart Story',
-      icon:CHART_GURU_PRIMARY_STORY_ICON,
+      key:primaryStoryKey,
+      label:primaryStoryLabel,
+      icon:primaryStoryIcon,
       text:prose.chartStory,
-      evidenceFactIds:['openai_two_step_narrative'],
-      confidence:0.82,
-      rankReason:interpretation.dominantEvent || interpretation.whatChanged || 'two_step_chart_guru'
+      evidenceFactIds:evidenceFactIds.slice(),
+      confidence:Number.isFinite(Number(eventPacket.confidence)) ? Number(eventPacket.confidence) : 0.82,
+      rankReason:eventPacket.rankReason || interpretation.dominantEvent || interpretation.whatChanged || 'two_step_chart_guru'
     },
     recentStory:{
-      key:'openai_two_step_narrative',
-      bias:'educational',
-      toneMode:'openai_two_step',
-      confidenceMode:'structured_facts_plus_trader_interpretation',
-      trendLabel:String(interpretation.dominantEvent || '').trim(),
-      supportLabel:String(prose.setupLocation || '').trim(),
+      key:recentStoryKey,
+      bias:String(eventPacket.recentStoryBias || 'educational').trim(),
+      toneMode:String(eventPacket.recentStoryToneMode || 'openai_two_step').trim(),
+      confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'deterministic_event_packet_plus_trader_interpretation').trim(),
+      trendLabel:String(interpretation.dominantEvent || eventPacket.recentStoryTrendLabel || '').trim(),
+      supportLabel:String(prose.setupLocation || eventPacket.recentStorySupportLabel || '').trim(),
       steps:eventSequence,
       stepDetails:storyStepDetails,
-      evidenceFactIds:['openai_two_step_narrative']
+      evidenceFactIds:evidenceFactIds.slice()
     },
     sections:sections.map(section => ({
       ...section,
@@ -482,7 +605,7 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
     summaryText,
     source:'openai_two_step_chart_guru',
     renderVersion:CHART_GURU_RENDER_VERSION,
-    explanationFacts:['openai_two_step_narrative'],
+    explanationFacts:evidenceFactIds.slice(),
     diagnostics:{
       priorityOrder:sections.map(section => String(section.key || '').trim()),
       sectionConfidence:sections.map(section => ({
@@ -491,10 +614,10 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
         teachingFocus:section.teachingFocus === true
       })),
       storyContract:{
-        primaryStoryKey:'openai_two_step_primary_story',
-        storyKey:'openai_two_step_narrative',
-        toneMode:'openai_two_step',
-        confidenceMode:'structured_facts_plus_trader_interpretation',
+        primaryStoryKey,
+        storyKey:recentStoryKey,
+        toneMode:String(eventPacket.recentStoryToneMode || 'openai_two_step').trim(),
+        confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'deterministic_event_packet_plus_trader_interpretation').trim(),
         steps:eventSequence.slice(),
         stepDetails:storyStepDetails.map(detail => ({
           key:detail.key,
@@ -510,7 +633,8 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
 function mergeTwoStepNarrativeIntoAnalysis(analysis = {}, finalResponse = {}, traderInterpretation = {}, structuredFacts = {}){
   const base = analysis && typeof analysis === 'object' ? analysis : {};
   const prose = normalizeFlatStringFields(finalResponse, FINAL_PROSE_REQUIRED_FIELDS);
-  const interpretation = normalizeFlatStringFields(traderInterpretation, INTERPRETATION_REQUIRED_FIELDS);
+  const eventPacket = normalizeDeterministicEventPacket(safeObject(structuredFacts).deterministicEventPacket);
+  const interpretation = normalizeTraderInterpretation(traderInterpretation, eventPacket);
   const chartCoach = buildTwoStepChartCoach(prose, interpretation, structuredFacts);
   return {
     ...base,
@@ -535,9 +659,15 @@ function mergeTwoStepNarrativeIntoAnalysis(analysis = {}, finalResponse = {}, tr
       learningPoint:prose.learningPoint,
       whatNext:prose.whatNext
     },
+    deterministicEventPacket:eventPacket,
     traderInterpretation:{
+      dominantEventKey:interpretation.dominantEventKey,
       dominantEvent:interpretation.dominantEvent,
       whatChanged:interpretation.whatChanged,
+      eventSequence:interpretation.eventSequence.slice(),
+      traderInterpretation:interpretation.traderInterpretation,
+      currentRisk:interpretation.currentRisk,
+      nextSignal:interpretation.nextSignal,
       traderRead:interpretation.traderRead,
       riskToWatch:interpretation.riskToWatch,
       nextUsefulSignal:interpretation.nextUsefulSignal
@@ -585,7 +715,13 @@ function validateNoUnexpectedPriceMentions(response, fields = [], allowedValues 
 }
 
 function validateTraderInterpretationResponse(response){
-  const errors = validateRequiredStringFields(response, INTERPRETATION_REQUIRED_FIELDS);
+  const interpretation = normalizeTraderInterpretation(response);
+  const errors = [];
+  if(!interpretation.dominantEvent) errors.push('Missing required field: dominantEvent.');
+  if(!interpretation.eventSequence.length) errors.push('Missing required field: eventSequence.');
+  if(!interpretation.traderInterpretation) errors.push('Missing required field: traderInterpretation.');
+  if(!interpretation.currentRisk) errors.push('Missing required field: currentRisk.');
+  if(!interpretation.nextSignal) errors.push('Missing required field: nextSignal.');
   return {ok:errors.length === 0, errors};
 }
 
@@ -1204,7 +1340,7 @@ exports.handler = async function handler(event){
       });
     }
 
-    const finalPrompt = buildProductionChartGuruFinalPrompt(structuredFacts, interpretationResult.parsed, tightenedPrompt);
+    const finalPrompt = buildProductionChartGuruFinalPrompt(interpretationResult.parsed, tightenedPrompt);
     const finalResult = await sendStrictSchemaOpenAiRequest(
       apiKey,
       model,
@@ -1268,4 +1404,20 @@ exports.handler = async function handler(event){
     model,
     analysis
   });
+};
+
+exports.__test = {
+  normalizeDeterministicEventPacket,
+  normalizeTraderInterpretation,
+  buildChartGuruNarrationDiagnostics,
+  buildProductionStructuredFacts,
+  buildProductionChartGuruInterpretationInstructions,
+  buildProductionChartGuruInterpretationPrompt,
+  buildProductionChartGuruFinalInstructions,
+  buildProductionChartGuruFinalPrompt,
+  buildTwoStepChartCoach,
+  mergeTwoStepNarrativeIntoAnalysis,
+  buildEmptyChartCoach,
+  validateTraderInterpretationResponse,
+  validateFinalProseResponse
 };

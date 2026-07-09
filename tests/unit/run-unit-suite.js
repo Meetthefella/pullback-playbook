@@ -41,6 +41,18 @@ const cases = [
     groups:['all', 'contracts']
   },
   {
+    id:'chart-guru-event-first',
+    label:'Chart Guru event-first assertions',
+    script:'scripts/run-chart-guru-event-first-assertions.js',
+    groups:['all', 'contracts']
+  },
+  {
+    id:'chart-guru-narration-contracts',
+    label:'Chart Guru narration contract assertions',
+    script:'scripts/run-chart-guru-narration-contract-assertions.js',
+    groups:['all', 'contracts']
+  },
+  {
     id:'storage-persistence',
     label:'Storage persistence assertions',
     script:'scripts/run-storage-persistence-assertions.js',
