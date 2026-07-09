@@ -25286,6 +25286,20 @@ function finalDisplayedAnalysisChartRead(record, analysis){
   const analysisState = analysis && typeof analysis === 'object' ? analysis : {};
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const globalVerdict = resolveGlobalVerdict(item);
+  const semanticSetup = {
+    finalVerdict:globalVerdict.final_verdict,
+    structureState:globalVerdict.structure_state || derivedStates.structureState,
+    structureEligibility:globalVerdict.structure_eligibility,
+    setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState,
+    priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState,
+    bounceState:globalVerdict.bounce_state || derivedStates.bounceState,
+    stabilisationState:derivedStates.stabilisationState,
+    viability:globalVerdict.viability,
+    terminalAvoidApplied:globalVerdict.terminal_avoid_applied,
+    rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate,
+    avoid_trigger_source:globalVerdict.avoid_trigger_source,
+    explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason
+  };
   const selectedSummary = selectReviewAiSummary(item, analysisState, {
     derivedStates,
     globalVerdict
@@ -25303,26 +25317,21 @@ function finalDisplayedAnalysisChartRead(record, analysis){
       structureState:derivedStates.structureState
     }
   );
-  const aiBaseText = correction.text || String(selectedSummary.text || '').trim();
+  const sanitizedChartCoach = sanitizeChartCoachForDisplay(
+    selectedSummary.chartCoach || chartCoachFallback,
+    semanticSetup
+  );
+  const aiBaseText = correction.text
+    || (
+      sanitizedChartCoach
+      && Array.isArray(sanitizedChartCoach.sections)
+      && sanitizedChartCoach.sections.length
+        ? String(sanitizedChartCoach.summaryText || '').trim()
+        : String(selectedSummary.text || '').trim()
+    );
   const useFallback = /^deterministic_/.test(String(selectedSummary.source || ''));
   const baseText = aiBaseText;
-  const sanitizedText = sanitizeAliveWatchSemanticCopy(
-    baseText,
-    {
-      finalVerdict:globalVerdict.final_verdict,
-      structureState:globalVerdict.structure_state || derivedStates.structureState,
-      structureEligibility:globalVerdict.structure_eligibility,
-      setupLocationState:globalVerdict.setup_location_state || derivedStates.setupLocationState,
-      priceabilityState:globalVerdict.priceability_state || derivedStates.priceabilityState,
-      bounceState:globalVerdict.bounce_state || derivedStates.bounceState,
-      stabilisationState:derivedStates.stabilisationState,
-      viability:globalVerdict.viability,
-      terminalAvoidApplied:globalVerdict.terminal_avoid_applied,
-      rejected_by_viability_gate:globalVerdict.rejected_by_viability_gate,
-      avoid_trigger_source:globalVerdict.avoid_trigger_source,
-      explicit_invalidation_reason:globalVerdict.explicit_invalidation_reason
-    }
-  );
+  const sanitizedText = sanitizeAliveWatchSemanticCopy(baseText, semanticSetup);
   return {
     text:sanitizedText,
     applied:correction.applied || useFallback,
@@ -25339,7 +25348,7 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     selectedSummarySource:String(selectedSummary.source || ''),
     fallbackReason:'deterministic_chart_coach',
     fallbackFacts:chartCoachFallback.facts || null,
-    chartCoach:selectedSummary.chartCoach || chartCoachFallback
+    chartCoach:sanitizedChartCoach || chartCoachFallback
   };
 }
 
@@ -25357,6 +25366,34 @@ function renderChartCoachMarkup(display = {}){
     const confidenceAttr = Number.isFinite(Number(section.confidence)) ? ` data-chart-coach-confidence="${escapeHtml(Number(section.confidence).toFixed(2))}"` : '';
     return `<div class="chart-coach-section${section.teachingFocus === true ? ' chart-coach-section--teaching' : ''}" data-chart-coach-key="${escapeHtml(String(section.key || ''))}"${confidenceAttr}><div class="chart-coach-heading">${escapeHtml(`${section.icon} ${section.label}`)}</div>${copy}</div>`;
   }).join('');
+}
+
+function sanitizeChartCoachForDisplay(chartCoach = null, setup = {}){
+  const safe = chartCoach && typeof chartCoach === 'object' ? chartCoach : null;
+  if(!safe) return null;
+  const sections = Array.isArray(safe.sections)
+    ? safe.sections.map(section => {
+      const item = section && typeof section === 'object' ? section : {};
+      return {
+        ...item,
+        text:sanitizeAliveWatchSemanticCopy(String(item.text || '').trim(), setup)
+      };
+    }).filter(section => section.icon && section.label && section.text)
+    : [];
+  const primaryStory = safe.primaryStory && typeof safe.primaryStory === 'object'
+    ? {
+      ...safe.primaryStory,
+      text:sanitizeAliveWatchSemanticCopy(String(safe.primaryStory.text || '').trim(), setup)
+    }
+    : null;
+  return {
+    ...safe,
+    primaryStory,
+    sections,
+    summaryText:sections.length
+      ? sections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n')
+      : sanitizeAliveWatchSemanticCopy(String(safe.summaryText || '').trim(), setup)
+  };
 }
 
 function describeCandleBodyDirection(candle = {}){
@@ -27123,6 +27160,34 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
   const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(item);
   const deterministicCoach = buildDeterministicChartCoach(item, state, {derivedStates, globalVerdict});
   const chartCoach = state.chartCoach && typeof state.chartCoach === 'object' ? state.chartCoach : null;
+  if(
+    chartCoachModelIsUsable(chartCoach)
+    && String(chartCoach.source || '').trim() === 'openai_two_step_chart_guru'
+  ){
+    const mergedSections = finalizeChartCoachSections(Array.isArray(chartCoach.sections) ? chartCoach.sections.slice() : []);
+    const mergedPrimaryStory = chartCoach.primaryStory && typeof chartCoach.primaryStory === 'object'
+      ? chartCoach.primaryStory
+      : deterministicCoach.primaryStory;
+    const mergedRecentStory = chartCoach.recentStory && typeof chartCoach.recentStory === 'object'
+      ? chartCoach.recentStory
+      : deterministicCoach.recentStory;
+    const mergedChartCoach = {
+      ...deterministicCoach,
+      ...chartCoach,
+      primaryStory:mergedPrimaryStory,
+      recentStory:mergedRecentStory,
+      chartNarrator:chartCoach.chartNarrator || deterministicCoach.chartNarrator,
+      sections:mergedSections,
+      summaryText:mergedSections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n'),
+      diagnostics:chartCoachDiagnosticsForSections(mergedSections, mergedRecentStory, mergedPrimaryStory)
+    };
+    return {
+      text:String(mergedChartCoach.summaryText || '').trim(),
+      source:'openai_two_step_chart_guru',
+      chartCoach:mergedChartCoach,
+      fallback:deterministicCoach
+    };
+  }
   if(
     chartCoachModelIsUsable(chartCoach)
     && String(chartCoach.primaryStory && chartCoach.primaryStory.key || '').trim() === String(deterministicCoach.primaryStory && deterministicCoach.primaryStory.key || '').trim()
@@ -34656,10 +34721,12 @@ function normalizeAnalysisResponse(raw){
         confidence:Number.isFinite(Number(primaryStorySource.confidence)) ? Number(primaryStorySource.confidence) : null,
         rankReason:String(primaryStorySource.rankReason || primaryStorySource.rank_reason || '').trim()
       } : null,
+      recentStory:normalizeObject(safe.recentStory || safe.recent_story) || null,
       sections,
       summaryText:String(safe.summaryText || safe.summary_text || '').trim(),
       source:String(safe.source || '').trim(),
       renderVersion:String(safe.renderVersion || safe.render_version || '').trim(),
+      diagnostics:normalizeObject(safe.diagnostics) || null,
       explanationFacts:Array.isArray(safe.explanationFacts || safe.explanation_facts)
         ? (safe.explanationFacts || safe.explanation_facts).map(item => String(item || '').trim()).filter(Boolean)
         : []
@@ -34730,6 +34797,11 @@ function normalizeAnalysisResponse(raw){
     plain_english_chart_read:String(raw.plain_english_chart_read || raw.chart_read || '').trim(),
     legacy_summary:legacySummary,
     parseWarning:String(raw.parseWarning || raw.parse_warning || '').trim(),
+    chartGuruOpenAiFallbackReason:String(raw.chartGuruOpenAiFallbackReason || '').trim(),
+    chartGuruOpenAiValidationErrors:Array.isArray(raw.chartGuruOpenAiValidationErrors)
+      ? raw.chartGuruOpenAiValidationErrors.map(item => String(item || '').trim()).filter(Boolean)
+      : [],
+    chartGuruOpenAiError:String(raw.chartGuruOpenAiError || '').trim(),
     visible_ticker:String(raw.visible_ticker || imageFacts.visible_ticker || imageFacts.ticker || '').trim().toUpperCase(),
     visible_timeframe:String(raw.visible_timeframe || imageFacts.visible_timeframe || imageFacts.timeframe || '').trim(),
     visible_latest_price:analysisNumberOrNull(raw.visible_latest_price ?? imageFacts.visible_latest_price ?? imageFacts.price),

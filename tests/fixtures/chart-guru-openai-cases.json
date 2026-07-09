@@ -1,0 +1,108 @@
+[
+  {
+    "id": "CAT_failed_first_bounce_20ma",
+    "ticker": "CAT",
+    "verdict": "watch",
+    "setupScore": 4,
+    "primaryRecentEvent": "failed_first_bounce_from_20ma",
+    "eventSequence": [
+      "strong uptrend",
+      "price became extended above the 20-day average",
+      "price pulled back to the 20-day average",
+      "buyers attempted a small bounce",
+      "bounce failed quickly",
+      "price is now between the 20-day and 50-day averages"
+    ],
+    "technicalContext": [
+      "structure intact",
+      "volume weak",
+      "market mixed",
+      "not actionable"
+    ],
+    "allowedPriceMentions": []
+  },
+  {
+    "id": "ALLY_first_test_50ma_buyers_unconfirmed",
+    "ticker": "ALLY",
+    "verdict": "watch",
+    "setupScore": 5,
+    "primaryRecentEvent": "first_test_of_50ma_buyers_not_confirmed",
+    "eventSequence": [
+      "broader uptrend still intact",
+      "price pulled back toward the 50-day average for the first meaningful test",
+      "the pullback has reached support but buyers have not produced a clear bounce yet",
+      "price is hovering around the 50-day average",
+      "confirmation is still missing"
+    ],
+    "technicalContext": [
+      "structure intact",
+      "support test in progress",
+      "buyers not confirmed",
+      "watch patiently"
+    ],
+    "allowedPriceMentions": []
+  },
+  {
+    "id": "UPS_constructive_pullback_no_confirmation",
+    "ticker": "UPS",
+    "verdict": "watch",
+    "setupScore": 6,
+    "primaryRecentEvent": "constructive_pullback_no_confirmation",
+    "eventSequence": [
+      "uptrend remains intact",
+      "price has pulled back in a controlled way toward support",
+      "the pullback still looks constructive",
+      "buyers have not produced convincing follow-through yet",
+      "the chart is watchable but early"
+    ],
+    "technicalContext": [
+      "constructive trend",
+      "pullback in progress",
+      "confirmation missing",
+      "not actionable yet"
+    ],
+    "allowedPriceMentions": []
+  },
+  {
+    "id": "VRT_diminishing_quality",
+    "ticker": "VRT",
+    "verdict": "watch",
+    "setupScore": 4,
+    "primaryRecentEvent": "diminishing_quality",
+    "eventSequence": [
+      "trend had been constructive earlier",
+      "recent pullbacks have become less clean",
+      "buying response is getting less convincing",
+      "the setup quality is slipping rather than improving",
+      "it is no longer a clean beginner-friendly setup"
+    ],
+    "technicalContext": [
+      "trend still partly intact",
+      "quality fading",
+      "timing less clean",
+      "needs caution"
+    ],
+    "allowedPriceMentions": []
+  },
+  {
+    "id": "GEV_constructive_early_monitor_watch",
+    "ticker": "GEV",
+    "verdict": "watch",
+    "setupScore": 6,
+    "primaryRecentEvent": "constructive_but_early_monitor_watch",
+    "eventSequence": [
+      "constructive trend backdrop",
+      "price is starting to pull back toward a useful area",
+      "the chart still looks early rather than confirmed",
+      "buyers have not fully shown themselves yet",
+      "this is a monitor watch, not an entry"
+    ],
+    "technicalContext": [
+      "constructive setup",
+      "early monitor watch",
+      "confirmation pending",
+      "not actionable yet"
+    ],
+    "allowedPriceMentions": []
+  }
+]

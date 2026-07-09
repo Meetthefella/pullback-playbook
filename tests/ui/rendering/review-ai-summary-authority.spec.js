@@ -317,6 +317,145 @@ test('Chart Guru renders deterministic teaching sections in the review UI', asyn
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
 });
 
+test('Chart Guru renders the production two-step chartCoach when it is usable', async ({page}) => {
+  await bootApp(page);
+  await seedReviewScenario(page);
+
+  await applyAnalysis(page, {
+    trustedMarketContext:{
+      ticker:'NVDA',
+      timeframe:'1D',
+      currentPrice:200.09,
+      ma20:205.74,
+      ma50:209.99,
+      ma200:190.84,
+      recentCandleSequence:[
+        {date:'2026-06-30', open:198.42, high:201.17, low:197.85, close:200.09, volume:18345000},
+        {date:'2026-06-29', open:199.8, high:200.0, low:196.7, close:198.77, volume:17122000},
+        {date:'2026-06-28', open:194.4, high:197.11, low:193.98, close:196.2, volume:16220000}
+      ]
+    },
+    canonicalValues:{
+      price:200.09,
+      ma20:205.74,
+      ma50:209.99,
+      ma200:190.84,
+      volume:18345000
+    },
+    chartCoach:{
+      primaryStory:{
+        key:'openai_two_step_primary_story',
+        label:'Chart Story',
+        icon:'🧭',
+        text:'The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.',
+        evidenceFactIds:['openai_two_step_narrative'],
+        confidence:0.82,
+        rankReason:'two_step_chart_guru'
+      },
+      sections:[
+        {key:'biggest_clue', icon:'🧭', label:'Chart Story', text:'The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.', confidence:0.82, source:'openai_two_step_chart_guru'},
+        {key:'why_it_matters', icon:'🧠', label:'Why it matters', text:'That matters because a bounce can fail when price cannot repair the nearer damage.', confidence:0.78, source:'openai_two_step_chart_guru'},
+        {key:'setup_location', icon:'📍', label:'Setup location', text:'Price is sitting between the short-term averages and the longer-term support area.', confidence:0.76, source:'openai_two_step_chart_guru'},
+        {key:'learning_point', icon:'💡', label:'Learning point', text:'Early bounces are stronger when they reclaim nearby resistance, not just flick up for one candle.', confidence:0.8, source:'openai_two_step_chart_guru', teachingFocus:true},
+        {key:'what_next', icon:'🎯', label:'What next?', text:'Watch for firmer follow-through that starts reclaiming the nearby averages.', confidence:0.78, source:'openai_two_step_chart_guru'}
+      ],
+      summaryText:'🧭 Chart Story: The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.\n🧠 Why it matters: That matters because a bounce can fail when price cannot repair the nearer damage.\n📍 Setup location: Price is sitting between the short-term averages and the longer-term support area.\n💡 Learning point: Early bounces are stronger when they reclaim nearby resistance, not just flick up for one candle.\n🎯 What next?: Watch for firmer follow-through that starts reclaiming the nearby averages.',
+      source:'openai_two_step_chart_guru',
+      renderVersion:'chart-guru-v1',
+      explanationFacts:['openai_two_step_narrative']
+    },
+    coach_summary:'The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.',
+    plain_english_chart_read:'The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.'
+  });
+
+  const chartRead = await page.evaluate(() => {
+    const record = getTickerRecord('NVDA');
+    const result = finalDisplayedAnalysisChartRead(record, record.review.normalizedAnalysis);
+    return {
+      selectedSummarySource:String(result.selectedSummarySource || ''),
+      usedDeterministicFallback:result.usedDeterministicFallback === true,
+      previewText:String(result.text || '')
+    };
+  });
+
+  expect(chartRead.selectedSummarySource).toBe('openai_two_step_chart_guru');
+  expect(chartRead.usedDeterministicFallback).toBe(false);
+  expect(chartRead.previewText).toContain('buyers tried to bounce');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🧭 Chart Story');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('buyers tried to bounce');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📍 Setup location');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
+});
+
+test('Chart Guru sanitizes contradictory two-step section copy before Review render', async ({page}) => {
+  await bootApp(page);
+  await seedReviewScenario(page);
+
+  await applyAnalysis(page, {
+    trustedMarketContext:{
+      ticker:'NVDA',
+      timeframe:'1D',
+      currentPrice:200.09,
+      ma20:205.74,
+      ma50:209.99,
+      ma200:190.84,
+      recentCandleSequence:[
+        {date:'2026-06-30', open:198.42, high:201.17, low:197.85, close:200.09, volume:18345000},
+        {date:'2026-06-29', open:199.8, high:200.0, low:196.7, close:198.77, volume:17122000},
+        {date:'2026-06-28', open:194.4, high:197.11, low:193.98, close:196.2, volume:16220000}
+      ]
+    },
+    canonicalValues:{
+      price:200.09,
+      ma20:205.74,
+      ma50:209.99,
+      ma200:190.84,
+      volume:18345000
+    },
+    chartCoach:{
+      primaryStory:{
+        key:'openai_two_step_primary_story',
+        label:'Chart Story',
+        icon:'🧭',
+        text:'Structure is broken and the setup is failing.',
+        evidenceFactIds:['openai_two_step_narrative'],
+        confidence:0.82,
+        rankReason:'two_step_chart_guru'
+      },
+      sections:[
+        {key:'biggest_clue', icon:'🧭', label:'Chart Story', text:'Structure is broken and the setup is failing.', confidence:0.82, source:'openai_two_step_chart_guru'},
+        {key:'why_it_matters', icon:'🧠', label:'Why it matters', text:'The trend is weakening and buyers are no longer in control.', confidence:0.78, source:'openai_two_step_chart_guru'},
+        {key:'what_next', icon:'🎯', label:'What next?', text:'No actionable plan yet because the structure is broken.', confidence:0.78, source:'openai_two_step_chart_guru'}
+      ],
+      summaryText:'🧭 Chart Story: Structure is broken and the setup is failing.\n🧠 Why it matters: The trend is weakening and buyers are no longer in control.\n🎯 What next?: No actionable plan yet because the structure is broken.',
+      source:'openai_two_step_chart_guru',
+      renderVersion:'chart-guru-v1',
+      explanationFacts:['openai_two_step_narrative']
+    },
+    coach_summary:'Structure is broken and the setup is failing.',
+    plain_english_chart_read:'Structure is broken and the setup is failing.'
+  });
+
+  const chartRead = await page.evaluate(() => {
+    const record = getTickerRecord('NVDA');
+    const result = finalDisplayedAnalysisChartRead(record, record.review.normalizedAnalysis);
+    return {
+      selectedSummarySource:String(result.selectedSummarySource || ''),
+      renderedText:String(result.text || ''),
+      sectionTexts:Array.isArray(result.chartCoach && result.chartCoach.sections)
+        ? result.chartCoach.sections.map(section => String(section && section.text || ''))
+        : []
+    };
+  });
+
+  expect(chartRead.selectedSummarySource).toBe('openai_two_step_chart_guru');
+  expect(chartRead.renderedText).not.toContain('Structure is broken');
+  expect(chartRead.sectionTexts.join(' | ')).not.toContain('Structure is broken');
+  expect(chartRead.sectionTexts.join(' | ')).toMatch(/Setup remains untradable|Setup is not actionable yet|confirmation/i);
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('Structure is broken');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText(/Setup remains untradable|Setup is not actionable yet|confirmation/i);
+});
+
 test('Chart Guru renders the structure_breaking_down branch in the Review UI', async ({page}) => {
   await bootApp(page);
   await page.evaluate(() => {

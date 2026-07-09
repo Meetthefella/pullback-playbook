@@ -117,69 +117,129 @@ async function runNetlifyCanonicalizationRegression(){
     ],
     coach_summary:'Price is below the 20MA and 50MA but above the 200MA. Recent candles show a bounce attempt, but follow-through is still missing.'
   };
-
-  const fetchCalls = [];
-  global.fetch = async (url, options = {}) => {
-    fetchCalls.push({url, options});
-    return {
-      ok:true,
-      status:200,
-      json:async () => ({
-        output_text:JSON.stringify(aiPayload)
-      })
-    };
+  const traderInterpretation = {
+    dominantEvent:'Bounce attempt below the short-term averages.',
+    whatChanged:'Buyers tried to lift price, but the chart is still below the 20MA and 50MA.',
+    traderRead:'This is still an early repair attempt rather than a confirmed reversal.',
+    riskToWatch:'If price keeps failing under those averages, the pullback can stay weak.',
+    nextUsefulSignal:'A firmer close with follow-through above nearby resistance would matter more.'
+  };
+  const finalNarrative = {
+    chartStory:'The main event is that buyers tried to bounce, but the move is still stuck below the 20MA and 50MA.',
+    whyItMatters:'That matters because an early bounce can fail if price cannot reclaim those nearer trend guides.',
+    setupLocation:'Price is sitting between the short-term averages and the longer-term 200MA.',
+    learningPoint:'Early bounces are easier to trust when price can climb back through nearby resistance, not just flick up for one candle.',
+    whatNext:'Watch for firmer follow-through that starts reclaiming the nearby averages.'
   };
 
   const {handler} = require(modulePath);
-  const response = await handler({
-    httpMethod:'POST',
-    body:JSON.stringify({
-      payload:{
-        ticker:'NVDA',
-        marketStatus:'S&P above 50 MA',
-        trustedMarketContext
-      },
-      prompt:'Return JSON only.'
-    })
-  });
+  const invokeHandler = async sequence => {
+    const fetchCalls = [];
+    global.fetch = async (url, options = {}) => {
+      fetchCalls.push({url, options});
+      const requestBody = JSON.parse(options.body || '{}');
+      const step = sequence[Math.max(0, fetchCalls.length - 1)] || sequence[sequence.length - 1];
+      if(typeof step === 'function'){
+        return step({url, options, requestBody, callNumber:fetchCalls.length});
+      }
+      const safeStep = step || {};
+      return {
+        ok:safeStep.ok !== false,
+        status:Number.isFinite(Number(safeStep.status)) ? Number(safeStep.status) : 200,
+        json:async () => safeStep.payload || {}
+      };
+    };
 
-  assert.strictEqual(fetchCalls.length, 1, 'Expected one OpenAI request');
-  const body = JSON.parse(response.body);
-  assert.strictEqual(response.statusCode, 200, 'Handler should succeed');
+    const response = await handler({
+      httpMethod:'POST',
+      body:JSON.stringify({
+        payload:{
+          ticker:'NVDA',
+          marketStatus:'S&P above 50 MA',
+          trustedMarketContext
+        },
+        prompt:'Return JSON only.'
+      })
+    });
+    return {response, fetchCalls, body:JSON.parse(response.body)};
+  };
+
+  const successRun = await invokeHandler([
+    {payload:{output_text:JSON.stringify(aiPayload)}},
+    {payload:{output_text:JSON.stringify(traderInterpretation)}},
+    {payload:{output_text:JSON.stringify(finalNarrative)}}
+  ]);
+
+  assert.strictEqual(successRun.fetchCalls.length, 3, 'Expected analysis request plus two-step Chart Guru requests');
+  assert.strictEqual(successRun.response.statusCode, 200, 'Handler should succeed');
+  const firstRequest = JSON.parse(successRun.fetchCalls[0].options.body || '{}');
+  const secondRequest = JSON.parse(successRun.fetchCalls[1].options.body || '{}');
+  const thirdRequest = JSON.parse(successRun.fetchCalls[2].options.body || '{}');
+  const body = successRun.body;
+  assert.strictEqual(secondRequest.text && secondRequest.text.format && secondRequest.text.format.name, 'chart_guru_trader_interpretation', 'Production Chart Guru should call the interpretation step before final prose');
+  assert.strictEqual(thirdRequest.text && thirdRequest.text.format && thirdRequest.text.format.name, 'chart_guru_final_prose', 'Production Chart Guru should use the final prose schema after interpretation');
+  assert.ok(/Return extractedFromImage, trustedMarketContext, canonicalValues/i.test(String(firstRequest.instructions || '')), 'The canonical analysis request should remain intact');
+  assert.ok(!/Return extractedFromImage, trustedMarketContext, canonicalValues/i.test(String(thirdRequest.instructions || '')), 'Final prose request should not carry the full non-prose output contract');
+  const finalPromptText = (((thirdRequest.input || [])[0] || {}).content || []).find(part => part && part.type === 'input_text');
+  assert.ok(finalPromptText && /dominantEvent/.test(String(finalPromptText.text || '')), 'Final prose prompt should receive traderInterpretation');
   assert.strictEqual(body.analysis.canonicalValues.price, 200.09, 'Canonical price must come from trusted market context');
   assert.strictEqual(body.analysis.canonicalValues.ma20, 205.74, 'Canonical 20MA must come from trusted market context');
   assert.strictEqual(body.analysis.canonicalValues.ma50, 209.99, 'Canonical 50MA must come from trusted market context');
   assert.strictEqual(body.analysis.canonicalValues.ma200, 190.84, 'Canonical 200MA must come from trusted market context');
   assert.strictEqual(body.analysis.trustedMarketContext.currentPrice, 200.09, 'Trusted context should be preserved');
   assert.strictEqual(body.analysis.visible_ma20, null, 'Unreadable image MA should remain unreadable in extracted image facts');
-  assert.ok(/below the 20MA and 50MA but above the 200MA/i.test(body.analysis.coach_summary), 'Summary should reflect canonical MA relationship');
-  assert.ok(/bounce attempt/i.test(body.analysis.coach_summary), 'Summary should mention bounce attempt');
+  assert.ok(/buyers tried to bounce/i.test(body.analysis.coach_summary), 'Summary should now come from the two-step Chart Guru prose');
+  assert.ok(body.analysis.traderInterpretation && /early repair attempt/i.test(body.analysis.traderInterpretation.traderRead || ''), 'Analysis should preserve the intermediate trader interpretation');
+  assert.ok(body.analysis.chartGuruNarrative && /nearby averages/i.test(body.analysis.chartGuruNarrative.whatNext || ''), 'Analysis should preserve the final two-step narrative payload');
+  assert.strictEqual(body.analysis.chartCoach && body.analysis.chartCoach.source, 'openai_two_step_chart_guru', 'Two-step success should populate a renderable Chart Guru model');
+  assert.ok(Array.isArray(body.analysis.chartCoach && body.analysis.chartCoach.sections) && body.analysis.chartCoach.sections.some(section => section.key === 'setup_location'), 'Two-step success should populate the visible section model');
+  assert.strictEqual(body.analysis.chartCoach && body.analysis.chartCoach.recentStory && body.analysis.chartCoach.recentStory.key, 'openai_two_step_narrative', 'Two-step success should emit broader recentStory metadata server-side');
+  assert.ok(Array.isArray(body.analysis.chartCoach && body.analysis.chartCoach.diagnostics && body.analysis.chartCoach.diagnostics.priorityOrder), 'Two-step success should emit chartCoach diagnostics server-side');
+  assert.strictEqual(body.analysis.chartGuruOpenAiFallbackReason, '', 'Successful two-step Chart Guru should not set a fallback reason');
 
-  global.fetch = async () => ({
-    ok:true,
-    status:200,
-    json:async () => ({
-      output_text:'{"broken": true'
-    })
-  });
-  const malformedResponse = await handler({
-    httpMethod:'POST',
-    body:JSON.stringify({
-      payload:{
-        ticker:'NVDA',
-        marketStatus:'S&P above 50 MA',
-        trustedMarketContext
-      },
-      prompt:'Return JSON only.'
-    })
-  });
-  const malformedBody = JSON.parse(malformedResponse.body);
+  const malformedResponseRun = await invokeHandler([
+    {payload:{output_text:'{"broken": true'}}
+  ]);
+  const malformedResponse = malformedResponseRun.response;
+  const malformedBody = malformedResponseRun.body;
   assert.strictEqual(malformedResponse.statusCode, 200, 'Malformed JSON with trusted market context should still return usable analysis');
   assert.ok(/malformed json/i.test(String(malformedBody.analysis.parseWarning || '')), 'Malformed JSON fallback should record a parse warning');
   const malformedSummary = String(malformedBody.analysis.candleStructureAnalysis && malformedBody.analysis.candleStructureAnalysis.summary || '');
   assert.ok(/below the 20MA/i.test(malformedSummary) && /below the 50MA/i.test(malformedSummary) && /above the 200MA/i.test(malformedSummary), 'Malformed JSON fallback should include deterministic candle summary with canonical MA relationships');
   assert.strictEqual(Array.isArray(malformedBody.analysis.chartCoach && malformedBody.analysis.chartCoach.sections) ? malformedBody.analysis.chartCoach.sections.length : -1, 0, 'Malformed JSON server fallback should not emit a legacy Chart Guru section list');
   assert.strictEqual(malformedBody.analysis.chartCoach && malformedBody.analysis.chartCoach.primaryStory, null, 'Malformed JSON server fallback should defer primary story selection to the shared deterministic builder');
+
+  const interpretationFailureRun = await invokeHandler([
+    {payload:{output_text:JSON.stringify(aiPayload)}},
+    {ok:false, status:500, payload:{error:{message:'Interpretation exploded'}}}
+  ]);
+  assert.strictEqual(interpretationFailureRun.response.statusCode, 200, 'Interpretation-stage failure should degrade to deterministic 200');
+  assert.strictEqual(interpretationFailureRun.body.analysis.chartGuruOpenAiFallbackReason, 'interpretation_request_failed', 'Interpretation-stage failure should record a specific fallback reason');
+  assert.strictEqual(Array.isArray(interpretationFailureRun.body.analysis.chartCoach.sections) ? interpretationFailureRun.body.analysis.chartCoach.sections.length : -1, 0, 'Interpretation-stage failure should leave Chart Guru to deterministic fallback');
+
+  const interpretationMalformedRun = await invokeHandler([
+    {payload:{output_text:JSON.stringify(aiPayload)}},
+    {payload:{output_text:'{"dominantEvent":"broken"'}}
+  ]);
+  assert.strictEqual(interpretationMalformedRun.response.statusCode, 200, 'Malformed interpretation JSON should degrade to deterministic 200');
+  assert.strictEqual(interpretationMalformedRun.body.analysis.chartGuruOpenAiFallbackReason, 'interpretation_json_parse_failed', 'Malformed interpretation JSON should record a parse fallback reason');
+
+  const finalFailureRun = await invokeHandler([
+    {payload:{output_text:JSON.stringify(aiPayload)}},
+    {payload:{output_text:JSON.stringify(traderInterpretation)}},
+    {ok:false, status:500, payload:{error:{message:'Final prose exploded'}}}
+  ]);
+  assert.strictEqual(finalFailureRun.response.statusCode, 200, 'Final-prose failure should degrade to deterministic 200');
+  assert.strictEqual(finalFailureRun.body.analysis.chartGuruOpenAiFallbackReason, 'final_prose_request_failed', 'Final-prose failure should record a specific fallback reason');
+  assert.strictEqual(Array.isArray(finalFailureRun.body.analysis.chartCoach.sections) ? finalFailureRun.body.analysis.chartCoach.sections.length : -1, 0, 'Final-prose failure should leave Chart Guru to deterministic fallback');
+
+  const finalMalformedRun = await invokeHandler([
+    {payload:{output_text:JSON.stringify(aiPayload)}},
+    {payload:{output_text:JSON.stringify(traderInterpretation)}},
+    {payload:{output_text:'{"chartStory":"broken"'}}
+  ]);
+  assert.strictEqual(finalMalformedRun.response.statusCode, 200, 'Malformed final prose JSON should degrade to deterministic 200');
+  assert.strictEqual(finalMalformedRun.body.analysis.chartGuruOpenAiFallbackReason, 'final_prose_json_parse_failed', 'Malformed final prose JSON should record a parse fallback reason');
 }
 
 function runReviewPresentationRegression(){
@@ -371,6 +431,7 @@ function runDeterministicCandleFallbackRegression(){
     'isGenericTradePlanCommentary',
     'canonicalCandleContext',
     'deterministicCandleStructureSummary',
+    'sanitizeChartCoachForDisplay',
     'selectReviewAiSummary',
     'finalDisplayedAnalysisChartRead'
   ].forEach(name => {
@@ -1345,6 +1406,39 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual((mergedAiCoach.chartCoach.sections.find(section => section.key === 'biggest_clue') || {}).text, (deterministicBounceCoach.sections.find(section => section.key === 'biggest_clue') || {}).text, 'AI-supplied Chart Coach must not override the deterministic Chart Story text');
   assert.strictEqual((mergedAiCoach.chartCoach.sections.find(section => section.key === 'what_next') || {}).text, (deterministicBounceCoach.sections.find(section => section.key === 'what_next') || {}).text, 'AI-supplied Chart Coach must not override deterministic what-next guidance');
 
+  const twoStepAiCoach = sandbox.selectReviewAiSummary(
+    bounceRecord,
+    {
+      chartCoach:{
+        primaryStory:{
+          key:'openai_two_step_primary_story',
+          label:'Chart Story',
+          icon:'🧭',
+          text:'The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.',
+          evidenceFactIds:['openai_two_step_narrative'],
+          confidence:0.82,
+          rankReason:'two_step_chart_guru'
+        },
+        source:'openai_two_step_chart_guru',
+        sections:[
+          {key:'biggest_clue', icon:'🧭', label:'Chart Story', text:'The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.', confidence:0.82, source:'openai_two_step_chart_guru'},
+          {key:'why_it_matters', icon:'🧠', label:'Why it matters', text:'That matters because a bounce can fail when price cannot repair the nearer damage.', confidence:0.78, source:'openai_two_step_chart_guru'},
+          {key:'setup_location', icon:'📍', label:'Setup location', text:'Price is caught between the nearer trend guides and the longer-term support area.', confidence:0.76, source:'openai_two_step_chart_guru'},
+          {key:'learning_point', icon:'💡', label:'Learning point', text:'Early bounces are stronger when they reclaim nearby resistance, not just bounce for one candle.', confidence:0.8, source:'openai_two_step_chart_guru', teachingFocus:true},
+          {key:'what_next', icon:'🎯', label:'What next?', text:'Watch for firmer follow-through that starts reclaiming the nearby averages.', confidence:0.78, source:'openai_two_step_chart_guru'}
+        ],
+        summaryText:'🧭 Chart Story: The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.'
+      }
+    },
+    {
+      derivedStates:sandbox.analysisDerivedStatesFromRecord(bounceRecord),
+      globalVerdict:bounceRecord._globalVerdict
+    }
+  );
+  assert.strictEqual(twoStepAiCoach.source, 'openai_two_step_chart_guru', 'Review should accept a usable two-step Chart Guru model directly');
+  assert.strictEqual(twoStepAiCoach.chartCoach.source, 'openai_two_step_chart_guru', 'Review should keep the two-step Chart Guru model as the visible source');
+  assert.ok(/buyers tried to bounce/i.test(twoStepAiCoach.text), 'Two-step Chart Guru text should remain visible instead of being replaced by deterministic fallback');
+
   const amatRead = sandbox.finalDisplayedAnalysisChartRead(
     {
       marketData:{price:186.4, ma20:180.2, ma50:174.1, ma200:156.8, avgVolume30d:1000000},
@@ -1536,11 +1630,24 @@ function runClientNormalizerRegression(){
 
   const normalized = sandbox.normalizeAnalysisResponse({
     parseWarning:'Model response was malformed JSON. Deterministic chart summary used instead.',
+    chartGuruOpenAiFallbackReason:'final_prose_request_failed',
+    chartGuruOpenAiValidationErrors:['Missing required field: whatNext.'],
+    chartGuruOpenAiError:'Final prose exploded.',
     candleStructureAnalysis:{
       summary:'Price is below the 20MA and 50MA but above the 200MA. Recent candles show a bounce attempt, but follow-through is still missing.'
     },
     tradePlanCommentary:{
       summary:'Estimated maths exist, but confirmation is still missing before any entry is valid.'
+    },
+    chartCoach:{
+      primaryStory:{key:'openai_two_step_primary_story', label:'Chart Story', icon:'🧭', text:'AI chart story', confidence:0.82, rankReason:'two_step'},
+      recentStory:{key:'deterministic_recent_story', steps:['pullback', 'bounce_attempt']},
+      diagnostics:{storyContract:{steps:['pullback', 'bounce_attempt']}},
+      sections:[{key:'biggest_clue', icon:'🧭', label:'Chart Story', text:'AI chart story', confidence:0.82, source:'openai_two_step_chart_guru'}],
+      summaryText:'🧭 Chart Story: AI chart story',
+      source:'openai_two_step_chart_guru',
+      renderVersion:'chart-guru-v1',
+      explanationFacts:['openai_two_step_narrative']
     },
     canonicalValues:{price:200.09, ma20:205.74, ma50:209.99, ma200:190.84},
     trustedMarketContext:{currentPrice:200.09, ma20:205.74, ma50:209.99, ma200:190.84}
@@ -1550,8 +1657,13 @@ function runClientNormalizerRegression(){
   assert.strictEqual(normalized.legacy_summary, '', 'Client normalizer should not invent a legacy summary when only structured fields exist');
   assert.strictEqual(normalized.candleStructureAnalysis.summary, 'Price is below the 20MA and 50MA but above the 200MA. Recent candles show a bounce attempt, but follow-through is still missing.', 'Structured candle summary should survive client normalization');
   assert.ok(normalized.chartCoach && Array.isArray(normalized.chartCoach.sections), 'Client normalizer should preserve structured Chart Coach data');
-  assert.strictEqual(normalized.chartCoach.sections.length, 0, 'Client normalizer should preserve an empty Chart Guru shell for malformed-response fallback');
-  assert.strictEqual(normalized.chartCoach.primaryStory, null, 'Client normalizer should preserve that malformed-response fallback has no preselected primary story');
+  assert.strictEqual(normalized.chartCoach.sections.length, 1, 'Client normalizer should preserve supplied Chart Guru sections');
+  assert.strictEqual(normalized.chartCoach.primaryStory.key, 'openai_two_step_primary_story', 'Client normalizer should preserve supplied Chart Guru primary story');
+  assert.strictEqual(normalized.chartCoach.recentStory.key, 'deterministic_recent_story', 'Client normalizer should preserve recent-story metadata when supplied');
+  assert.strictEqual((normalized.chartCoach.diagnostics && normalized.chartCoach.diagnostics.storyContract && normalized.chartCoach.diagnostics.storyContract.steps || []).join('|'), 'pullback|bounce_attempt', 'Client normalizer should preserve diagnostics metadata when supplied');
+  assert.strictEqual(normalized.chartGuruOpenAiFallbackReason, 'final_prose_request_failed', 'Client normalizer should preserve Chart Guru fallback reason');
+  assert.strictEqual((normalized.chartGuruOpenAiValidationErrors || []).join('|'), 'Missing required field: whatNext.', 'Client normalizer should preserve Chart Guru validation errors');
+  assert.strictEqual(normalized.chartGuruOpenAiError, 'Final prose exploded.', 'Client normalizer should preserve Chart Guru fallback error text');
 }
 
 function runServerCandleOrderRegression(){
@@ -1720,6 +1832,19 @@ function runSourceAssertions(){
   assert(appSource.includes("'chartCoach'"), 'Prompt output keys must include chartCoach');
   assert(appSource.includes("chartVerificationNumberOrNull(read.ma20) === null && chartVerificationNumberOrNull(expected.ma20) === null"), 'Review diagnostics must suppress unreadable MA copy when trusted MA exists');
   assert(serverSource.includes('Use trustedMarketContext for all numeric values and canonical market facts.'), 'Server prompt must instruct AI to trust canonical market context');
+  assert(serverSource.includes('buildProductionChartGuruInterpretationInstructions()'), 'Production handler should use the production interpretation prompt');
+  assert(serverSource.includes('buildProductionChartGuruFinalInstructions()'), 'Production handler should use the production final prose prompt');
+  assert(!serverSource.includes('scripts/lib/chart-guru-openai-harness'), 'Production handler must not import the dev-only harness helper');
+  assert(!serverSource.includes('buildOneStepInstructions()'), 'One-step prompt mode must remain out of the production handler');
+  [
+    'CAT_failed_first_bounce_20ma',
+    'ALLY_first_test_of_50ma',
+    'UPS_constructive_pullback_no_confirmation',
+    'VRT_diminishing_quality',
+    'GEV_constructive_but_early_monitor_watch'
+  ].forEach(forbidden => {
+    assert(!serverSource.includes(forbidden), `Production handler must not hardcode fixture-specific id ${forbidden}`);
+  });
   assert(appSource.includes('function buildDeterministicChartCoach'), 'App must include deterministic Chart Coach helper');
   assert(appSource.includes('function selectReviewAiSummary'), 'App must include the Review AI summary authority selector');
   assert(appSource.includes('function buildReviewChartGuruDisplay'), 'App must expose a dedicated Review Chart Guru display helper');

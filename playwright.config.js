@@ -2,6 +2,7 @@ const {defineConfig} = require('@playwright/test');
 
 const baseURL = process.env.PP_BASE_URL || 'http://127.0.0.1:4173';
 const reuseExistingServer = process.env.PP_REUSE_EXISTING_SERVER === 'true';
+const disableManagedWebServer = process.env.PP_DISABLE_WEBSERVER === 'true';
 
 module.exports = defineConfig({
   testDir:'./tests/ui',
@@ -13,7 +14,7 @@ module.exports = defineConfig({
     ['list'],
     ['html', {open:'never', outputFolder:'playwright-report'}]
   ],
-  webServer:{
+  webServer:disableManagedWebServer ? undefined : {
     command:'node scripts/playwright-static-server.js',
     url:baseURL,
     reuseExistingServer,

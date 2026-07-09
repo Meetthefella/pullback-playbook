@@ -9,6 +9,46 @@ const corsHeaders = {
 const MAX_CHART_DATA_URL_LENGTH = 6 * 1024 * 1024;
 const OPENAI_TIMEOUT_MS = 45000;
 const RETRYABLE_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
+const CHART_GURU_PRIMARY_STORY_ICON = '🧭';
+const CHART_GURU_RENDER_VERSION = 'chart-guru-v1';
+const INTERPRETATION_REQUIRED_FIELDS = [
+  'dominantEvent',
+  'whatChanged',
+  'traderRead',
+  'riskToWatch',
+  'nextUsefulSignal'
+];
+const FINAL_PROSE_REQUIRED_FIELDS = [
+  'chartStory',
+  'whyItMatters',
+  'setupLocation',
+  'learningPoint',
+  'whatNext'
+];
+const TRADER_INTERPRETATION_SCHEMA = {
+  type:'object',
+  additionalProperties:false,
+  required:INTERPRETATION_REQUIRED_FIELDS,
+  properties:{
+    dominantEvent:{type:'string'},
+    whatChanged:{type:'string'},
+    traderRead:{type:'string'},
+    riskToWatch:{type:'string'},
+    nextUsefulSignal:{type:'string'}
+  }
+};
+const FINAL_PROSE_SCHEMA = {
+  type:'object',
+  additionalProperties:false,
+  required:FINAL_PROSE_REQUIRED_FIELDS,
+  properties:{
+    chartStory:{type:'string'},
+    whyItMatters:{type:'string'},
+    setupLocation:{type:'string'},
+    learningPoint:{type:'string'},
+    whatNext:{type:'string'}
+  }
+};
 
 function jsonResponse(statusCode, body){
   return {
@@ -61,6 +101,30 @@ function buildRequestBody(model, instructions, content, maxOutputTokens = 1000){
       }
     },
     max_output_tokens: maxOutputTokens
+  };
+}
+
+function buildStrictSchemaRequestBody(model, instructions, prompt, schemaName, schema, maxOutputTokens = 600){
+  return {
+    model,
+    instructions,
+    input:[{
+      role:'user',
+      content:[{
+        type:'input_text',
+        text:String(prompt || '')
+      }]
+    }],
+    text:{
+      format:{
+        type:'json_schema',
+        name:schemaName,
+        strict:true,
+        schema
+      }
+    },
+    temperature:0.2,
+    max_output_tokens:maxOutputTokens
   };
 }
 
@@ -198,6 +262,390 @@ function normaliseNumber(value){
 
 function normalizeObject(value){
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function safeObject(value){
+  return normalizeObject(value);
+}
+
+function normalizeFlatStringFields(value, fields = []){
+  const source = safeObject(value);
+  return fields.reduce((acc, field) => {
+    acc[field] = normaliseString(source[field], '');
+    return acc;
+  }, {});
+}
+
+function collectAllowedNumericMentions(value, target = new Set()){
+  if(value === null || value === undefined) return target;
+  if(typeof value === 'number' && Number.isFinite(value)){
+    target.add(String(value));
+    return target;
+  }
+  if(typeof value === 'string'){
+    const trimmed = value.trim();
+    if(trimmed && /^-?\d+(?:\.\d+)?$/.test(trimmed)){
+      target.add(trimmed);
+    }
+    return target;
+  }
+  if(Array.isArray(value)){
+    value.forEach(item => collectAllowedNumericMentions(item, target));
+    return target;
+  }
+  if(typeof value === 'object'){
+    Object.values(value).forEach(item => collectAllowedNumericMentions(item, target));
+  }
+  return target;
+}
+
+function buildProductionStructuredFacts(payload = {}, analysis = {}){
+  const trustedMarketContext = normalizeObject(analysis.trustedMarketContext || payload.trustedMarketContext);
+  const canonicalValues = normalizeObject(analysis.canonicalValues);
+  return {
+    ticker:normaliseString(payload.ticker, ''),
+    marketStatus:normaliseString(payload.marketStatus, ''),
+    scanType:normaliseString(payload.scanType, ''),
+    notes:normaliseString(payload.notes, ''),
+    setupStates:{
+      trendState:normaliseString(payload.trendState, ''),
+      pullbackZone:normaliseString(payload.pullbackZone, ''),
+      structureState:normaliseString(payload.structureState, ''),
+      stabilisationState:normaliseString(payload.stabilisationState, ''),
+      bounceState:normaliseString(payload.bounceState, ''),
+      volumeState:normaliseString(payload.volumeState, ''),
+      entryDefined:normaliseString(payload.entryDefined, ''),
+      stopDefined:normaliseString(payload.stopDefined, ''),
+      targetDefined:normaliseString(payload.targetDefined, '')
+    },
+    trustedMarketContext,
+    canonicalValues,
+    candleStructureAnalysis:normalizeObject(analysis.candleStructureAnalysis),
+    tradePlanCommentary:normalizeObject(analysis.tradePlanCommentary),
+    constructiveEvidence:normaliseStringArray(analysis.constructive_evidence),
+    riskEvidence:normaliseStringArray(analysis.risk_evidence),
+    whatNeedsToImprove:normaliseStringArray(analysis.what_needs_to_improve),
+    confidenceWarnings:normaliseStringArray(analysis.confidenceWarnings)
+  };
+}
+
+function buildProductionAnalysisInstructionLines(){
+  return [
+    'Analyse a Quality Pullback chart as Chart Guru, an observation-only educational feature.',
+    'Use plain English for a novice retail trader.',
+    'Be honest about uncertainty.',
+    'Do not invent chart details that are not provided.',
+    'Do not issue buy/sell advice.',
+    'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
+    'The deterministic app resolver will decide final state.',
+    'Use trustedMarketContext for all numeric values and canonical market facts.',
+    'Do not replace trusted ticker, timeframe, price, MA values, volume, candle OHLC, or trade-plan maths with visual guesses from the image.',
+    'Use the image only for visual structure, candle interpretation, and disagreement detection.',
+    'If the image disagrees with trustedMarketContext, return both but keep trustedMarketContext canonical.',
+    'If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and confidence.',
+    'If numeric chart labels are visible but cannot be confidently assigned to latest price or a specific moving average, include them in visible_numeric_labels.',
+    'TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but its value is unreadable, report the line as visible and keep the numeric value null.',
+    'Do not fabricate MA values. Visibility can be partial/inferred; numeric values require readable text.',
+    'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
+    'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
+    'Return extractedFromImage, trustedMarketContext, canonicalValues, candleStructureAnalysis, tradePlanCommentary, chartCoach, confidenceWarnings, and a short novice-friendly candle read.',
+    'chartCoach is the main educational output for Chart Guru.',
+    'The app has already determined the setup context and story order before you respond.',
+    'chartCoach must include a deterministic primaryStory object with key, label, icon, text, evidenceFactIds, confidence, and rankReason.',
+    'Use the supplied chart evidence to explain the app-determined primary story first, then supporting evidence, then one learning point, then What next?.',
+    'chartCoach.sections must contain at most 5 relevant emoji-led sections.',
+    'The first section should usually be Biggest clue and should follow primaryStory.',
+    'Include only one Learning point section and one What next? section.',
+    'You may simplify or polish the deterministic explanation for a beginner, but do not rediscover the chart from scratch or change primaryStory key, section order, evidence facts, numeric values, confidence, or resolver authority.',
+    'Return exactly one JSON object.',
+    'Return evidence fields only; ai_observation_only must be true.',
+    'If a field is unknown, return null.'
+  ];
+}
+
+function buildProductionChartGuruInterpretationInstructions(){
+  return [
+    'You are an internal trader interpreter for Chart Guru.',
+    'Read the structured chart facts and explain what just happened in trader terms before any beginner-friendly narration is written.',
+    'Stay concise, factual, and sequence-aware.',
+    'Do not invent prices, new indicators, or unsupported chart facts.',
+    'Return only the JSON fields defined by the schema.'
+  ].join('\n');
+}
+
+function buildProductionChartGuruInterpretationPrompt(structuredFacts, originalPrompt = ''){
+  return [
+    String(originalPrompt || '').trim(),
+    '',
+    'Before writing the final Chart Guru prose, produce the internal trader interpretation from these structured chart facts.',
+    '',
+    JSON.stringify(safeObject(structuredFacts), null, 2)
+  ].join('\n');
+}
+
+function buildProductionChartGuruFinalInstructions(){
+  return [
+    'Analyse a Quality Pullback chart as Chart Guru, an observation-only educational feature.',
+    'Use plain English for a novice retail trader.',
+    'Be honest about uncertainty.',
+    'Do not invent chart details that are not provided.',
+    'Do not issue buy/sell advice.',
+    'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
+    'The deterministic app resolver will decide final state.',
+    'The app has already determined the setup context and story order before you respond.',
+    'Use the supplied chart evidence to explain the app-determined primary story first, then supporting evidence, then one learning point, then What next?.',
+    'Keep the language plain-English and beginner-friendly.',
+    'Return exactly one JSON object.',
+    'Return only these fields as JSON strings: chartStory, whyItMatters, setupLocation, learningPoint, whatNext.',
+    'If a field is unknown, return an empty string.'
+  ].join('\n');
+}
+
+function buildProductionChartGuruFinalPrompt(structuredFacts, traderInterpretation, originalPrompt = ''){
+  return [
+    String(originalPrompt || '').trim(),
+    '',
+    'Internal trader interpretation for the final Chart Guru prose:',
+    JSON.stringify(safeObject(traderInterpretation), null, 2),
+    '',
+    'Structured chart facts for the same chart review:',
+    JSON.stringify(safeObject(structuredFacts), null, 2)
+  ].join('\n');
+}
+
+function buildEmptyChartCoach(explanationFacts = []){
+  return {
+    primaryStory:null,
+    sections:[],
+    summaryText:'',
+    source:'',
+    renderVersion:CHART_GURU_RENDER_VERSION,
+    explanationFacts:normaliseStringArray(explanationFacts)
+  };
+}
+
+function normalizeRecentStoryStep(step = ''){
+  return String(step || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+}
+
+function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, structuredFacts = {}){
+  const prose = normalizeFlatStringFields(finalResponse, FINAL_PROSE_REQUIRED_FIELDS);
+  const interpretation = normalizeFlatStringFields(traderInterpretation, INTERPRETATION_REQUIRED_FIELDS);
+  const facts = safeObject(structuredFacts);
+  const eventSequence = Array.isArray(facts.eventSequence)
+    ? facts.eventSequence.map(step => normalizeRecentStoryStep(step)).filter(Boolean)
+    : [];
+  const storyStepDetails = eventSequence.map(step => ({
+    key:step,
+    evidenceFactIds:['openai_two_step_narrative'],
+    derivedFromSteps:[step],
+    derivedFromConditions:[]
+  }));
+  const sections = [
+    {key:'biggest_clue', icon:CHART_GURU_PRIMARY_STORY_ICON, label:'Chart Story', text:prose.chartStory, confidence:0.82, teachingFocus:false},
+    {key:'why_it_matters', icon:'🧠', label:'Why it matters', text:prose.whyItMatters, confidence:0.78, teachingFocus:false},
+    {key:'setup_location', icon:'📍', label:'Setup location', text:prose.setupLocation, confidence:0.76, teachingFocus:false},
+    {key:'learning_point', icon:'💡', label:'Learning point', text:prose.learningPoint, confidence:0.8, teachingFocus:true},
+    {key:'what_next', icon:'🎯', label:'What next?', text:prose.whatNext, confidence:0.78, teachingFocus:false}
+  ].filter(section => section.text);
+  const summaryText = sections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n');
+  return {
+    primaryStory:{
+      key:'openai_two_step_primary_story',
+      label:'Chart Story',
+      icon:CHART_GURU_PRIMARY_STORY_ICON,
+      text:prose.chartStory,
+      evidenceFactIds:['openai_two_step_narrative'],
+      confidence:0.82,
+      rankReason:interpretation.dominantEvent || interpretation.whatChanged || 'two_step_chart_guru'
+    },
+    recentStory:{
+      key:'openai_two_step_narrative',
+      bias:'educational',
+      toneMode:'openai_two_step',
+      confidenceMode:'structured_facts_plus_trader_interpretation',
+      trendLabel:String(interpretation.dominantEvent || '').trim(),
+      supportLabel:String(prose.setupLocation || '').trim(),
+      steps:eventSequence,
+      stepDetails:storyStepDetails,
+      evidenceFactIds:['openai_two_step_narrative']
+    },
+    sections:sections.map(section => ({
+      ...section,
+      source:'openai_two_step_chart_guru'
+    })),
+    summaryText,
+    source:'openai_two_step_chart_guru',
+    renderVersion:CHART_GURU_RENDER_VERSION,
+    explanationFacts:['openai_two_step_narrative'],
+    diagnostics:{
+      priorityOrder:sections.map(section => String(section.key || '').trim()),
+      sectionConfidence:sections.map(section => ({
+        key:String(section.key || '').trim(),
+        confidence:Number.isFinite(Number(section.confidence)) ? Number(section.confidence) : null,
+        teachingFocus:section.teachingFocus === true
+      })),
+      storyContract:{
+        primaryStoryKey:'openai_two_step_primary_story',
+        storyKey:'openai_two_step_narrative',
+        toneMode:'openai_two_step',
+        confidenceMode:'structured_facts_plus_trader_interpretation',
+        steps:eventSequence.slice(),
+        stepDetails:storyStepDetails.map(detail => ({
+          key:detail.key,
+          evidenceFactIds:detail.evidenceFactIds.slice(),
+          derivedFromSteps:detail.derivedFromSteps.slice(),
+          derivedFromConditions:detail.derivedFromConditions.slice()
+        }))
+      }
+    }
+  };
+}
+
+function mergeTwoStepNarrativeIntoAnalysis(analysis = {}, finalResponse = {}, traderInterpretation = {}, structuredFacts = {}){
+  const base = analysis && typeof analysis === 'object' ? analysis : {};
+  const prose = normalizeFlatStringFields(finalResponse, FINAL_PROSE_REQUIRED_FIELDS);
+  const interpretation = normalizeFlatStringFields(traderInterpretation, INTERPRETATION_REQUIRED_FIELDS);
+  const chartCoach = buildTwoStepChartCoach(prose, interpretation, structuredFacts);
+  return {
+    ...base,
+    coach_summary:prose.chartStory || base.coach_summary || '',
+    plain_english_chart_read:prose.chartStory || base.plain_english_chart_read || '',
+    candleStructureAnalysis:{
+      ...normalizeObject(base.candleStructureAnalysis),
+      noviceFriendlyCandleRead:prose.chartStory || normalizeObject(base.candleStructureAnalysis).noviceFriendlyCandleRead || '',
+      twoStepNarrative:{
+        chartStory:prose.chartStory,
+        whyItMatters:prose.whyItMatters,
+        setupLocation:prose.setupLocation,
+        learningPoint:prose.learningPoint,
+        whatNext:prose.whatNext
+      }
+    },
+    chartCoach,
+    chartGuruNarrative:{
+      chartStory:prose.chartStory,
+      whyItMatters:prose.whyItMatters,
+      setupLocation:prose.setupLocation,
+      learningPoint:prose.learningPoint,
+      whatNext:prose.whatNext
+    },
+    traderInterpretation:{
+      dominantEvent:interpretation.dominantEvent,
+      whatChanged:interpretation.whatChanged,
+      traderRead:interpretation.traderRead,
+      riskToWatch:interpretation.riskToWatch,
+      nextUsefulSignal:interpretation.nextUsefulSignal
+    },
+    chartGuruOpenAiFallbackReason:''
+  };
+}
+
+function disablePrimaryAnalysisChartCoach(analysis = {}, explanationFacts = []){
+  const base = analysis && typeof analysis === 'object' ? analysis : {};
+  return {
+    ...base,
+    chartCoach:buildEmptyChartCoach(explanationFacts),
+    chartGuruOpenAiFallbackReason:normaliseString(base.chartGuruOpenAiFallbackReason, '')
+  };
+}
+
+function validateRequiredStringFields(response, fields = []){
+  const source = safeObject(response);
+  const errors = [];
+  fields.forEach(field => {
+    if(!String(source[field] || '').trim()){
+      errors.push(`Missing required field: ${field}.`);
+    }
+  });
+  return errors;
+}
+
+function validateNoUnexpectedPriceMentions(response, fields = [], allowedValues = []){
+  const text = fields.map(field => String(safeObject(response)[field] || '').trim()).join('\n');
+  const allowed = new Set(normaliseStringArray(allowedValues));
+  const errors = [];
+  for(const match of text.matchAll(/\b\d+(?:\.\d+)?\b/g)){
+    const value = String(match[0]);
+    const index = Number(match.index || 0);
+    const context = text.slice(Math.max(0, index - 12), Math.min(text.length, index + value.length + 12));
+    if(allowed.has(value)) continue;
+    if(/\b(20|50|200)(?:-day|\s*day|\s*ma)\b/i.test(context)) continue;
+    if(/\bma\s*(20|50|200)\b/i.test(context)) continue;
+    if(/[£$€]/.test(context) || value.includes('.') || Number(value) >= 100){
+      errors.push(`Unexpected price-like number "${value}" in "${context.trim()}".`);
+    }
+  }
+  return errors;
+}
+
+function validateTraderInterpretationResponse(response){
+  const errors = validateRequiredStringFields(response, INTERPRETATION_REQUIRED_FIELDS);
+  return {ok:errors.length === 0, errors};
+}
+
+function validateFinalProseResponse(response, allowedPriceMentions = []){
+  const errors = validateRequiredStringFields(response, FINAL_PROSE_REQUIRED_FIELDS);
+  errors.push(...validateNoUnexpectedPriceMentions(response, FINAL_PROSE_REQUIRED_FIELDS, allowedPriceMentions));
+  return {ok:errors.length === 0, errors};
+}
+
+async function sendStrictSchemaOpenAiRequest(apiKey, model, instructions, prompt, schemaName, schema, maxOutputTokens = 600){
+  let upstream;
+  let upstreamJson = {};
+
+  try{
+    ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
+      apiKey,
+      buildStrictSchemaRequestBody(model, instructions, prompt, schemaName, schema, maxOutputTokens)
+    ));
+  }catch(err){
+    const error = new Error(err?.name === 'AbortError' ? 'OpenAI request timed out.' : 'Could not reach the OpenAI API.');
+    error.stage = schemaName;
+    throw error;
+  }
+
+  if(!upstream.ok && RETRYABLE_STATUSES.has(upstream.status)){
+    await sleep(800);
+    try{
+      ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
+        apiKey,
+        buildStrictSchemaRequestBody(model, instructions, prompt, schemaName, schema, maxOutputTokens)
+      ));
+    }catch(err){
+      const error = new Error(err?.name === 'AbortError' ? 'OpenAI request timed out.' : 'Could not reach the OpenAI API.');
+      error.stage = schemaName;
+      throw error;
+    }
+  }
+
+  if(!upstream.ok){
+    const openAiMessage = extractOpenAiErrorMessage(upstreamJson) || 'OpenAI request failed.';
+    const error = new Error(openAiMessage);
+    error.status = upstream.status;
+    error.payload = upstreamJson;
+    error.stage = schemaName;
+    throw error;
+  }
+
+  const rawText = extractOutputText(upstreamJson);
+  const parsed = tryParseJson(rawText);
+  if(!parsed || typeof parsed !== 'object'){
+    const error = new Error('OpenAI response could not be parsed as JSON.');
+    error.raw = rawText || null;
+    error.stage = schemaName;
+    throw error;
+  }
+
+  return {
+    rawText,
+    parsed
+  };
 }
 
 function normalizeCanonicalValues(canonicalValues = {}, trustedMarketContext = {}, imageFacts = {}){
@@ -593,37 +1041,7 @@ exports.handler = async function handler(event){
       'Set coach_summary, plain_english_chart_read, constructive_evidence, risk_evidence, what_needs_to_improve, and chartCoach to empty values.',
       'If a field is unknown, return null.'
     ].join('\n')
-    : [
-      'Analyse a Quality Pullback chart as Chart Guru, an observation-only educational feature.',
-      'Use plain English for a novice retail trader.',
-      'Be honest about uncertainty.',
-      'Do not invent chart details that are not provided.',
-      'Do not issue buy/sell advice.',
-      'Do not assign the app final readiness label, trading action, verdict, state, bucket, tone, promotion/demotion state, or score.',
-      'The deterministic app resolver will decide final state.',
-      'Use trustedMarketContext for all numeric values and canonical market facts.',
-      'Do not replace trusted ticker, timeframe, price, MA values, volume, candle OHLC, or trade-plan maths with visual guesses from the image.',
-      'Use the image only for visual structure, candle interpretation, and disagreement detection.',
-      'If the image disagrees with trustedMarketContext, return both but keep trustedMarketContext canonical.',
-      'If a chart image is attached, extract visible facts only: visible ticker, timeframe, latest price, moving average values, visible price/date range, and confidence.',
-      'If numeric chart labels are visible but cannot be confidently assigned to latest price or a specific moving average, include them in visible_numeric_labels.',
-      'TradingView mobile/narrow screenshots may crop MA legend text or numeric labels. If an MA line is visible but its value is unreadable, report the line as visible and keep the numeric value null.',
-      'Do not fabricate MA values. Visibility can be partial/inferred; numeric values require readable text.',
-      'Do not decide whether the chart is authentic. The app will compare extracted facts against trusted scanner and market data.',
-      'Legacy fallback only: if deterministic facts are not visible enough and the chart/ticker match looks doubtful, return chart_match_status as mismatch or unclear and explain chart_match_warning.',
-      'Return extractedFromImage, trustedMarketContext, canonicalValues, candleStructureAnalysis, tradePlanCommentary, chartCoach, confidenceWarnings, and a short novice-friendly candle read.',
-      'chartCoach is the main educational output for Chart Guru.',
-      'The app has already determined the setup context and story order before you respond.',
-      'chartCoach must include a deterministic primaryStory object with key, label, icon, text, evidenceFactIds, confidence, and rankReason.',
-      'Use the supplied chart evidence to explain the app-determined primary story first, then supporting evidence, then one learning point, then What next?.',
-      'chartCoach.sections must contain at most 5 relevant emoji-led sections.',
-      'The first section should usually be Biggest clue and should follow primaryStory.',
-      'Include only one Learning point section and one What next? section.',
-      'You may simplify or polish the deterministic explanation for a beginner, but do not rediscover the chart from scratch or change primaryStory key, section order, evidence facts, numeric values, confidence, or resolver authority.',
-      'Return exactly one JSON object.',
-      'Return evidence fields only; ai_observation_only must be true.',
-      'If a field is unknown, return null.'
-    ].join('\n');
+    : buildProductionAnalysisInstructionLines().join('\n');
 
   let upstream;
   let upstreamJson = {};
@@ -751,7 +1169,92 @@ exports.handler = async function handler(event){
     });
   }
 
-  const analysis = normaliseAnalysis(parsed, payload);
+  let analysis = disablePrimaryAnalysisChartCoach(
+    normaliseAnalysis(parsed, payload),
+    ['primary_analysis_chart_coach_disabled_for_two_step']
+  );
+
+  try{
+    const structuredFacts = buildProductionStructuredFacts(payload, analysis);
+    const allowedPriceMentions = Array.from(collectAllowedNumericMentions(structuredFacts));
+    const interpretationPrompt = buildProductionChartGuruInterpretationPrompt(structuredFacts, tightenedPrompt);
+    const interpretationResult = await sendStrictSchemaOpenAiRequest(
+      apiKey,
+      model,
+      buildProductionChartGuruInterpretationInstructions(),
+      interpretationPrompt,
+      'chart_guru_trader_interpretation',
+      TRADER_INTERPRETATION_SCHEMA,
+      500
+    );
+    const interpretationValidation = validateTraderInterpretationResponse(interpretationResult.parsed);
+    if(!interpretationValidation.ok){
+      console.error('Chart Guru trader interpretation validation failed; falling back to deterministic Chart Guru', {
+        model,
+        ticker: String(payload.ticker || ''),
+        errors: interpretationValidation.errors
+      });
+      analysis.chartGuruOpenAiFallbackReason = 'interpretation_validation_failed';
+      analysis.chartGuruOpenAiValidationErrors = interpretationValidation.errors.slice();
+      analysis.chartCoach = buildEmptyChartCoach(['interpretation_validation_failed']);
+      return jsonResponse(200, {
+        ok:true,
+        model,
+        analysis
+      });
+    }
+
+    const finalPrompt = buildProductionChartGuruFinalPrompt(structuredFacts, interpretationResult.parsed, tightenedPrompt);
+    const finalResult = await sendStrictSchemaOpenAiRequest(
+      apiKey,
+      model,
+      buildProductionChartGuruFinalInstructions(),
+      finalPrompt,
+      'chart_guru_final_prose',
+      FINAL_PROSE_SCHEMA,
+      700
+    );
+    const finalValidation = validateFinalProseResponse(finalResult.parsed, allowedPriceMentions);
+    if(!finalValidation.ok){
+      console.error('Chart Guru final prose validation failed; falling back to deterministic Chart Guru', {
+        model,
+        ticker: String(payload.ticker || ''),
+        errors: finalValidation.errors
+      });
+      analysis.chartGuruOpenAiFallbackReason = 'final_prose_validation_failed';
+      analysis.chartGuruOpenAiValidationErrors = finalValidation.errors.slice();
+      analysis.chartCoach = buildEmptyChartCoach(['final_prose_validation_failed']);
+      return jsonResponse(200, {
+        ok:true,
+        model,
+        analysis
+      });
+    }
+
+    analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, finalResult.parsed, interpretationResult.parsed, structuredFacts);
+  }catch(err){
+    const stage = String(err && err.stage || '');
+    const failureReason = /chart_guru_trader_interpretation/i.test(stage)
+      ? (/parsed as json/i.test(String(err && err.message || '')) ? 'interpretation_json_parse_failed' : 'interpretation_request_failed')
+      : (/chart_guru_final_prose/i.test(stage)
+        ? (/parsed as json/i.test(String(err && err.message || '')) ? 'final_prose_json_parse_failed' : 'final_prose_request_failed')
+        : 'chart_guru_pipeline_failed');
+    console.error('Chart Guru two-step pipeline failed; falling back to deterministic Chart Guru', {
+      model,
+      ticker:String(payload.ticker || ''),
+      message:String(err && err.message || 'Unknown error'),
+      status:Number.isFinite(Number(err && err.status)) ? Number(err.status) : null,
+      raw:err && Object.prototype.hasOwnProperty.call(err, 'raw') ? err.raw : null
+    });
+    analysis.chartGuruOpenAiFallbackReason = failureReason;
+    analysis.chartGuruOpenAiError = String(err && err.message || 'Chart Guru two-step pipeline failed.');
+    analysis.chartCoach = buildEmptyChartCoach([failureReason]);
+    return jsonResponse(200, {
+      ok:true,
+      model,
+      analysis
+    });
+  }
 
   console.log('OPENAI_ANALYSIS_SUCCESS_PAYLOAD', JSON.stringify({
     ok: true,
