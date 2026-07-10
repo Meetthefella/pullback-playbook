@@ -287,8 +287,17 @@ for(const fixtureId of ['CAT_event_first_failed_bounce', 'ALLY_event_first_50ma_
     expect(chartRead.primaryStoryKey).toBe(expectedPrimaryStoryKey);
     expect(chartRead.recentStoryKey).toBe(expectedRecentStoryKey);
     expect(chartRead.trendLabel).toBe(chartRead.traderDominantEvent);
-    await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('🧘 Chart Guru');
+    await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('\u{1F9D8} Chart Guru');
     await expect(page.locator('#reviewAiSummaryPreview')).toContainText(fixture.finalProse.chartStory);
+    await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F3AF} What next?');
+    await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00F0\u0178');
+    await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00E2\u20AC');
+    await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00C3');
+    await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00C2');
+    await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00F0\u0178');
+    await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00E2\u20AC');
+    await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00C3');
+    await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00C2');
     await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('dominantEvent');
     await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('currentRisk');
     await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('nextSignal');

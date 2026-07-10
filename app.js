@@ -25348,7 +25348,7 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     );
   const useFallback = /^deterministic_/.test(String(selectedSummary.source || ''));
   const baseText = aiBaseText;
-  const sanitizedText = sanitizeAliveWatchSemanticCopy(baseText, semanticSetup);
+  const sanitizedText = repairChartGuruStoredText(sanitizeAliveWatchSemanticCopy(baseText, semanticSetup));
   return {
     text:sanitizedText,
     applied:correction.applied || useFallback,
@@ -25369,13 +25369,79 @@ function finalDisplayedAnalysisChartRead(record, analysis){
   };
 }
 
+const CHART_GURU_MOJIBAKE_REPAIRS = Object.freeze({
+  'ðŸ§˜':'🧘',
+  'ðŸ§­':'🧭',
+  'ðŸ§ ':'🧠',
+  'Ã°Å¸Â§Â­':'🧠',
+  'ðŸ“':'📍',
+  'ðŸ’¡':'💡',
+  'ðŸŽ¯':'🎯',
+  'ðŸ“‰':'📉',
+  'ðŸŸ¢':'🟢',
+  'ðŸŸ¡':'🟡',
+  'ðŸ”´':'🔴',
+  'ðŸ“ˆ':'📈',
+  'ðŸ“Š':'📊'
+});
+
+const CHART_GURU_SECTION_DISPLAY = Object.freeze({
+  biggest_clue:{icon:'🧭', label:'Chart Story'},
+  why_it_matters:{icon:'🧭', label:'Why it matters'},
+  setup_location:{icon:'📍', label:'Setup location'},
+  support:{icon:'📍', label:'Support'},
+  resistance:{icon:'📍', label:'Resistance'},
+  trend:{icon:'📈', label:'Trend'},
+  weakness:{icon:'📉', label:'Weakness'},
+  volume:{icon:'📊', label:'Volume'},
+  wicks:{icon:'🕯️', label:'Candle clue'},
+  indecision:{icon:'🧭', label:'Indecision'},
+  learning_point:{icon:'💡', label:'Learning point'},
+  what_next:{icon:'🎯', label:'What next?'}
+});
+
+function repairChartGuruStoredText(value = ''){
+  const safe = String(value || '');
+  if(!/[ðâÃÂ]/.test(safe)) return safe;
+  let repaired = safe;
+  Object.entries(CHART_GURU_MOJIBAKE_REPAIRS).forEach(([broken, fixed]) => {
+    repaired = repaired.split(broken).join(fixed);
+  });
+  return repaired;
+}
+
+function normalizeChartGuruSectionKey(value = ''){
+  const normalized = String(value || '')
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+  if(normalized === 'chart_story') return 'biggest_clue';
+  if(normalized === 'why_it_matters') return 'why_it_matters';
+  if(normalized === 'setup_location') return 'setup_location';
+  if(normalized === 'learning_point') return 'learning_point';
+  if(normalized === 'what_next') return 'what_next';
+  return normalized;
+}
+
+function chartGuruSectionDisplayForKey(key = '', fallback = {}){
+  const normalizedKey = normalizeChartGuruSectionKey(key);
+  const canonical = CHART_GURU_SECTION_DISPLAY[normalizedKey] || null;
+  if(canonical) return canonical;
+  return {
+    icon:repairChartGuruStoredText(String(fallback.icon || '').trim()),
+    label:repairChartGuruStoredText(String(fallback.label || '').trim())
+  };
+}
+
 function renderChartCoachMarkup(display = {}){
   const chartCoach = display && display.chartCoach && typeof display.chartCoach === 'object'
     ? display.chartCoach
     : null;
   const sections = chartCoach && Array.isArray(chartCoach.sections) ? chartCoach.sections : [];
   if(!sections.length){
-    return escapeHtml(String(display && display.text || '').trim());
+    return escapeHtml(repairChartGuruStoredText(String(display && display.text || '').trim()));
   }
   return sections.map(section => {
     const lines = String(section.text || '').split('\n').map(line => String(line || '').trim()).filter(Boolean);
@@ -25391,16 +25457,25 @@ function sanitizeChartCoachForDisplay(chartCoach = null, setup = {}){
   const sections = Array.isArray(safe.sections)
     ? safe.sections.map(section => {
       const item = section && typeof section === 'object' ? section : {};
+      const key = normalizeChartGuruSectionKey(item.key || '');
+      const display = chartGuruSectionDisplayForKey(key, item);
       return {
         ...item,
-        text:sanitizeAliveWatchSemanticCopy(String(item.text || '').trim(), setup)
+        key,
+        icon:display.icon,
+        label:display.label,
+        text:repairChartGuruStoredText(sanitizeAliveWatchSemanticCopy(String(item.text || '').trim(), setup))
       };
     }).filter(section => section.icon && section.label && section.text)
     : [];
+  const primaryStoryDisplay = chartGuruSectionDisplayForKey('biggest_clue', safe.primaryStory || {});
   const primaryStory = safe.primaryStory && typeof safe.primaryStory === 'object'
     ? {
       ...safe.primaryStory,
-      text:sanitizeAliveWatchSemanticCopy(String(safe.primaryStory.text || '').trim(), setup)
+      key:normalizeChartGuruSectionKey(safe.primaryStory.key || '') || String(safe.primaryStory.key || '').trim(),
+      icon:primaryStoryDisplay.icon,
+      label:primaryStoryDisplay.label,
+      text:repairChartGuruStoredText(sanitizeAliveWatchSemanticCopy(String(safe.primaryStory.text || '').trim(), setup))
     }
     : null;
   return {
@@ -25409,7 +25484,7 @@ function sanitizeChartCoachForDisplay(chartCoach = null, setup = {}){
     sections,
     summaryText:sections.length
       ? sections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n')
-      : sanitizeAliveWatchSemanticCopy(String(safe.summaryText || '').trim(), setup)
+      : repairChartGuruStoredText(sanitizeAliveWatchSemanticCopy(String(safe.summaryText || '').trim(), setup))
   };
 }
 
@@ -25865,6 +25940,7 @@ function chartGuruBuyerResponsePresent(context = {}){
 
 function chartGuruSemanticEnvelopeFromStory(storyKey = '', context = {}){
   const normalizedKey = String(storyKey || '').trim().toLowerCase();
+  const buyerResponsePresent = chartGuruBuyerResponsePresent(context);
   const supportSemantic = (() => {
     if(['early_rebound_from_20ma', 'constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(normalizedKey)){
       return 'support_present';
@@ -25877,14 +25953,16 @@ function chartGuruSemanticEnvelopeFromStory(storyKey = '', context = {}){
     return 'support_unknown';
   })();
   const buyerResponseSemantic = (() => {
-    if(['failed_bounce', 'structure_breaking_down', 'sharp_selloff'].includes(normalizedKey)) return 'response_failed';
-    if(chartGuruBuyerResponsePresent(context)) return 'response_present';
+    if(normalizedKey === 'failed_bounce') return 'response_failed';
+    if(buyerResponsePresent) return 'response_present';
+    if(['structure_breaking_down', 'sharp_selloff'].includes(normalizedKey)) return 'response_failed';
     if(['off_level_wait_for_clearer_support', 'extended_after_run'].includes(normalizedKey)) return 'response_absent';
     return 'response_unknown';
   })();
   const confirmationSemantic = (() => {
     if(context.followThroughConfirmed === true || normalizedKey === 'bounce_confirmation_pending') return 'follow_through_confirmed';
-    if(context.failedBounce === true || ['failed_bounce', 'structure_breaking_down'].includes(normalizedKey)) return 'follow_through_failed';
+    if(context.failedBounce === true || normalizedKey === 'failed_bounce') return 'follow_through_failed';
+    if(['structure_breaking_down', 'sharp_selloff'].includes(normalizedKey) && !buyerResponsePresent) return 'follow_through_failed';
     if(buyerResponseSemantic === 'response_present') return 'follow_through_unconfirmed';
     return 'follow_through_unknown';
   })();
@@ -25947,6 +26025,8 @@ function chartNarratorStepEvidenceFactIds(step = '', context = {}){
     pullback_to_50ma:['support_medium_term_average'],
     buyer_response:[
       ...(context.bounceAttempt === true ? ['bounce_attempt'] : []),
+      ...((context.bounceAttempt !== true && chartGuruBuyerResponsePresent(context)) ? ['buyer_response_state'] : []),
+      ...(['early', 'clear', 'present'].includes(String(context.stabilisationState || '').trim().toLowerCase()) ? ['stabilisation_present'] : []),
       ...(context.latestWickRejection === 'lower_rejection' ? ['lower_rejection_wick'] : [])
     ],
     sellers_pushed_back:[
@@ -26048,8 +26128,11 @@ function chartNarratorStepDerivedSupport(step = '', context = {}, recentStory = 
       derivedFromConditions:['break_direction_unconfirmed']
     },
     repair_needed:{
-      derivedFromSteps:['weak_structure', 'support_not_reclaimed'],
-      derivedFromConditions:['structure_not_repaired']
+      derivedFromSteps:[
+        hasStep('support_lost') ? 'support_lost' : (hasStep('weak_structure') ? 'weak_structure' : ''),
+        hasStep('buyer_response') ? 'buyer_response' : (hasStep('support_not_reclaimed') ? 'support_not_reclaimed' : '')
+      ].filter(Boolean),
+      derivedFromConditions:[hasStep('support_lost') ? 'support_failed' : 'structure_not_repaired']
     }
   };
   return Object.prototype.hasOwnProperty.call(map, normalized) ? map[normalized] : null;
@@ -26097,6 +26180,7 @@ function chartNarratorRecentStoryForPrimaryStory(primaryStory = {}, context = {}
   }else if(key === 'structure_breaking_down'){
     steps.push('broken_structure');
     steps.push(context.failedBounce === true ? 'failed_bounce' : 'support_lost');
+    if(chartGuruBuyerResponsePresent(context)) steps.push('buyer_response', 'repair_needed');
     steps.push('avoid');
   }else if(key === 'strong_upside_acceleration'){
     steps.push('strong_uptrend', 'buyers_in_control', context.activeVolume === true ? 'volume_supports_move' : 'volume_mixed', 'wait_for_calmer_pullback');
@@ -26216,6 +26300,12 @@ function chartNarratorStoryTextForPrimaryStory(primaryStory = {}, context = {}, 
     ], seed);
   }
   if(key === 'structure_breaking_down'){
+    if(chartGuruBuyerResponsePresent(context) && context.followThroughConfirmed !== true){
+      return chartNarratorDeterministicPick([
+        'Support has already failed, so the chart is still damaged. Buyers are trying to stabilise it, but they have not regained control yet, which keeps this in rebuild mode rather than turning it back into a healthy pullback.',
+        'This is still a damaged chart because support has already given way. Buyers are attempting to steady the action, but the rebound has not repaired the structure or put them back in control yet.'
+      ], seed + (context.failedBounce === true ? 1 : 0));
+    }
     return chartNarratorDeterministicPick([
       'The bigger picture is no longer healthy. Price has lost support and sellers are still controlling the recent candles, so this looks more like a chart breaking down than a normal pullback.',
       'This is not a constructive pause anymore. Support has given way, and the recent action still shows sellers in charge.'
@@ -26273,7 +26363,11 @@ function chartNarratorWhyItMattersForStory(primaryStory = {}, context = {}, rece
   }
   if(key === 'off_level_wait_for_clearer_support') return 'Good charts are usually easier to manage when they pull back into a level that clearly matters. Away from support, the reward-to-risk picture is usually less clear.';
   if(key === 'pullback_still_repairing') return 'When price cannot quickly retake a support area, it tells you the pullback is still doing damage instead of settling down.';
-  if(key === 'structure_breaking_down') return 'Once support starts failing, small bounce attempts are less trustworthy because the chart first needs time to rebuild.';
+  if(key === 'structure_breaking_down'){
+    return chartGuruBuyerResponsePresent(context) && context.followThroughConfirmed !== true
+      ? 'Even when buyers try to stabilise a damaged chart, that attempt matters only if it can rebuild the structure and take control back.'
+      : 'Once support starts failing, small bounce attempts are less trustworthy because the chart first needs time to rebuild.';
+  }
   if(key === 'strong_upside_acceleration') return 'Big up moves can keep going, but they also become easier to mis-time if you chase them after they are already extended.';
   if(key === 'sharp_selloff') return 'Fast weakness usually matters because it shows buyers are stepping back, not because one red candle is magical on its own.';
   if(key === 'bounce_confirmation_pending') return 'Early support reactions are useful, but the chart only improves if buyers can add another sign of strength.';
@@ -26336,9 +26430,13 @@ function chartNarratorSupportSectionsForStory(recentStory = null, context = {}){
       key:'weakness',
       icon:'📉',
       label:'Weakness',
-      text:`Price has already lost the ${supportLabel}, so this has moved from a normal pullback into clear damage.`,
-      confidence:0.9,
-      storySteps:['support_lost', 'broken_structure']
+      text:hasStep('buyer_response')
+        ? `Price has already lost the ${supportLabel}, so the chart is damaged. Buyers are trying to stabilise it, but they still need to reclaim control before the setup can improve.`
+        : `Price has already lost the ${supportLabel}, so this has moved from a normal pullback into clear damage.`,
+      confidence:hasStep('buyer_response') ? 0.88 : 0.9,
+      storySteps:hasStep('buyer_response')
+        ? ['support_lost', 'buyer_response', 'repair_needed']
+        : ['support_lost', 'broken_structure']
     });
   }else if(hasStep('buyers_in_control')){
     addSection({
@@ -26487,7 +26585,11 @@ function chartCoachLearningPointForStory(storyKey = '', context = {}){
       ? 'One good day can start a bounce, but it usually means more when buyers can back it up on the next day as well.'
       : 'A push off the low matters more when the next candle also closes stronger instead of slipping back again.';
   }
-  if(storyKey === 'structure_breaking_down') return 'When support stops holding, the chart usually needs time to rebuild before a safer setup can appear.';
+  if(storyKey === 'structure_breaking_down'){
+    return chartGuruBuyerResponsePresent(context) && context.followThroughConfirmed !== true
+      ? 'Once support fails, a small rebound only matters if it keeps building and starts repairing the structure.'
+      : 'When support stops holding, the chart usually needs time to rebuild before a safer setup can appear.';
+  }
   if(storyKey === 'extended_after_run') return 'A strong trend is easier to manage after it pulls back into support than when price is still stretched well above it.';
   if(storyKey === 'strong_upside_acceleration'){
     return volumeRatio >= 1.05
@@ -26529,7 +26631,9 @@ function chartCoachWhatNextForStory(storyKey = '', context = {}){
       : `Watch for buyers to defend the ${supportLabel} and close stronger on the next candle. A decisive break below support would show that defence has failed.`;
   }
   if(storyKey === 'structure_breaking_down'){
-    return 'Watch for the chart to stop making weaker closes and rebuild a proper base before treating any bounce as meaningful.';
+    return chartGuruBuyerResponsePresent(context) && context.followThroughConfirmed !== true
+      ? 'Watch for the chart to build a firmer base, hold up better on the next pullback, and reclaim control before treating this rebound as meaningful.'
+      : 'Watch for the chart to stop making weaker closes and rebuild a proper base before treating any bounce as meaningful.';
   }
   if(storyKey === 'extended_after_run'){
     return 'Watch for a calmer pullback into the 20-day average or another clear support area before treating the move as lower risk.';
@@ -26612,6 +26716,8 @@ function chartCoachPrimaryStoryCandidates(context = {}){
     const evidenceFactIds = ['trend_context', 'weakness_signal'];
     if(structureBroken) evidenceFactIds.push('structure_broken');
     if(failedBounce) evidenceFactIds.push('failed_bounce');
+    if(buyerResponsePresent) evidenceFactIds.push('buyer_response_state');
+    if(['early', 'clear', 'present'].includes(String(context.stabilisationState || '').trim().toLowerCase())) evidenceFactIds.push('stabilisation_present');
     candidates.push({
       key:'structure_breaking_down',
       label:'Biggest clue',
@@ -34800,7 +34906,7 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
   const context = {
     bounceAttempt:eventPacketEvidenceIncludes(evidenceFactIds, 'bounce_attempt'),
     followThroughConfirmed:String(recentStory.confidenceMode || '').trim().toLowerCase() === 'follow_through_confirmed',
-    failedBounce:dominantEventKey === 'failed_bounce',
+    failedBounce:dominantEventKey === 'failed_bounce' || eventPacketEvidenceIncludes(evidenceFactIds, 'failed_bounce'),
     pullbackNear20:/20-day/.test(supportLabel),
     pullbackNear50:/50-day/.test(supportLabel),
     recentlyLeftSupportZone:['off_level_wait_for_clearer_support', 'extended_after_run'].includes(dominantEventKey),
@@ -35034,23 +35140,26 @@ function normalizeAnalysisResponse(raw){
     const sections = Array.isArray(safe.sections)
       ? safe.sections.map(section => {
         const item = normalizeObject(section) || {};
+        const key = normalizeChartGuruSectionKey(item.key || '');
+        const display = chartGuruSectionDisplayForKey(key, item);
         return {
-          key:String(item.key || '').trim(),
-          icon:String(item.icon || '').trim(),
-          label:String(item.label || '').trim(),
-          text:String(item.text || '').trim(),
+          key,
+          icon:display.icon,
+          label:display.label,
+          text:repairChartGuruStoredText(String(item.text || '').trim()),
           confidence:Number.isFinite(Number(item.confidence)) ? Number(item.confidence) : null,
           teachingFocus:item.teachingFocus === true,
           source:String(item.source || '').trim()
         };
       }).filter(section => section.icon && section.label && section.text)
       : [];
+    const primaryStoryDisplay = chartGuruSectionDisplayForKey('biggest_clue', primaryStorySource || {});
     return {
       primaryStory:hasPrimaryStory ? {
-        key:String(primaryStorySource.key || '').trim(),
-        label:String(primaryStorySource.label || '').trim(),
-        icon:String(primaryStorySource.icon || '').trim(),
-        text:String(primaryStorySource.text || '').trim(),
+        key:normalizeChartGuruSectionKey(primaryStorySource.key || '') || String(primaryStorySource.key || '').trim(),
+        label:primaryStoryDisplay.label,
+        icon:primaryStoryDisplay.icon,
+        text:repairChartGuruStoredText(String(primaryStorySource.text || '').trim()),
         evidenceFactIds:Array.isArray(primaryStorySource.evidenceFactIds || primaryStorySource.evidence_fact_ids)
           ? (primaryStorySource.evidenceFactIds || primaryStorySource.evidence_fact_ids).map(item => String(item || '').trim()).filter(Boolean)
           : [],
@@ -35059,7 +35168,9 @@ function normalizeAnalysisResponse(raw){
       } : null,
       recentStory:normalizeObject(safe.recentStory || safe.recent_story) || null,
       sections,
-      summaryText:String(safe.summaryText || safe.summary_text || '').trim(),
+      summaryText:sections.length
+        ? sections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n')
+        : repairChartGuruStoredText(String(safe.summaryText || safe.summary_text || '').trim()),
       source:String(safe.source || '').trim(),
       renderVersion:String(safe.renderVersion || safe.render_version || '').trim(),
       diagnostics:normalizeObject(safe.diagnostics) || null,
@@ -45538,8 +45649,8 @@ function renderReviewWorkspace(options = {}){
     resolvedReviewDisplay
   });
   const chartCoachDisplay = chartGuruDisplayState.display || {text:'No Chart Guru saved yet.', markup:'', title:'🧘 Chart Guru'};
-  const aiSummaryTitle = chartCoachDisplay.title || '🧘 Chart Guru';
-  const aiSummaryPreview = String(chartCoachDisplay.text || '').trim();
+  const aiSummaryTitle = repairChartGuruStoredText(chartCoachDisplay.title || '\u{1F9D8} Chart Guru');
+  const aiSummaryPreview = repairChartGuruStoredText(String(chartCoachDisplay.text || '').trim());
   const chartCoachMarkup = String(chartCoachDisplay.markup || '').trim();
   const aiSummaryVisible = !!String(aiSummaryPreview || '').trim()
     && aiSummaryPreview !== 'No Chart Guru saved yet.'
@@ -45810,7 +45921,7 @@ function renderReviewWorkspace(options = {}){
       <div class="review-action-row review-action-row--top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(effectivePlanUi.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
       ${aiSummaryVisible ? `<details class="responsepanel compact-open-on-demand" id="reviewResponse" data-tour="ai-summary" ${analysisResponseOpen}>
-        <summary id="reviewAiSummaryTitle">${escapeHtml(aiSummaryTitle)}</summary>
+        <summary id="reviewAiSummaryTitle">${escapeHtml(repairChartGuruStoredText(aiSummaryTitle))}</summary>
         <div class="tiny review-ai-preview${chartCoachMarkup ? ' review-ai-preview--chart-coach' : ''}" id="reviewAiSummaryPreview">${chartCoachMarkup || escapeHtml(aiSummaryPreview)}</div>
         <div class="tiny review-ai-overflow-hint" id="reviewAiSummaryOverflowHint" hidden>Scroll for more</div>
       </details>` : ''}

@@ -56,6 +56,15 @@ function inferSemanticEnvelope(primaryStory = {}, recentStory = {}){
       confirmationSemantic:'follow_through_failed'
     };
   }
+  if(storyKey === 'structure_breaking_down'){
+    const steps = Array.isArray(recentStory.steps) ? recentStory.steps.map(step => String(step || '').trim()) : [];
+    const buyerResponsePresent = steps.includes('buyer_response');
+    return {
+      supportSemantic:'support_failed',
+      buyerResponseSemantic:buyerResponsePresent ? 'response_present' : 'response_failed',
+      confirmationSemantic:buyerResponsePresent ? 'follow_through_unconfirmed' : 'follow_through_failed'
+    };
+  }
   if(storyKey === 'off_level_wait_for_clearer_support'){
     return {
       supportSemantic:'support_absent',

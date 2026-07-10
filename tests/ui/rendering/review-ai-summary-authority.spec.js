@@ -229,19 +229,27 @@ test('Chart Guru renders deterministic teaching sections in the review UI', asyn
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('🧘 Chart Guru');
+  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('\u{1F9D8} Chart Guru');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('AI Summary');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Guru Notes');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Coach');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Chart Story');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F9ED} Chart Story');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('buyers have started to respond');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('50-day average');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('setup constructive as long as buyers can follow through');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Why it matters');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('💡 Learning point');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F9ED} Why it matters');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F4A1} Learning point');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Volume');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Volume');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
+  await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00F0\u0178');
+  await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00E2\u20AC');
+  await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00C3');
+  await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00C2');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00F0\u0178');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00E2\u20AC');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00C3');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00C2');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F3AF} What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('AI analysis failed');
 
@@ -272,9 +280,9 @@ test('Chart Guru renders deterministic teaching sections in the review UI', asyn
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🟢 Chart Story');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('Why it matters');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F9ED} Chart Story');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F9ED} Why it matters');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F3AF} What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
 
   await page.setViewportSize({width:390, height:844});
@@ -312,7 +320,7 @@ test('Chart Guru renders deterministic teaching sections in the review UI', asyn
     }
   });
 
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F3AF} What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('Interesting setup. Monitor.');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('observe how price behaves around key moving averages');
 });
@@ -381,10 +389,10 @@ test('Chart Guru renders the production two-step chartCoach when it is usable', 
   expect(chartRead.selectedSummarySource).toBe('openai_two_step_chart_guru');
   expect(chartRead.usedDeterministicFallback).toBe(false);
   expect(chartRead.previewText).toContain('buyers tried to bounce');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🧭 Chart Story');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F9ED} Chart Story');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('buyers tried to bounce');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📍 Setup location');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F3AF} What next?');
 });
 
 test('Chart Guru sanitizes contradictory two-step section copy before Review render', async ({page}) => {
@@ -636,14 +644,23 @@ test('Chart Guru renders the structure_breaking_down branch in the Review UI', a
     };
   });
 
-  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('🧘 Chart Guru');
+  await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('\u{1F9D8} Chart Guru');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('AI Summary');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Guru Notes');
   await expect(page.locator('#reviewWorkspace')).not.toContainText('Chart Coach');
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('📉 Chart Story');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F9ED} Chart Story');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText(deterministicModel.biggestClueText);
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F4C9} Weakness');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText(deterministicModel.whatNextText);
-  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('🎯 What next?');
+  await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00F0\u0178');
+  await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00E2\u20AC');
+  await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00C3');
+  await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00C2');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00F0\u0178');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00E2\u20AC');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00C3');
+  await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('\u00C2');
+  await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F3AF} What next?');
   await expect(page.locator('#reviewAiSummaryPreview')).toContainText('rebuild a proper base');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('The latest candle is red');
   await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('The latest candle is small');

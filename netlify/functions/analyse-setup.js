@@ -484,11 +484,22 @@ function classifyBuyerResponseSemantic(text = ''){
   return 'response_unknown';
 }
 
+function classifyRepairNarrationSemantic(text = ''){
+  const safe = String(text || '').trim().toLowerCase();
+  if(!safe) return 'repair_unknown';
+  if(/\b(?:rebuild|repair mode|still damaged|not repaired|have not regained control|has not regained control|buyers are trying to stabili(?:s|z)e|attempting to steady|stabili(?:s|z)e it)\b/.test(safe)) return 'repair_unconfirmed';
+  if(/\b(?:repaired|recovered|regained control|buyers are back in control|trend is healthy again)\b/.test(safe)) return 'repair_confirmed';
+  return 'repair_unknown';
+}
+
 function semanticContradictionsForEnvelope(text = '', envelope = {}){
   const safeEnvelope = buildSemanticEnvelope(envelope);
   const errors = [];
   const supportSemantic = classifySupportNarrationSemantic(text);
   const buyerResponseSemantic = classifyBuyerResponseSemantic(text);
+  const repairSemantic = classifyRepairNarrationSemantic(text);
+  const buyerResponseMentioned = buyerResponseSemantic === 'response_present';
+  const unqualifiedSellerControl = /\bsellers (?:are|remain|still look) (?:fully )?(?:in charge|in control)\b|\brecent action still shows sellers in charge\b|\bsellers are still controlling the recent candles\b/.test(String(text || '').trim().toLowerCase());
   if(safeEnvelope.supportSemantic === 'support_present' && ['support_absent'].includes(supportSemantic)){
     errors.push('Narration contradicts support_present by implying price is away from support.');
   }
@@ -500,6 +511,21 @@ function semanticContradictionsForEnvelope(text = '', envelope = {}){
   }
   if(safeEnvelope.buyerResponseSemantic === 'response_failed' && buyerResponseSemantic === 'response_present' && !/\bfail(?:ed|ure)\b/i.test(String(text || ''))){
     errors.push('Narration contradicts response_failed by implying a healthy buyer response.');
+  }
+  if(
+    safeEnvelope.supportSemantic === 'support_failed'
+    && safeEnvelope.buyerResponseSemantic === 'response_present'
+    && safeEnvelope.confirmationSemantic !== 'follow_through_confirmed'
+  ){
+    if(!buyerResponseMentioned){
+      errors.push('Narration must acknowledge the buyer response when support has failed but stabilisation is being attempted.');
+    }
+    if(repairSemantic === 'repair_confirmed'){
+      errors.push('Narration contradicts the damaged-but-unconfirmed envelope by implying the chart has already repaired.');
+    }
+    if(unqualifiedSellerControl && !buyerResponseMentioned){
+      errors.push('Narration overstates seller control by omitting the active stabilisation attempt.');
+    }
   }
   return errors;
 }
@@ -609,6 +635,7 @@ function buildProductionChartGuruInterpretationInstructions(){
     'Do not write beginner prose.',
     'Do not invent prices, new indicators, or unsupported chart facts.',
     'Carry supportSemantic, buyerResponseSemantic, and confirmationSemantic forward from the deterministic evidence instead of re-inferring them.',
+    'If support has already failed but buyerResponseSemantic says a response is present, keep the dominant event negative while preserving that stabilisation attempt as live context.',
     'If deterministic context says the setup is near the 20-day or 50-day average, do not describe price as away from support unless the deterministic event packet explicitly says the setup is off-level or extended.',
     'Return only the JSON fields defined by the schema.'
   ].join('\n');
@@ -634,6 +661,7 @@ function buildProductionChartGuruFinalInstructions(){
     'Do not issue buy/sell advice or app verdicts.',
     'Use supportSemantic, buyerResponseSemantic, and confirmationSemantic as fixed meaning constraints from the trader interpretation.',
     'Preserve support-location meaning from the trader interpretation. Do not rewrite a near-support rebound as price being away from support.',
+    'If supportSemantic is support_failed while buyerResponseSemantic is response_present and confirmationSemantic is not follow_through_confirmed, explain that support already failed, buyers are trying to stabilise, and control has not been regained.',
     'Return exactly one JSON object.',
     'Return only these fields as JSON strings: chartStory, whyItMatters, setupLocation, learningPoint, whatNext.',
     'If a field is unknown, return an empty string.'
@@ -1583,6 +1611,7 @@ exports.__test = {
   buildEmptyChartCoach,
   classifySupportNarrationSemantic,
   classifyBuyerResponseSemantic,
+  classifyRepairNarrationSemantic,
   semanticContradictionsForEnvelope,
   validateTraderInterpretationResponse,
   validateFinalProseResponse

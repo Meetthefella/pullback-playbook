@@ -337,6 +337,12 @@ function verifyNetlifyNormalizationAndTutorBoundary(){
     assert.strictEqual(mergedAnalysis.deterministicEventPacket.primaryStoryKey, sourcePacket.primaryStoryKey, `${fixture.id}: merged analysis must store deterministicEventPacket.`);
     assert.deepStrictEqual(toPlainJson(mergedAnalysis.traderInterpretation.eventSequence), toPlainJson(sourcePacket.eventSequence), `${fixture.id}: merged analysis must retain eventSequence in traderInterpretation.`);
     assert.strictEqual(mergedAnalysis.traderInterpretation.traderInterpretation, fixture.interpreterResponse.traderInterpretation, `${fixture.id}: merged analysis must store normalized traderInterpretation text.`);
+    if(fixture.id === 'MSFT_event_first_support_breakdown_stabilising'){
+      assert.strictEqual(sourcePacket.primaryStoryKey, 'structure_breaking_down', 'MSFT should preserve the structural-breakdown dominant event.');
+      assert.strictEqual(sourcePacket.supportSemantic, 'support_failed', 'MSFT should preserve support_failed semantics.');
+      assert.strictEqual(sourcePacket.buyerResponseSemantic, 'response_present', 'MSFT should preserve the active stabilisation attempt.');
+      assert.strictEqual(sourcePacket.confirmationSemantic, 'follow_through_unconfirmed', 'MSFT should preserve that repair is not confirmed.');
+    }
   }
 }
 
@@ -345,6 +351,7 @@ function verifyFixtureCoverage(){
   assert.ok(ids.includes('CAT_event_first_failed_bounce'), 'Fixture set must include the CAT failed-first-bounce event-first case.');
   assert.ok(ids.includes('ALLY_event_first_50ma_test'), 'Fixture set must include the ALLY 50MA-test event-first case.');
   assert.ok(ids.includes('UNP_event_first_early_rebound_20ma'), 'Fixture set must include the UNP early-rebound-from-20MA event-first case.');
+  assert.ok(ids.includes('MSFT_event_first_support_breakdown_stabilising'), 'Fixture set must include the MSFT damaged-but-stabilising event-first case.');
 }
 
 function run(){

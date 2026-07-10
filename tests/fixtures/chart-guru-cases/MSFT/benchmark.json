@@ -1,0 +1,129 @@
+{
+  "id": "MSFT_event_first_support_breakdown_stabilising",
+  "ticker": "MSFT",
+  "benchmark": {
+    "dominantEvent": "Support breakdown",
+    "eventSequence": [
+      "support failed first",
+      "buyers are attempting to stabilise the chart",
+      "the structure remains damaged",
+      "repair is still unconfirmed"
+    ],
+    "expectedTraderInterpretation": "Support has already failed, and while buyers are trying to stabilise MSFT, they have not regained control yet.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "Support breakdown"
+    }
+  },
+  "marketStatus": "S&P below 50 MA",
+  "scanType": "50MA",
+  "setupStates": {
+    "trendState": "weak",
+    "pullbackZone": "off_level",
+    "structureState": "broken",
+    "stabilisationState": "early",
+    "bounceState": "rebound",
+    "volumeState": "neutral"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "structure_breaking_down",
+      "label": "Chart Story",
+      "icon": "\ud83d\udcc9",
+      "text": "Support has already failed, so the chart is still damaged. Buyers are trying to stabilise it, but they have not regained control yet.",
+      "evidenceFactIds": ["trend_context", "weakness_signal", "structure_broken", "buyer_response_state", "stabilisation_present"],
+      "confidence": 0.91,
+      "rankReason": "structure_break_is_clearest_setup_story"
+    },
+    "recentStory": {
+      "key": "support_breakdown_stabilisation_attempt",
+      "bias": "bad",
+      "toneMode": "broken_avoid",
+      "confidenceMode": "avoid_until_rebuilt",
+      "trendLabel": "Support breakdown",
+      "supportLabel": "Lost the 50-day average",
+      "supportSemantic": "support_failed",
+      "buyerResponseSemantic": "response_present",
+      "confirmationSemantic": "follow_through_unconfirmed",
+      "steps": [
+        "broken_structure",
+        "support_lost",
+        "buyer_response",
+        "repair_needed",
+        "avoid"
+      ],
+      "stepDetails": [
+        {
+          "key": "support_lost",
+          "evidenceFactIds": ["weakness_signal", "structure_broken"],
+          "derivedFromSteps": ["broken_structure", "support_lost"],
+          "derivedFromConditions": ["support_failed", "structure_broken"]
+        },
+        {
+          "key": "buyer_response",
+          "evidenceFactIds": ["buyer_response_state", "stabilisation_present"],
+          "derivedFromSteps": ["support_lost", "buyer_response"],
+          "derivedFromConditions": ["stabilisation_attempt_present"]
+        },
+        {
+          "key": "repair_needed",
+          "evidenceFactIds": ["weakness_signal"],
+          "derivedFromSteps": ["buyer_response", "repair_needed"],
+          "derivedFromConditions": ["control_not_regained"]
+        }
+      ],
+      "evidenceFactIds": ["trend_context", "weakness_signal", "structure_broken", "buyer_response_state", "stabilisation_present"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "MSFT",
+    "timeframe": "1D",
+    "currentPrice": 483.2,
+    "ma20": 490.6,
+    "ma50": 486.4,
+    "ma200": 440.2,
+    "volume": 18600000,
+    "latestCandleOHLC": {
+      "open": 480.4,
+      "high": 485.1,
+      "low": 478.8,
+      "close": 483.2
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "50MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "Support breakdown",
+    "eventSequence": [
+      "support failed first",
+      "buyers are attempting to stabilise the chart",
+      "the structure remains damaged",
+      "repair is still unconfirmed"
+    ],
+    "traderInterpretation": "Support has already failed, and while buyers are trying to stabilise MSFT, they have not regained control yet.",
+    "currentRisk": "The rebound can still fail if price slips back under the recent lows and sellers reassert control before the chart repairs.",
+    "nextSignal": "Watch for a firmer base, stronger closes, and a reclaim of lost support before trusting the rebound."
+  },
+  "finalProse": {
+    "chartStory": "Support has already failed, but buyers are trying to stabilise MSFT after that breakdown. The chart is still damaged because the rebound has not put buyers back in control yet.",
+    "whyItMatters": "When support breaks first, a rebound is only the start of a repair attempt, not proof that the chart damage is repaired.",
+    "setupLocation": "Price is trying to steady itself after losing support, so traders should think in terms of repair and resistance reclaim rather than a clean pullback.",
+    "learningPoint": "A damaged chart can bounce before it is fixed. What matters is whether buyers can keep building a base and reclaim important levels.",
+    "whatNext": "Watch for MSFT to build a firmer base, print stronger closes, and reclaim lost support before treating the rebound as meaningful."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["support", "breakdown", "damaged"],
+    "eventSequenceTokens": ["support", "stabilise", "repair"],
+    "traderTokens": ["stabilise", "damaged", "control"],
+    "tutorTokens": ["support", "stabilise", "reclaim"],
+    "forbiddenTokens": ["entry ready", "buyers are back in control", "sellers are still in charge"]
+  }
+}

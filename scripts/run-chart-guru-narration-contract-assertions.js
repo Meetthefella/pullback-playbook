@@ -381,7 +381,8 @@ function verifyFixtureCoverage(){
     'AMAT_event_first_pullback_20ma',
     'GEV_event_first_early_constructive',
     'VRT_event_first_momentum_fading',
-    'UNP_event_first_early_rebound_20ma'
+    'UNP_event_first_early_rebound_20ma',
+    'MSFT_event_first_support_breakdown_stabilising'
   ].forEach(id => {
     assert.ok(ids.includes(id), `Fixture set must include ${id}.`);
   });
@@ -407,6 +408,22 @@ function verifySemanticClassifierCoverage(){
   assert.ok(
     hooks.semanticContradictionsForEnvelope('Price is away from support and waiting for a cleaner pullback.', {supportSemantic:'support_present'}).length >= 1,
     'Semantic envelope should reject support-absent narration when supportSemantic is support_present.'
+  );
+  assert.strictEqual(
+    hooks.classifyRepairNarrationSemantic('Buyers are trying to stabilise the chart, but they have not regained control yet.'),
+    'repair_unconfirmed',
+    'Repair classifier should recognise unconfirmed stabilisation attempts.'
+  );
+  assert.ok(
+    hooks.semanticContradictionsForEnvelope(
+      'Support has failed, sellers are still in charge, and the chart needs a clearer support area elsewhere.',
+      {
+        supportSemantic:'support_failed',
+        buyerResponseSemantic:'response_present',
+        confirmationSemantic:'follow_through_unconfirmed'
+      }
+    ).length >= 1,
+    'Semantic envelope should reject damaged-chart narration that omits the active buyer response.'
   );
 }
 
@@ -768,6 +785,17 @@ function verifyStoryContinuityAndBenchmarks(){
       assert.strictEqual(interpretation.confirmationSemantic, 'follow_through_unconfirmed', 'UNP should preserve follow-through-unconfirmed semantics.');
       assert.strictEqual(chartCoach.recentStory.trendLabel, 'Early rebound from 20MA', 'UNP tutor-mapped chartCoach should keep the rebound dominant event visible.');
     }
+    if(fixture.id === 'MSFT_event_first_support_breakdown_stabilising'){
+      const proseText = Object.values(fixture.finalProse).join(' ');
+      assert.strictEqual(packet.primaryStoryKey, 'structure_breaking_down', 'MSFT should keep the structural-breakdown dominant event.');
+      assert.strictEqual(interpretation.supportSemantic, 'support_failed', 'MSFT should preserve support_failed semantics.');
+      assert.strictEqual(interpretation.buyerResponseSemantic, 'response_present', 'MSFT should preserve the stabilisation attempt as live context.');
+      assert.strictEqual(interpretation.confirmationSemantic, 'follow_through_unconfirmed', 'MSFT should preserve that control has not been regained.');
+      assert.ok(/stabili[sz]/i.test(proseText), 'MSFT narration should acknowledge the buyer response or stabilisation attempt.');
+      assert.ok(/not regained control|still damaged|repair|rebuild/i.test(proseText), 'MSFT narration should state that the chart is not repaired yet.');
+      assert.ok(!/healthy again|entry ready|constructive setup/i.test(proseText), 'MSFT narration must not imply that the damaged setup is actionable.');
+      assert.ok(!/\bsellers (?:are|remain) (?:still )?in charge\b/i.test(proseText), 'MSFT narration must avoid an unqualified sellers-are-in-charge formulation when buyers are responding.');
+    }
 
     const judge = buildSemanticJudge(fixture, interpretation, fixture.finalProse);
     judgeSummaries.push({id:fixture.id, total:judge.total});
@@ -780,7 +808,7 @@ function verifyStoryContinuityAndBenchmarks(){
     assert.ok(judge.repetitiveWording >= 2, `${fixture.id}: semantic judge must reject repetitive wording.`);
     assert.ok(judge.total >= 20, `${fixture.id}: semantic benchmark score must stay above regression threshold.`);
   }
-  assert.strictEqual(judgeSummaries.length, 7, 'Benchmark suite must evaluate all seven representative narration fixtures.');
+  assert.strictEqual(judgeSummaries.length, 8, 'Benchmark suite must evaluate all eight representative narration fixtures.');
 }
 
 async function run(){
