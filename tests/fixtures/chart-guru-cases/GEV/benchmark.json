@@ -97,11 +97,11 @@
     "nextSignal": "The next useful signal is a cleaner support test followed by a visible buyer response instead of more aimless drift."
   },
   "finalProse": {
-    "chartStory": "The main event is an early constructive pullback, but buyers have not shown a real defence yet.",
-    "whyItMatters": "Early pullbacks can become good setups later, but right now the chart is still in the stage where support needs to prove itself.",
+    "chartStory": "GEV is only starting to pull back toward the 20-day average. Buyers have not shown enough yet, so the setup is still early.",
+    "whyItMatters": "This matters because early pullbacks can become good setups later, but support still needs to prove itself.",
     "setupLocation": "Price is easing back toward support inside a constructive trend, but the test is still developing.",
     "learningPoint": "A chart can be constructive and still too early at the same time. Traders care about both location and timing.",
-    "whatNext": "Watch for a cleaner support test and a more convincing buyer response before expecting the setup to improve."
+    "whatNext": "Watch for a cleaner support test and proof that buyers are stepping in before expecting the setup to improve."
   },
   "semanticExpectations": {
     "dominantEventTokens": ["early", "constructive", "pullback"],

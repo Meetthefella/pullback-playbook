@@ -97,11 +97,11 @@
     "nextSignal": "The next useful signal is a clear buyer response from the 50-day average rather than price just hovering there."
   },
   "finalProse": {
-    "chartStory": "The main event is that ALLY has pulled back into its first meaningful test of the 50-day average.",
-    "whyItMatters": "First tests of medium-term support can become useful pullback spots, but only if buyers actually show up there.",
-    "setupLocation": "Price is sitting right around the 50-day average with support still being tested.",
-    "learningPoint": "A good support area is only the starting point. Traders still need to see the response that comes after price gets there.",
-    "whatNext": "Watch for a clearer buyer reaction from the 50-day average before treating this as a stronger pullback setup."
+    "chartStory": "ALLY has reached its first meaningful test of the 50-day average. Buyers still need to prove support is holding.",
+    "whyItMatters": "This matters because first tests of medium-term support can work well, but only if buyers actually step in there.",
+    "setupLocation": "Price is sitting right on the 50-day average, with support still being tested.",
+    "learningPoint": "A good support area is only the starting point. Traders still need to see buyers respond after price gets there.",
+    "whatNext": "Watch for proof that buyers are stepping in at the 50-day average before treating this as a stronger pullback setup."
   },
   "semanticExpectations": {
     "dominantEventTokens": ["50-day", "test", "support"],

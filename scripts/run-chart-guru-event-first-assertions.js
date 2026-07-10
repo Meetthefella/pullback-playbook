@@ -313,6 +313,9 @@ function verifyNetlifyNormalizationAndTutorBoundary(){
     assert.ok(!tutorPrompt.includes('deterministicEventPacket'), `${fixture.id}: Stage 3 prompt must not include raw deterministic packet payload.`);
     assert.ok(!tutorPrompt.includes('visible_latest_price'), `${fixture.id}: Stage 3 prompt must not include screenshot-derived evidence fields.`);
     assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('Do not inspect raw chart evidence.'), `${fixture.id}: Stage 3 instructions must forbid raw evidence access.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('Chart Guru Style Guide:'), `${fixture.id}: Stage 3 instructions must include the Chart Guru style guide.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('buyers are trying to stabilise the chart'), `${fixture.id}: Stage 3 instructions must anchor preferred stabilisation language.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('build a base'), `${fixture.id}: Stage 3 instructions must anchor preferred rebuilding language.`);
 
     const chartCoach = hooks.buildTwoStepChartCoach(fixture.finalProse, compatInterpretation, {
       deterministicEventPacket:sourcePacket

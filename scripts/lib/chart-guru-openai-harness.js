@@ -168,6 +168,68 @@ const LOCATION_SPECIFICITY_PATTERNS = [
   /\bpullback\b/i
 ];
 
+const BANNED_ABSTRACTION_PATTERNS = [
+  /\bthis situation indicates\b/i,
+  /\bpotential opportunity\b/i,
+  /\bfavourable position\b/i,
+  /\bbuyer commitment\b/i,
+  /\bwaiting phase\b/i,
+  /\bconstructive backdrop\b/i,
+  /\bmarket participants\b/i,
+  /\bquality environment\b/i,
+  /\bdemonstrates\b/i,
+  /\bfacilitates\b/i,
+  /\bin order to\b/i
+];
+
+function eventLeadPatternsForCase(testCase){
+  switch(String(testCase?.primaryRecentEvent || '').trim()){
+    case 'failed_first_bounce_from_20ma':
+      return [/\bfailed\b/i, /\bbounce\b/i, /\bfaded quickly\b/i, /\bcould not hold\b/i];
+    case 'first_test_of_50ma_buyers_not_confirmed':
+      return [/\b50(?:-day)?\b/i, /\btest\b/i, /\bsupport\b/i];
+    case 'constructive_pullback_no_confirmation':
+      return [/\bpullback\b/i, /\bpulled back\b/i, /\bpulling back\b/i, /\b20(?:-day)?\b/i, /\bcontrolled\b/i, /\borderly\b/i];
+    case 'diminishing_quality':
+      return [/\blosing quality\b/i, /\bmessier\b/i, /\bless clean\b/i, /\bfading\b/i, /\bweakening\b/i, /\btired\b/i];
+    case 'constructive_but_early_monitor_watch':
+      return [/\bearly\b/i, /\bpullback\b/i, /\bpulling back\b/i, /\bsupport\b/i, /\bmoving toward\b/i];
+    case 'support_breakdown_stabilisation_attempt':
+      return [/\bsupport\b/i, /\bfailed\b/i, /\blost\b/i, /\bbreakdown\b/i];
+    default:
+      return [];
+  }
+}
+
+function learningPointPatternsForCase(testCase){
+  switch(String(testCase?.primaryRecentEvent || '').trim()){
+    case 'failed_first_bounce_from_20ma':
+      return [/\bsupport touch\b/i, /\bresponse that follows\b/i, /\bfirst bounce\b/i, /\bfailed bounce\b/i, /\bbuyers have not defended\b/i, /\brebound\b/i, /\bstay patient\b/i];
+    case 'first_test_of_50ma_buyers_not_confirmed':
+      return [/\breaching support\b/i, /\bfirst step\b/i, /\bsupport area\b/i, /\bstarting point\b/i, /\b50(?:-day)?\b/i, /\bbuyer response\b/i, /\bholding\b/i, /\bdefend\b/i];
+    case 'constructive_pullback_no_confirmation':
+      return [/\bcontrolled pullback\b/i, /\bhealthy pullback\b/i, /\bgood location\b/i, /\bbuyers need to follow through\b/i, /\bbounce\b/i, /\bsupport\b/i, /\btoo early\b/i, /\bstronger setup\b/i];
+    case 'constructive_but_early_monitor_watch':
+      return [/\bright area\b/i, /\btoo early\b/i, /\blocation\b/i, /\bbuyer response\b/i, /\bnot be ready\b/i, /\bsupport\b/i];
+    case 'diminishing_quality':
+      return [/\bmessier pullbacks\b/i, /\bharder to trade\b/i, /\bharder to time\b/i, /\bquality\b/i, /\btiming\b/i, /\bclean pullbacks\b/i, /\bless reliable timing\b/i];
+    case 'support_breakdown_stabilisation_attempt':
+      return [/\bbounce before it is fixed\b/i, /\bbuild a base\b/i, /\breclaim lost support\b/i, /\bdamaged chart\b/i];
+    default:
+      return [];
+  }
+}
+
+function hasRepeatedSemanticState(sentences){
+  const semanticBuckets = [
+    {key:'response_absent', patterns:[/\bnot shown enough\b/i, /\bneeds proof\b/i, /\bneeds confirmation\b/i, /\bnot confirmed\b/i]},
+    {key:'response_present', patterns:[/\bbuyers (?:stepped in|responded|started to respond|are trying to)\b/i, /\bbounce has started\b/i, /\brebound has started\b/i]},
+    {key:'support_failed', patterns:[/\bsupport (?:failed|gave way|broke)\b/i, /\blost support\b/i, /\bbreakdown\b/i]}
+  ];
+  const sentenceBuckets = sentences.map(sentence => semanticBuckets.filter(bucket => bucket.patterns.some(pattern => pattern.test(sentence))).map(bucket => bucket.key));
+  return semanticBuckets.some(bucket => sentenceBuckets.filter(keys => keys.includes(bucket.key)).length > 1);
+}
+
 function safeObject(value){
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -180,6 +242,14 @@ function combinedTextFromFields(response, fields){
   return fields.map(field => String(response?.[field] || '').trim()).join('\n').trim();
 }
 
+function splitIntoSentences(text){
+  return String(text || '')
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
 function buildStructuredFacts(testCase){
   const caseData = safeObject(testCase);
   return {
@@ -187,6 +257,11 @@ function buildStructuredFacts(testCase){
     verdict:String(caseData.verdict || '').trim(),
     setupScore:Number(caseData.setupScore),
     primaryRecentEvent:String(caseData.primaryRecentEvent || '').trim(),
+    supportLabel:String(caseData.supportLabel || '').trim(),
+    trendLabel:String(caseData.trendLabel || '').trim(),
+    supportSemantic:String(caseData.supportSemantic || '').trim(),
+    buyerResponseSemantic:String(caseData.buyerResponseSemantic || '').trim(),
+    confirmationSemantic:String(caseData.confirmationSemantic || '').trim(),
     eventSequence:normalizeStringArray(caseData.eventSequence),
     technicalContext:normalizeStringArray(caseData.technicalContext)
   };
@@ -224,6 +299,23 @@ function buildTwoStepFinalInstructions(){
     'Explain what happened, not just what is visible.',
     'Lead with the dominant recent event from the interpretation.',
     'Use plain English for a novice retail trader.',
+    'Sound like an experienced swing trader quietly explaining the chart to someone buying their first stock.',
+    'Start chartStory with visible buyer, seller, or price behaviour before explaining what it means.',
+    'Keep sentences short and spoken. One idea per sentence.',
+    'Section jobs are fixed: chartStory = observable behaviour then meaning; whyItMatters = why traders care now; setupLocation = factual support/resistance location; learningPoint = one practical lesson; whatNext = one concrete signal to watch.',
+    'chartStory should usually be two short sentences. Sentence 1 = what just happened. Sentence 2 = what that means now. Use a third short sentence only when it is essential.',
+    'chartStory first sentence must lead with the dominant event itself rather than generic trend recap.',
+    'learningPoint should be one or two short sentences. Teach one practical lesson tied directly to the current event. Do not give generic advice.',
+    'Do not start learningPoint with "watch", "look for", or "wait for". That belongs in whatNext.',
+    'Avoid vague chartStory wording like "potential setup", "useful area", or "promising chart" when a more concrete event is available.',
+    'Use chartStory formulas like: "Buyers tried to bounce from support, but the move faded quickly. That means support has not proved itself yet." "The stock has reached its first proper test of support. That means traders are watching for a buyer response, not assuming support is already holding." "The stock is pulling back in a controlled way toward support. That means the trend is still intact, but buyers still need to follow through." "The pullbacks are getting messier. That tells traders the setup is losing quality."',
+    'Use learningPoint formulas like: "A good support area is only a starting point. Traders still need to see buyers defend it." "The first reaction from support is encouraging, but one response is not enough on its own." "A damaged chart can bounce before it is fixed." "A trend can stay up while the setup gets harder to trade."',
+    'Avoid generic lesson wording like "it is important to", "it is crucial to", "always look for", "be cautious", or "before making any decisions".',
+    'If buyers have not shown enough yet, say that clearly and do not imply a confirmed bounce.',
+    'If buyers are responding but follow-through is not confirmed, acknowledge the response without implying control has been regained.',
+    'For constructive pullback cases near support with buyers still absent or weak and follow-through unconfirmed, prefer phrases like "buyers still need to step in", "buyers have not followed through yet", "the bounce still needs proof", or "the pullback is worth watching, but it is not ready yet".',
+    'For failed-bounce cases, whatNext must ask for a new stronger buyer response or a stronger reclaim. Do not say "confirmed bounce" or "confirmation of the bounce" because the earlier bounce already failed.',
+    'Avoid abstract phrasing like "this situation indicates", "potential opportunity", "favourable position", "buyer commitment", "waiting phase", or "constructive backdrop".',
     'Do not invent prices, indicators, confirmations, or extra chart facts.',
     'Do not say "the chart shows".',
     'Avoid repeating "wait for confirmation".',
@@ -426,6 +518,134 @@ function validateDistinctSectionJobs(response){
   return errors;
 }
 
+function validateSectionRoleDiscipline(testCase, response){
+  const errors = [];
+  const chartStory = String(response?.chartStory || '').trim();
+  const whyItMatters = String(response?.whyItMatters || '').trim();
+  const setupLocation = String(response?.setupLocation || '').trim();
+  const learningPoint = String(response?.learningPoint || '').trim();
+  const whatNext = String(response?.whatNext || '').trim();
+  const chartStorySentences = splitIntoSentences(chartStory);
+  const chartStoryOpening = chartStorySentences.slice(0, 2).join(' ');
+  const learningPointSentences = splitIntoSentences(learningPoint);
+
+  if(/^this situation\b/i.test(chartStoryOpening) || /^the trend\b/i.test(chartStoryOpening)){
+    errors.push('chartStory started with generic framing instead of visible behaviour.');
+  }
+  if(!/\b(buyers?|sellers?|price|stock|bounce|pullback|rebound|green day|red day|drifting|pushed|faded)\b/i.test(chartStoryOpening)){
+    errors.push('chartStory did not begin with observable behaviour.');
+  }
+  const eventLeadPatterns = eventLeadPatternsForCase(testCase);
+  if(eventLeadPatterns.length && !eventLeadPatterns.some(pattern => pattern.test(chartStorySentences[0] || ''))){
+    errors.push('chartStory first sentence did not lead with the dominant event.');
+  }
+  if(hasRepeatedSemanticState(chartStorySentences)){
+    errors.push('chartStory repeated the same semantic state across multiple sentences.');
+  }
+  if(/^recently\b/i.test(whyItMatters) || /^currently\b/i.test(whyItMatters)){
+    errors.push('whyItMatters repeated story/location framing instead of why traders care now.');
+  }
+  const specificLocationPresent = /\b(support|resistance|20(?:-day)?|50(?:-day)?|near|at|around|between)\b/i.test(setupLocation);
+  const honestNonSpecificLocation = String(testCase?.primaryRecentEvent || '') === 'diminishing_quality'
+    && /\b(trend has not fully broken|trend is still partly intact|current timing|harder to trust|less orderly|pullbacks)\b/i.test(setupLocation);
+  if(!specificLocationPresent && !honestNonSpecificLocation){
+    errors.push('setupLocation was not factual enough about support or resistance.');
+  }
+  if(/\balways be cautious\b/i.test(learningPoint)){
+    errors.push('learningPoint used generic advice.');
+  }
+  if(!/\b(need to see|good area|before trusting|traders|reduce the risk|can bounce before it is fixed|starting point|too early|harder to time|harder to trade|build a base|what buyers do next|stay patient|buyer response|follow through|holding|defended|location|timing)\b/i.test(learningPoint)){
+    errors.push('learningPoint did not read like one practical lesson.');
+  }
+  if(/\b(always|every time|never)\b/i.test(learningPoint) || /\bassess the setup carefully\b/i.test(learningPoint) || /\bclear signals\b/i.test(learningPoint) || /\bdecision-making process\b/i.test(learningPoint) || /\bbe cautious\b/i.test(learningPoint) || /\bpatience is important\b/i.test(learningPoint)){
+    errors.push('learningPoint fell back to generic advice instead of teaching the current event.');
+  }
+  const learningPatterns = learningPointPatternsForCase(testCase);
+  if(learningPatterns.length && !learningPatterns.some(pattern => pattern.test(learningPoint))){
+    errors.push('learningPoint was not practical enough for the current dominant event.');
+  }
+  if(learningPointSentences.length > 2){
+    errors.push('learningPoint exceeded the one-to-two sentence target.');
+  }
+  if(/^(watch|look for|wait for)\b/i.test(learningPoint)){
+    errors.push('learningPoint repeated whatNext instead of teaching the lesson.');
+  }
+  if(!/\b(watch|look for|wait for|need to see|hold|reclaim|another strong)\b/i.test(whatNext)){
+    errors.push('whatNext did not give a concrete observable signal.');
+  }
+  if(/\bconfirmed bounce\b/i.test(whatNext) && String(testCase?.primaryRecentEvent || '') !== 'failed_first_bounce_from_20ma'){
+    errors.push('whatNext implied confirmation had already happened.');
+  }
+  if(String(testCase?.primaryRecentEvent || '') === 'failed_first_bounce_from_20ma' && /\b(confirmed bounce|confirmation of the bounce)\b/i.test(whatNext)){
+    errors.push('whatNext for a failed-bounce case must ask for a new stronger buyer response, not a "confirmed bounce".');
+  }
+  return errors;
+}
+
+function validateTutorVoice(response){
+  const errors = [];
+  for(const field of FINAL_REQUIRED_FIELDS){
+    const text = String(response?.[field] || '').trim();
+    if(BANNED_ABSTRACTION_PATTERNS.some(pattern => pattern.test(text))){
+      errors.push(`${field} used banned abstract wording.`);
+    }
+    const sentences = splitIntoSentences(text);
+    if(sentences.length > 3){
+      errors.push(`${field} exceeded the 1-3 sentence rhythm target.`);
+    }
+    for(const sentence of sentences){
+      const words = sentence.split(/\s+/).filter(Boolean);
+      if(words.length > 28){
+        errors.push(`${field} contained a long sentence that did not sound spoken.`);
+        break;
+      }
+    }
+  }
+  return errors;
+}
+
+function validateSemanticDisciplineByFixture(testCase, response){
+  const text = combinedTextFromFields(response, FINAL_REQUIRED_FIELDS);
+  const chartStoryOpening = splitIntoSentences(String(response?.chartStory || '')).slice(0, 2).join(' ');
+  const errors = [];
+  switch(String(testCase?.primaryRecentEvent || '')){
+    case 'first_test_of_50ma_buyers_not_confirmed':
+      if(/\bconfirmed bounce\b/i.test(text)){
+        errors.push('ALLY: implied a bounce or confirmation that had not happened.');
+      }
+      if(!/\b(no clear bounce|not yet|have not shown enough|have not yet shown|without a clear response|still needs proof|still needs confirmation|no strong response)\b/i.test(text)){
+        errors.push('ALLY: did not make the missing buyer confirmation clear enough.');
+      }
+      break;
+    case 'failed_first_bounce_from_20ma':
+      if(/\b(confirmed bounce|confirmation of the bounce)\b/i.test(String(response?.whatNext || ''))){
+        errors.push('CAT: whatNext treated the failed bounce as if it only needed confirmation instead of a new stronger response.');
+      }
+      if(!/\b(failed|bounce failed|could not hold|rebound faded)\b/i.test(chartStoryOpening)){
+        errors.push('CAT: failed bounce was no longer the clear lead.');
+      }
+      break;
+    case 'constructive_pullback_no_confirmation':
+      if(BANNED_ABSTRACTION_PATTERNS.some(pattern => pattern.test(text))){
+        errors.push('UPS: wording became abstract or over-explained.');
+      }
+      break;
+    case 'diminishing_quality':
+      if(!/\b(losing quality|quality is slipping|quality is fading|messier|less clean|less convincing|weakening)\b/i.test(chartStoryOpening)){
+        errors.push('VRT: deterioration did not lead the story.');
+      }
+      break;
+    case 'constructive_but_early_monitor_watch':
+      if(/\b(useful area|promising|potential)\b/i.test(chartStoryOpening) && !/\bearly\b/i.test(chartStoryOpening)){
+        errors.push('GEV: used vague setup language instead of visible early behaviour.');
+      }
+      break;
+    default:
+      break;
+  }
+  return errors;
+}
+
 function validateFixtureSpecificPhrases(testCase, response){
   const text = combinedTextFromFields(response, FINAL_REQUIRED_FIELDS).toLowerCase();
   const errors = [];
@@ -450,7 +670,10 @@ function validateFinalResponse(testCase, response){
     .concat(validatePrimaryRecentEventWarnings(testCase, response))
     .concat(validateDominantLead(testCase, response))
     .concat(validateForbiddenPhrases(response))
-    .concat(validateDistinctSectionJobs(response));
+    .concat(validateDistinctSectionJobs(response))
+    .concat(validateSectionRoleDiscipline(testCase, response))
+    .concat(validateTutorVoice(response))
+    .concat(validateSemanticDisciplineByFixture(testCase, response));
   if(strict){
     errors.push(...proseWarnings);
   }else{
@@ -460,6 +683,47 @@ function validateFinalResponse(testCase, response){
     ok:errors.length === 0,
     errors,
     warnings
+  };
+}
+
+function buildTutorVoiceJudge(testCase, variantResult){
+  if(!variantResult || variantResult.error || !variantResult.response){
+    return {
+      available:false,
+      totalScore:0,
+      maxScore:14,
+      summary:'No response available for tutor-voice judging.',
+      failures:['No response available.']
+    };
+  }
+  const response = variantResult.response;
+  const chartStory = String(response.chartStory || '');
+  const whatNext = String(response.whatNext || '');
+  const voiceErrors = validateTutorVoice(response);
+  const sectionErrors = validateSectionRoleDiscipline(testCase, response);
+  const semanticWarnings = validateSemanticDisciplineByFixture(testCase, response);
+  let totalScore = 14;
+  if(!/\b(buyers?|sellers?|price|stock|bounce|pullback|rebound|green day|red day|drifting|pushed|faded)\b/i.test(splitIntoSentences(chartStory).slice(0, 2).join(' '))){
+    totalScore -= 2;
+  }
+  if(!/\b(watch|look for|wait for|need to see|hold|reclaim|another strong)\b/i.test(whatNext)){
+    totalScore -= 2;
+  }
+  const chartStorySentences = splitIntoSentences(chartStory);
+  if(chartStorySentences.length === 0 || chartStorySentences.length > 3){
+    totalScore -= 1;
+  }
+  totalScore -= Math.min(4, voiceErrors.length);
+  totalScore -= Math.min(4, sectionErrors.length);
+  totalScore -= Math.min(2, semanticWarnings.length);
+  return {
+    available:true,
+    totalScore:Math.max(0, totalScore),
+    maxScore:14,
+    summary:voiceErrors.length || sectionErrors.length || semanticWarnings.length
+      ? 'Tutor voice showed drift from the spoken, observable, section-disciplined target.'
+      : 'Tutor voice stayed spoken, concrete, and section-disciplined.',
+    failures:[].concat(voiceErrors).concat(sectionErrors).concat(semanticWarnings)
   };
 }
 
@@ -681,6 +945,7 @@ module.exports = {
   TRADER_INTERPRETATION_SCHEMA,
   JUDGE_SCHEMA,
   buildComparisonRubric,
+  buildTutorVoiceJudge,
   buildJudgeInstructions,
   buildJudgePrompt,
   buildOneStepInstructions,

@@ -104,11 +104,11 @@
     "nextSignal": "The next useful signal is a firmer reclaim of the 20-day average with follow-through instead of another weak bounce."
   },
   "finalProse": {
-    "chartStory": "The main event is that CAT tried to bounce from the 20-day average, but that first bounce failed quickly.",
-    "whyItMatters": "A failed first bounce usually means the pullback is not ready to resume higher yet, so traders should treat support as unproven.",
-    "setupLocation": "Price is sitting between the 20-day and 50-day averages after a failed support defence.",
-    "learningPoint": "A touch of the 20-day average matters less than the quality of the first buyer response that follows it.",
-    "whatNext": "Watch for a stronger reclaim of the 20-day average with better follow-through before trusting the pullback again."
+    "chartStory": "Buyers tried to bounce CAT from the 20-day average, but that first bounce faded quickly. That tells traders the pullback is still under pressure.",
+    "whyItMatters": "This matters because a failed first bounce usually means support is not proven yet.",
+    "setupLocation": "Price is still working around the 20-day average after that failed defence, with the 50-day average sitting underneath as the next support area.",
+    "learningPoint": "A support touch is not enough on its own. Traders still need to see buyers hold the rebound before trusting it.",
+    "whatNext": "Watch for proof that buyers can reclaim the 20-day average and add follow-through before trusting the pullback again."
   },
   "semanticExpectations": {
     "dominantEventTokens": ["failed", "bounce", "20-day"],

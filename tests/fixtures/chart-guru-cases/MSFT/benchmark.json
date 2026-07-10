@@ -113,11 +113,11 @@
     "nextSignal": "Watch for a firmer base, stronger closes, and a reclaim of lost support before trusting the rebound."
   },
   "finalProse": {
-    "chartStory": "Support has already failed, but buyers are trying to stabilise MSFT after that breakdown. The chart is still damaged because the rebound has not put buyers back in control yet.",
+    "chartStory": "Support has already failed, but buyers are trying to stabilise MSFT after that breakdown. The chart is still damaged, and the rebound still needs to prove itself.",
     "whyItMatters": "When support breaks first, a rebound is only the start of a repair attempt, not proof that the chart damage is repaired.",
-    "setupLocation": "Price is trying to steady itself after losing support, so traders should think in terms of repair and resistance reclaim rather than a clean pullback.",
-    "learningPoint": "A damaged chart can bounce before it is fixed. What matters is whether buyers can keep building a base and reclaim important levels.",
-    "whatNext": "Watch for MSFT to build a firmer base, print stronger closes, and reclaim lost support before treating the rebound as meaningful."
+    "setupLocation": "Price is sitting below the support it lost, so the chart still needs repair and a reclaim of that area.",
+    "learningPoint": "A damaged chart can bounce before it is fixed. Traders still need to see buyers build a base and reclaim lost support before trusting it.",
+    "whatNext": "Watch for proof through a firmer base, stronger closes, and a reclaim of lost support before treating the rebound as meaningful."
   },
   "semanticExpectations": {
     "dominantEventTokens": ["support", "breakdown", "damaged"],

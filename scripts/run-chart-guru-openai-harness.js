@@ -7,6 +7,7 @@ const {
   TRADER_INTERPRETATION_SCHEMA,
   JUDGE_SCHEMA,
   buildComparisonRubric,
+  buildTutorVoiceJudge,
   buildJudgeInstructions,
   buildJudgePrompt,
   buildOneStepInstructions,
@@ -190,6 +191,17 @@ function formatMarkdown(run){
       }
     }
     lines.push('');
+
+    if(result.tutorVoiceJudge){
+      lines.push('### Tutor Voice Judge');
+      lines.push('');
+      lines.push(`- Score: ${result.tutorVoiceJudge.totalScore}/${result.tutorVoiceJudge.maxScore}`);
+      lines.push(`- Summary: ${result.tutorVoiceJudge.summary}`);
+      for(const failure of result.tutorVoiceJudge.failures || []){
+        lines.push(`- Failure: ${failure}`);
+      }
+      lines.push('');
+    }
 
     if(result.judgeResult){
       lines.push('### Judge');
@@ -510,6 +522,7 @@ async function main(){
       structuredFacts:buildStructuredFacts(testCase),
       variants:[],
       comparisonRubric:null,
+      tutorVoiceJudge:null,
       judgeResult:null
     };
 
@@ -524,6 +537,7 @@ async function main(){
       model
     }));
     caseResult.comparisonRubric = buildComparisonRubric(testCase, caseResult.variants);
+    caseResult.tutorVoiceJudge = buildTutorVoiceJudge(testCase, variantByName(caseResult, 'two_step'));
     caseResult.judgeResult = await runJudge(testCase, caseResult, {
       dryRun:args.dryRun,
       judge:args.judge,

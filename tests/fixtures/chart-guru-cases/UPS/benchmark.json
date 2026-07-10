@@ -97,11 +97,11 @@
     "nextSignal": "The next useful signal is a cleaner bounce that holds the 20-day average and starts building follow-through."
   },
   "finalProse": {
-    "chartStory": "The main event is a constructive pullback toward the 20-day average, but buyers still have not confirmed the bounce.",
-    "whyItMatters": "Constructive pullbacks can become useful setups, but they are easier to trust after buyers prove they can defend support.",
+    "chartStory": "Price has pulled back toward the 20-day average in an orderly way, but buyers have not shown enough strength yet. That keeps the setup early rather than confirmed.",
+    "whyItMatters": "This matters because constructive pullbacks are easier to trust after buyers prove they can defend support.",
     "setupLocation": "Price is sitting near the 20-day average inside an intact uptrend.",
     "learningPoint": "Good location helps, but traders still care about the response that happens after price reaches support.",
-    "whatNext": "Watch for buyers to hold the 20-day average and add better follow-through before treating the setup as stronger."
+    "whatNext": "Watch for buyers to hold the 20-day average and add follow-through before treating the setup as stronger."
   },
   "semanticExpectations": {
     "dominantEventTokens": ["constructive", "pullback", "confirmation"],

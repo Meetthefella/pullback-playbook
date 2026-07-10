@@ -393,6 +393,8 @@ function normalizeTraderInterpretation(value = {}, eventPacket = {}){
     supportSemantic:normaliseString(source.supportSemantic, '') || deterministicPacket.supportSemantic,
     buyerResponseSemantic:normaliseString(source.buyerResponseSemantic, '') || deterministicPacket.buyerResponseSemantic,
     confirmationSemantic:normaliseString(source.confirmationSemantic, '') || deterministicPacket.confirmationSemantic,
+    supportLabel:normaliseString(source.supportLabel, '') || deterministicPacket.recentStorySupportLabel,
+    trendLabel:normaliseString(source.trendLabel, '') || deterministicPacket.recentStoryTrendLabel,
     eventSequence:eventSequence.length ? eventSequence : deterministicPacket.eventSequence,
     traderInterpretation,
     currentRisk,
@@ -430,8 +432,107 @@ function buildSemanticEnvelope(value = {}, fallback = {}){
   return {
     supportSemantic:normalizeSemanticToken(source.supportSemantic, packet.supportSemantic),
     buyerResponseSemantic:normalizeSemanticToken(source.buyerResponseSemantic, packet.buyerResponseSemantic),
-    confirmationSemantic:normalizeSemanticToken(source.confirmationSemantic, packet.confirmationSemantic)
+    confirmationSemantic:normalizeSemanticToken(source.confirmationSemantic, packet.confirmationSemantic),
+    dominantEventKey:normalizeSemanticToken(source.dominantEventKey, packet.dominantEventKey || packet.primaryStoryKey),
+    dominantEvent:normalizeSemanticToken(source.dominantEvent, packet.dominantEvent || packet.dominantEventLabel)
   };
+}
+
+const TUTOR_ABSTRACT_WORDING_PATTERNS = [
+  /\bthis situation indicates\b/i,
+  /\bpotential opportunity\b/i,
+  /\bfavourable position\b/i,
+  /\bbuyer commitment\b/i,
+  /\bwaiting phase\b/i,
+  /\bconstructive backdrop\b/i,
+  /\bmarket participants\b/i,
+  /\bquality environment\b/i,
+  /\bdemonstrates\b/i,
+  /\bfacilitates\b/i,
+  /\bin order to\b/i
+];
+
+function splitIntoSentences(text = ''){
+  return String(text || '')
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+function openingSectionText(text = '', count = 2){
+  return splitIntoSentences(text).slice(0, count).join(' ').trim();
+}
+
+function textHasAnyPattern(text = '', patterns = []){
+  return patterns.some(pattern => pattern.test(String(text || '')));
+}
+
+function inferQualitySemantic(envelope = {}){
+  const dominantEventKey = normalizeSemanticToken(envelope.dominantEventKey);
+  const dominantEvent = normalizeSemanticToken(envelope.dominantEvent);
+  if(dominantEventKey === 'extended_after_run' || /\b(diminishing|quality is slipping|quality is fading|losing quality|less convincing|weakening)\b/.test(dominantEvent)){
+    return 'fading';
+  }
+  return '';
+}
+
+function eventLeadPatternsForEnvelope(envelope = {}){
+  const dominantEventKey = normalizeSemanticToken(envelope.dominantEventKey);
+  const dominantEvent = normalizeSemanticToken(envelope.dominantEvent);
+  if(dominantEventKey === 'failed_first_bounce_from_20ma' || /\bfailed\b.*\bbounce\b/.test(dominantEvent)){
+    return [/\bfailed\b/i, /\bbounce\b/i, /\bfaded quickly\b/i, /\bcould not hold\b/i];
+  }
+  if(dominantEventKey === 'first_test_of_50ma' || /\b50ma\b.*\btest\b/.test(dominantEvent) || /\b50-day\b.*\btest\b/.test(dominantEvent)){
+    return [/\b50(?:-day)?\b/i, /\btest\b/i, /\bsupport\b/i];
+  }
+  if(dominantEventKey === 'constructive_pullback_awaiting_confirmation' || /\bconstructive\b.*\bpullback\b/.test(dominantEvent)){
+    return [/\bpullback\b/i, /\bpulled back\b/i, /\bpulling back\b/i, /\b20(?:-day)?\b/i, /\bcontrolled\b/i, /\borderly\b/i];
+  }
+  if(dominantEventKey === 'early_constructive_pullback' || /\bearly\b.*\bpullback\b/.test(dominantEvent)){
+    return [/\bearly\b/i, /\bpullback\b/i, /\bpulling back\b/i, /\bsupport\b/i, /\bmoving toward\b/i];
+  }
+  if(dominantEventKey === 'extended_after_run' || /\b(momentum fading|losing quality|weakening)\b/.test(dominantEvent)){
+    return [/\blosing quality\b/i, /\bmessier\b/i, /\bless clean\b/i, /\bfading\b/i, /\bweakening\b/i, /\btired\b/i];
+  }
+  if(dominantEventKey === 'support_breakdown_stabilisation_attempt' || dominantEventKey === 'structure_breaking_down' || /\bsupport breakdown\b/.test(dominantEvent)){
+    return [/\bsupport\b/i, /\bfailed\b/i, /\bbroke\b/i, /\blost\b/i, /\bbreakdown\b/i];
+  }
+  return [];
+}
+
+function learningPointPatternsForEnvelope(envelope = {}){
+  const dominantEventKey = normalizeSemanticToken(envelope.dominantEventKey);
+  const dominantEvent = normalizeSemanticToken(envelope.dominantEvent);
+  if(dominantEventKey === 'failed_first_bounce_from_20ma' || /\bfailed\b.*\bbounce\b/.test(dominantEvent)){
+    return [/\bsupport touch\b/i, /\bresponse that follows\b/i, /\bfirst bounce\b/i, /\bfailed bounce\b/i, /\bbuyers have not defended\b/i, /\brebound\b/i, /\bstay patient\b/i];
+  }
+  if(dominantEventKey === 'first_test_of_50ma' || /\b50ma\b.*\btest\b/.test(dominantEvent) || /\b50-day\b.*\btest\b/.test(dominantEvent)){
+    return [/\breaching support\b/i, /\bfirst step\b/i, /\bsupport area\b/i, /\bstarting point\b/i, /\b50(?:-day)?\b/i, /\bbuyer response\b/i, /\bholding\b/i, /\bdefend\b/i];
+  }
+  if(dominantEventKey === 'constructive_pullback_awaiting_confirmation' || /\bconstructive\b.*\bpullback\b/.test(dominantEvent)){
+    return [/\bcontrolled pullback\b/i, /\bhealthy pullback\b/i, /\bgood location\b/i, /\bbuyers need to follow through\b/i, /\bbounce\b/i, /\bsupport\b/i, /\btoo early\b/i, /\bstronger setup\b/i];
+  }
+  if(dominantEventKey === 'early_constructive_pullback' || /\bearly\b.*\bpullback\b/.test(dominantEvent)){
+    return [/\bright area\b/i, /\btoo early\b/i, /\blocation\b/i, /\bbuyer response\b/i, /\bnot be ready\b/i, /\bsupport\b/i];
+  }
+  if(dominantEventKey === 'extended_after_run' || /\b(momentum fading|losing quality|weakening)\b/.test(dominantEvent)){
+    return [/\bmessier pullbacks\b/i, /\bharder to trade\b/i, /\bharder to time\b/i, /\bquality\b/i, /\btiming\b/i, /\bclean pullbacks\b/i, /\bless reliable timing\b/i];
+  }
+  if(dominantEventKey === 'support_breakdown_stabilisation_attempt' || dominantEventKey === 'structure_breaking_down' || /\bsupport breakdown\b/.test(dominantEvent)){
+    return [/\bbounce before it is fixed\b/i, /\bbuild a base\b/i, /\breclaim lost support\b/i, /\bdamaged chart\b/i];
+  }
+  return [];
+}
+
+function hasRepeatedSemanticState(sentences = []){
+  const semanticBuckets = [
+    {key:'response_absent', patterns:[/\bnot shown enough\b/i, /\bneeds proof\b/i, /\bneeds confirmation\b/i, /\bnot confirmed\b/i]},
+    {key:'response_present', patterns:[/\bbuyers (?:stepped in|responded|started to respond|are trying to)\b/i, /\bbounce has started\b/i, /\brebound has started\b/i]},
+    {key:'support_failed', patterns:[/\bsupport (?:failed|gave way|broke)\b/i, /\blost support\b/i, /\bbreakdown\b/i]}
+  ];
+  const sentenceBuckets = sentences.map(sentence => semanticBuckets.filter(bucket => textHasAnyPattern(sentence, bucket.patterns)).map(bucket => bucket.key));
+  return semanticBuckets.some(bucket => sentenceBuckets.filter(keys => keys.includes(bucket.key)).length > 1);
 }
 
 function classifySupportNarrationSemantic(text = ''){
@@ -463,6 +564,8 @@ function classifySupportNarrationSemantic(text = ''){
       /\bsitting near support\b/,
       /\bfrom (?:the )?(?:20|50)-day average\b/,
       /\bat (?:the )?(?:20|50)-day average\b/,
+      /\baround (?:the )?(?:20|50)-day average\b/,
+      /\bworking around (?:the )?(?:20|50)-day average\b/,
       /\bholding (?:near|at|above) support\b/,
       /\brebounding from (?:the )?(?:20|50)-day average\b/,
       /\bsupport area\b/
@@ -527,6 +630,220 @@ function semanticContradictionsForEnvelope(text = '', envelope = {}){
       errors.push('Narration overstates seller control by omitting the active stabilisation attempt.');
     }
   }
+  return errors;
+}
+
+function validateTutorSectionRoles(response = {}, envelope = {}){
+  const safe = safeObject(response);
+  const semanticEnvelope = buildSemanticEnvelope(envelope);
+  const errors = [];
+  const chartStory = normaliseString(safe.chartStory, '');
+  const whyItMatters = normaliseString(safe.whyItMatters, '');
+  const setupLocation = normaliseString(safe.setupLocation, '');
+  const learningPoint = normaliseString(safe.learningPoint, '');
+  const whatNext = normaliseString(safe.whatNext, '');
+  const chartStoryOpening = openingSectionText(chartStory);
+  const learningPointSentences = splitIntoSentences(learningPoint);
+
+  if(/^this situation\b/i.test(chartStoryOpening) || /^the trend\b/i.test(chartStoryOpening)){
+    errors.push('chartStory must begin with observable price or buyer/seller behaviour, not generic framing.');
+  }
+  if(!textHasAnyPattern(chartStoryOpening, [
+    /\bbuyers?\b/i,
+    /\bsellers?\b/i,
+    /\bprice\b/i,
+    /\bstock\b/i,
+    /\bbounce\b/i,
+    /\bpullback\b/i,
+    /\brebound\b/i,
+    /\bgreen day\b/i,
+    /\bred days?\b/i,
+    /\bdrifting lower\b/i,
+    /\bstopped falling\b/i,
+    /\bpushed\b/i,
+    /\bfaded\b/i
+  ])){
+    errors.push('chartStory must open with visible behaviour the beginner can picture on the chart.');
+  }
+  if(/^recently\b/i.test(whyItMatters) || /^currently\b/i.test(whyItMatters)){
+    errors.push('whyItMatters must explain why traders care now, not restate the chart story or location.');
+  }
+  if(/\bimportant support level\b/i.test(whyItMatters) && /\bimportant support level\b/i.test(setupLocation)){
+    errors.push('whyItMatters and setupLocation should not repeat the same location claim.');
+  }
+  const specificLocationPresent = textHasAnyPattern(setupLocation, [/\bsupport\b/i, /\bresistance\b/i, /\b20(?:-day)?\b/i, /\b50(?:-day)?\b/i, /\bnear\b/i, /\bat\b/i, /\baround\b/i, /\bbetween\b/i]);
+  const honestNonSpecificLocation = semanticEnvelope.supportSemantic === 'support_unknown' && (
+    textHasAnyPattern(setupLocation, [/\btrend has not fully broken\b/i, /\btrend is still partly intact\b/i, /\bcurrent timing\b/i, /\bharder to trust\b/i, /\bless orderly\b/i, /\bpullbacks\b/i])
+  );
+  if(!specificLocationPresent && !honestNonSpecificLocation){
+    errors.push('setupLocation must explain where price sits relative to support or resistance in plain English.');
+  }
+  if(textHasAnyPattern(learningPoint, [/\balways be cautious\b/i, /\balways\b.+\bcautious\b/i])){
+    errors.push('learningPoint must avoid generic advice like "always be cautious".');
+  }
+  if(!textHasAnyPattern(learningPoint, [/\btraders?\b/i, /\bneed to see\b/i, /\bnot enough on its own\b/i, /\bbefore trusting\b/i, /\breduce the risk\b/i, /\bcan bounce before it is fixed\b/i, /\bstarting point\b/i, /\btoo early\b/i, /\bharder to time\b/i, /\bharder to trade\b/i, /\bbuild a base\b/i, /\bwhat buyers do next\b/i, /\bstay patient\b/i, /\bbuyer response\b/i, /\bfollow through\b/i, /\bholding\b/i, /\bdefended\b/i, /\blocation\b/i, /\btiming\b/i])){
+    errors.push('learningPoint must give one practical beginner lesson rather than restating the setup.');
+  }
+  if(textHasAnyPattern(learningPoint, [/\b(always|every time|never)\b/i, /\bassess the setup carefully\b/i, /\bclear signals\b/i, /\bdecision-making process\b/i, /\bbe cautious\b/i, /\bpatience is important\b/i])){
+    errors.push('learningPoint must teach the current event, not fall back to generic advice.');
+  }
+  if(learningPointSentences.length > 2){
+    errors.push('learningPoint must stay within one or two sentences.');
+  }
+  if(/^(watch|look for|wait for)\b/i.test(learningPoint)){
+    errors.push('learningPoint must teach a lesson, not repeat the whatNext instruction.');
+  }
+  if(!textHasAnyPattern(whatNext, [/\bwatch\b/i, /\blook for\b/i, /\bneed to see\b/i, /\bwait for\b/i, /\bif buyers\b/i, /\banother strong\b/i, /\bhold\b/i, /\breclaim\b/i])){
+    errors.push('whatNext must give one concrete observable signal.');
+  }
+  return errors;
+}
+
+function validateTutorVoice(response = {}){
+  const safe = safeObject(response);
+  const errors = [];
+  FINAL_PROSE_REQUIRED_FIELDS.forEach(field => {
+    const text = normaliseString(safe[field], '');
+    if(textHasAnyPattern(text, TUTOR_ABSTRACT_WORDING_PATTERNS)){
+      errors.push(`${field} uses abstract AI-style wording.`);
+    }
+    const sentences = splitIntoSentences(text);
+    if(sentences.length > 3){
+      errors.push(`${field} should stay within 1-3 short sentences.`);
+    }
+    sentences.forEach(sentence => {
+      const words = sentence.split(/\s+/).filter(Boolean);
+      if(words.length > 28){
+        errors.push(`${field} contains a long multi-clause sentence that breaks the spoken rhythm.`);
+      }
+    });
+  });
+  return errors;
+}
+
+function validateTutorPositiveSemanticRequirements(response = {}, envelope = {}){
+  const safe = safeObject(response);
+  const semanticEnvelope = buildSemanticEnvelope(envelope);
+  const errors = [];
+  const chartStory = normaliseString(safe.chartStory, '');
+  const whyItMatters = normaliseString(safe.whyItMatters, '');
+  const setupLocation = normaliseString(safe.setupLocation, '');
+  const learningPoint = normaliseString(safe.learningPoint, '');
+  const whatNext = normaliseString(safe.whatNext, '');
+  const storyAndWhy = [chartStory, whyItMatters].join(' ');
+  const fullText = [chartStory, whyItMatters, setupLocation, learningPoint, whatNext].join(' ');
+  const chartStorySentences = splitIntoSentences(chartStory);
+  const chartStoryFirstSentence = chartStorySentences[0] || '';
+  const responseAbsentPatterns = [
+    /\bbuyers have not shown enough\b/i,
+    /\bno clear response from buyers\b/i,
+    /\bthere has not been another strong green day yet\b/i,
+    /\bno clear bounce\b/i,
+    /\bbuyers have not stepped in strongly enough\b/i,
+    /\bstill needs a clear response\b/i
+  ];
+  const responsePresentPatterns = [
+    /\bbuyers (?:have )?(?:started to respond|responded|stepped in|are trying to stabilise|are trying to lift)\b/i,
+    /\bbuyers tried to bounce\b/i,
+    /\bthe bounce has started\b/i,
+    /\bstrong green day appeared\b/i,
+    /\bbuyers pushed the price higher\b/i,
+    /\bbuyers have started to push\b/i,
+    /\bbuyers are pushing\b/i,
+    /\brebounding from\b/i
+  ];
+  const proofPatterns = [
+    /\bneeds follow-through\b/i,
+    /\bstill needs another strong close\b/i,
+    /\bneeds buyers to back it up\b/i,
+    /\bwait for proof\b/i,
+    /\bwatch for proof\b/i,
+    /\bwatch for follow-through\b/i,
+    /\bneed to see buyers\b/i,
+    /\bhold above\b/i,
+    /\bbuild on the rebound\b/i,
+    /\bbefore trusting\b/i
+  ];
+  const confirmedPatterns = [
+    /\bconfirmed bounce\b/i,
+    /\bconfirmation has already happened\b/i,
+    /\bbuyers are defending support\b/i,
+    /\brebound (?:is )?underway\b/i,
+    /\bbuyers have regained control\b/i,
+    /\bbuyers are back in control\b/i
+  ];
+
+  if(semanticEnvelope.buyerResponseSemantic === 'response_absent'){
+    if(!textHasAnyPattern(storyAndWhy, responseAbsentPatterns)){
+      errors.push('Tutor prose must clearly communicate that buyers have not shown enough yet when buyerResponseSemantic is response_absent.');
+    }
+    if(textHasAnyPattern(fullText, confirmedPatterns)){
+      errors.push('Tutor prose must not imply a bounce is underway or confirmed when buyerResponseSemantic is response_absent.');
+    }
+  }
+
+  if(semanticEnvelope.buyerResponseSemantic === 'response_present'){
+    if(!textHasAnyPattern(storyAndWhy, responsePresentPatterns)){
+      errors.push('Tutor prose must acknowledge that buyers are responding when buyerResponseSemantic is response_present.');
+    }
+    if(semanticEnvelope.confirmationSemantic !== 'follow_through_confirmed' && textHasAnyPattern(fullText, [/\bregained control\b/i, /\bback in control\b/i, /\btrend is healthy again\b/i])){
+      errors.push('Tutor prose must not imply control has been regained while confirmation is still unconfirmed.');
+    }
+  }
+
+  if(semanticEnvelope.confirmationSemantic === 'follow_through_unconfirmed'){
+    if(!textHasAnyPattern(whatNext, proofPatterns)){
+      errors.push('whatNext must ask for proof or follow-through when confirmationSemantic is follow_through_unconfirmed.');
+    }
+    if(textHasAnyPattern(whatNext, confirmedPatterns)){
+      errors.push('whatNext must not imply confirmation has already happened when follow-through is still unconfirmed.');
+    }
+  }
+
+  if(semanticEnvelope.dominantEventKey === 'failed_first_bounce_from_20ma' || /\bfailed\b.*\bbounce\b/.test(semanticEnvelope.dominantEvent)){
+    if(textHasAnyPattern(whatNext, [/\bconfirmed bounce\b/i, /\bconfirmation of the bounce\b/i])){
+      errors.push('whatNext for a failed-bounce event must ask for a new stronger buyer response or reclaim, not a "confirmed bounce".');
+    }
+  }
+
+  if(semanticEnvelope.supportSemantic === 'support_present' && classifySupportNarrationSemantic(setupLocation) !== 'support_present'){
+    errors.push('setupLocation must clearly describe active interaction with support when supportSemantic is support_present.');
+  }
+
+  if(semanticEnvelope.supportSemantic === 'support_failed'){
+    if(classifySupportNarrationSemantic(setupLocation) !== 'support_failed' && !textHasAnyPattern(setupLocation, [/\blost support\b/i, /\bneeds time to rebuild\b/i, /\bneeds repair\b/i])){
+      errors.push('setupLocation must describe the lost support and the need for repair when supportSemantic is support_failed.');
+    }
+  }
+
+  if(inferQualitySemantic(semanticEnvelope) === 'fading'){
+    const opening = openingSectionText(chartStory);
+    if(!textHasAnyPattern(opening, [/\blosing quality\b/i, /\bquality is slipping\b/i, /\bquality is fading\b/i, /\bless clean\b/i, /\bmessier\b/i, /\bnot pushing back as strongly\b/i, /\bweakening\b/i])){
+      errors.push('chartStory must lead with deterioration or loss of quality when the setup is fading.');
+    }
+  }
+
+  const chartStoryLeadPatterns = eventLeadPatternsForEnvelope(semanticEnvelope);
+  if(chartStoryLeadPatterns.length && !textHasAnyPattern(chartStoryFirstSentence, chartStoryLeadPatterns)){
+    errors.push('chartStory first sentence must lead with the dominant event rather than broad context.');
+  }
+  if(chartStorySentences.length > 3){
+    errors.push('chartStory must stay within three sentences.');
+  }
+  if(hasRepeatedSemanticState(chartStorySentences)){
+    errors.push('chartStory must avoid repeating the same semantic state across multiple sentences.');
+  }
+
+  const learningPatterns = learningPointPatternsForEnvelope(semanticEnvelope);
+  if(learningPatterns.length && !textHasAnyPattern(learningPoint, learningPatterns)){
+    errors.push('learningPoint must teach a practical lesson tied to the current dominant event.');
+  }
+  const normalizedLearningPoint = learningPoint.toLowerCase().replace(/[^\w\s]/g, ' ').trim();
+  const normalizedWhatNext = whatNext.toLowerCase().replace(/[^\w\s]/g, ' ').trim();
+  if(normalizedLearningPoint && normalizedWhatNext && (normalizedLearningPoint === normalizedWhatNext || normalizedWhatNext.includes(normalizedLearningPoint))){
+    errors.push('learningPoint must stay distinct from whatNext.');
+  }
+
   return errors;
 }
 
@@ -652,6 +969,38 @@ function buildProductionChartGuruInterpretationPrompt(structuredFacts, originalP
 }
 
 function buildProductionChartGuruFinalInstructions(){
+  const styleGuide = [
+    'Chart Guru Style Guide:',
+    '- Sound like an experienced swing trader quietly explaining the chart to someone buying their first stock.',
+    '- Write the way a real trader would speak out loud, not like a market note, memo, or AI summary.',
+    '- Use ordinary spoken English that still makes sense to a beginner.',
+    '- Start with what the beginner can see on the chart, then explain why traders care.',
+    '- Prefer observable price behaviour over abstract trading language.',
+    '- Explain what buyers and sellers are doing rather than leaning on generic concepts.',
+    '- Keep sentences short. One idea per sentence.',
+    '- Avoid awkward literal rewrites of semantic fields.',
+    '- Do not sound corporate, polished, academic, or over-produced.',
+    '- Do not lecture or define jargon like a textbook. Explain why traders care instead.',
+    '- Prefer "This matters because..." over "This situation is significant because...".',
+    '- Prefer "This pullback is not as clean as the earlier ones." over "The setup quality has deteriorated."',
+    '- Prefer "Buyers have not shown enough strength yet." over "Buyer commitment is lacking."',
+    '- Prefer "There has not been another strong green day yet, so traders still do not know if buyers are back." over "Buyers have not confirmed the bounce."',
+    '- Prefer "buyers are trying to stabilise the chart" over "buyers are attempting to steady the action".',
+    '- Prefer "buyers have not regained control" over "the rebound has not put them back in control".',
+    '- Prefer "build a base" when the chart needs time to settle before improving.',
+    '- Prefer phrases like "a strong green day appeared", "the first bounce did not last", "the stock has been drifting lower", or "buyers pushed the price higher" when they fit the trader interpretation.',
+    '- For stabilisation semantics, use phrases like "trying to stabilise", "starting to settle", or "base-building" when accurate.',
+    '- For buyer response semantics, use phrases like "buyers stepped in", "buyers responded", or "buyers are trying to lift it".',
+    '- For seller control semantics, use phrases like "sellers are still in control", "selling pressure is still there", or "buyers have not taken control back" when accurate.',
+    '- For rebuilding semantics, use phrases like "build a base", "repair the damage", or "rebuild before it improves" depending on the context.',
+    '- For support semantics, use phrases like "near support", "testing support", "lost support", or "reclaim support" instead of abstract level language.',
+    '- For follow-through semantics, use phrases like "needs follow-through", "still needs another strong close", or "needs buyers to back it up".',
+    '- For failed-bounce semantics, use phrases like "the bounce failed", "buyers could not hold the rebound", or "the rebound faded quickly".',
+    '- For momentum-fading semantics, use phrases like "momentum is fading", "the move is losing steam", or "the trend looks more tired now".',
+    '- Avoid phrases like "favourable position", "buyer commitment", "waiting phase", "constructive backdrop", "market participants", "indicates potential", "demonstrates", "facilitates", and "in order to".',
+    '- The beginner should feel: I understand what happened, why traders care, and what I would watch next.',
+    '- Stay beginner-friendly, but keep the voice recognisably trader-like rather than polished, technical, or academic.'
+  ].join('\n');
   return [
     'You are the Chart Guru tutor layer.',
     'Use plain English for a novice retail trader.',
@@ -662,6 +1011,54 @@ function buildProductionChartGuruFinalInstructions(){
     'Use supportSemantic, buyerResponseSemantic, and confirmationSemantic as fixed meaning constraints from the trader interpretation.',
     'Preserve support-location meaning from the trader interpretation. Do not rewrite a near-support rebound as price being away from support.',
     'If supportSemantic is support_failed while buyerResponseSemantic is response_present and confirmationSemantic is not follow_through_confirmed, explain that support already failed, buyers are trying to stabilise, and control has not been regained.',
+    'Section jobs are fixed. chartStory: observable behaviour first, then what it means. whyItMatters: why traders care now, without repeating the story. setupLocation: where price sits relative to support or resistance in plain English. learningPoint: one practical lesson. whatNext: one concrete observable signal.',
+    'chartStory should usually be two short sentences. Sentence 1: what just happened. Sentence 2: what that means now. Use a third short sentence only when a secondary event is essential.',
+    'chartStory first sentence must lead with the dominant event itself, not a generic recap of the broader trend.',
+    'Do not write chartStory as a chopped-up list of short fragments or as one long essay sentence.',
+    'If buyerResponseSemantic is response_absent, make it clear that buyers have not shown enough yet and do not imply a bounce is underway or confirmed.',
+    'If buyerResponseSemantic is response_present, acknowledge that buyers are responding, but do not imply control has been regained unless confirmationSemantic supports it.',
+    'If confirmationSemantic is follow_through_unconfirmed, whatNext must ask for proof or follow-through rather than implying confirmation already happened.',
+    'For constructive pullback cases near support with buyers still absent or weak and follow-through unconfirmed, prefer phrases like "buyers still need to step in", "buyers have not followed through yet", "the bounce still needs proof", or "the pullback is worth watching, but it is not ready yet".',
+    'For failed-bounce cases, whatNext must ask for a new stronger buyer response, a stronger reclaim of the 20-day average, or buyers producing a better bounce and holding it. Do not say "confirmed bounce" or "confirmation of the bounce" because the original bounce already failed.',
+    'If supportSemantic is support_present, setupLocation must describe active interaction with support.',
+    'If supportSemantic is support_failed, setupLocation must describe the lost support and the need for repair.',
+    'If the setup is fading in quality, chartStory must lead with that deterioration rather than generic prior trend context.',
+    'learningPoint should be one or two short sentences. Teach one reusable lesson that comes directly from the dominant event. Do not give generic advice like "be cautious", "wait for confirmation", or "look for clear signals".',
+    'learningPoint should explain the lesson of the current event, not repeat chartStory and not turn into whatNext.',
+    'Do not start learningPoint with "watch", "look for", or "wait for". That belongs in whatNext, not in the lesson.',
+    'Avoid vague chartStory wording like "potential setup", "useful area", or "promising chart" when the trader interpretation gives a more concrete event such as a pullback, support test, failed bounce, or fading quality.',
+    'If supportLabel is present in the tutor input, preserve it in plain English instead of replacing it with vague location wording.',
+    'If supportLabel is empty, stay honest. Do not invent a moving average or named support zone.',
+    'Compact semantic-state examples:',
+    '- support present + response absent + confirmation unconfirmed: "Price has reached an important support area, but buyers have not pushed back yet. The location is useful, but the chart still needs a clear response."',
+    '- support present + response present + confirmation unconfirmed: "Buyers have started to respond at support, but the bounce still needs to hold. The first reaction is encouraging, not confirmed."',
+    '- support failed + response present + repair unconfirmed: "Support has already failed. Buyers are trying to stabilise the chart, but they have not repaired the damage yet."',
+    '- quality fading + trend partly intact: "This setup is losing quality. The pullbacks are becoming messier, and buyers are not pushing back as strongly as before."',
+    '- constructive but early: "The stock is easing toward the 20-day average, but it is still early. Buyers have not shown enough yet."',
+    'Examples of practical learning points: "A support touch is not enough on its own. Traders still need to see what buyers do next." "A good support area is only the starting point. Traders still need to see buyers defend it." "A damaged chart can bounce before it is fixed."',
+    'More learning-point examples by event: "A failed first bounce is a reason to stay patient." "A healthy pullback can still be too early." "Messier pullbacks usually mean harder timing." "A promising chart is not the same as a ready trade."',
+    'Preferred chartStory formulas by event meaning:',
+    '- failed bounce: "Buyers tried to bounce from support, but the move faded quickly. That means support has not proved itself yet."',
+    '- first support test without confirmation: "The stock has reached its first proper test of support. That means traders are watching for a buyer response, not assuming support is already holding."',
+    '- constructive pullback without confirmation: "The stock is pulling back in a controlled way toward support. That means the trend is still intact, but buyers still need to follow through."',
+    '- fading quality: "The pullbacks are getting messier. That tells traders the setup is losing quality."',
+    '- constructive but early: "The stock is only starting to pull back toward support. That means the setup is still early and buyers have not shown enough yet."',
+    'Preferred learningPoint formulas by semantic meaning:',
+    '- support present + response absent: "A good support area is only a starting point. Traders still need to see buyers defend it."',
+    '- support present + response present + follow-through unconfirmed: "The first reaction from support is encouraging, but one response is not enough on its own."',
+    '- support failed + response present + repair unconfirmed: "A damaged chart can bounce before it is fixed. Traders still need to see a base and a reclaim of lost support."',
+    '- quality fading: "A trend can stay up while the setup gets harder to trade. Messier pullbacks usually mean worse timing."',
+    '- constructive but early: "A promising location is not the same as a ready trade. Buyers still need to show up."',
+    'For VRT-style fading cases with no named support label, keep setupLocation honest: "The trend has not fully broken, but the recent pullbacks are less orderly. That makes the current timing harder to trust."',
+    'For GEV-style early cases with a named support label, prefer that label directly: "Price is only starting to pull back toward the 20-day average, so the chart has not reached a clear decision point yet."',
+    'Avoid generic lesson wording like "it is important to", "it is crucial to", "always look for", "be cautious", or "before making any decisions".',
+    'Each section should sound like a calm spoken explanation, not like generated commentary.',
+    'In chartStory, begin with the clearest observable behaviour from the trader interpretation before explaining what it means.',
+    'In whyItMatters, explain why traders care in plain language.',
+    'In setupLocation, describe where the setup sits in simple chart terms without drifting into abstract commentary.',
+    'In learningPoint, teach naturally by explaining what traders want to see, not by lecturing.',
+    'In whatNext, make the next watch signal feel practical and easy to picture on the chart.',
+    styleGuide,
     'Return exactly one JSON object.',
     'Return only these fields as JSON strings: chartStory, whyItMatters, setupLocation, learningPoint, whatNext.',
     'If a field is unknown, return an empty string.'
@@ -910,6 +1307,9 @@ function validateFinalProseResponse(response, allowedPriceMentions = [], eventPa
   if(deterministicNearSupportContext(eventPacket, structuredFacts) || envelope.supportSemantic || envelope.buyerResponseSemantic){
     errors.push(...semanticContradictionsForEnvelope(text, envelope));
   }
+  errors.push(...validateTutorPositiveSemanticRequirements(response, envelope));
+  errors.push(...validateTutorSectionRoles(response, envelope));
+  errors.push(...validateTutorVoice(response));
   return {ok:errors.length === 0, errors};
 }
 
@@ -1613,6 +2013,9 @@ exports.__test = {
   classifyBuyerResponseSemantic,
   classifyRepairNarrationSemantic,
   semanticContradictionsForEnvelope,
+  validateTutorPositiveSemanticRequirements,
+  validateTutorSectionRoles,
+  validateTutorVoice,
   validateTraderInterpretationResponse,
   validateFinalProseResponse
 };

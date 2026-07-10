@@ -425,6 +425,135 @@ function verifySemanticClassifierCoverage(){
     ).length >= 1,
     'Semantic envelope should reject damaged-chart narration that omits the active buyer response.'
   );
+  assert.strictEqual(
+    hooks.validateFinalProseResponse({
+      chartStory:'Price has reached support, and buyers are pushing it higher.',
+      whyItMatters:'This matters because traders now have a reason to trust the bounce.',
+      setupLocation:'The price is sitting at the 50-day moving average, which is a support area.',
+      learningPoint:'Support tests can work well when buyers prove themselves quickly.',
+      whatNext:'Watch for the confirmed bounce to keep working higher.'
+    }, [], {
+      supportSemantic:'support_present',
+      buyerResponseSemantic:'response_absent',
+      confirmationSemantic:'follow_through_unconfirmed'
+    }, {
+      traderInterpretation:{
+        supportSemantic:'support_present',
+        buyerResponseSemantic:'response_absent',
+        confirmationSemantic:'follow_through_unconfirmed'
+      }
+    }).ok,
+    false,
+    'Tutor validation must reject response-absent prose that implies a confirmed bounce.'
+  );
+  assert.strictEqual(
+    hooks.validateFinalProseResponse({
+      chartStory:'Buyers stepped in at support, but they are back in full control now.',
+      whyItMatters:'This matters because the stock looks ready again.',
+      setupLocation:'The price is near support at the 20-day moving average.',
+      learningPoint:'A first response can look good, but traders still want proof.',
+      whatNext:'Watch to see if buyers can back it up with another strong close.'
+    }, [], {
+      supportSemantic:'support_present',
+      buyerResponseSemantic:'response_present',
+      confirmationSemantic:'follow_through_unconfirmed'
+    }, {
+      traderInterpretation:{
+        supportSemantic:'support_present',
+        buyerResponseSemantic:'response_present',
+        confirmationSemantic:'follow_through_unconfirmed'
+      }
+    }).ok,
+    false,
+    'Tutor validation must reject response-present prose that claims control has already been regained.'
+  );
+  assert.strictEqual(
+    hooks.validateFinalProseResponse({
+      chartStory:'The pullbacks are getting messier, and buyers are not pushing back as strongly as before. That tells traders this setup is losing quality.',
+      whyItMatters:'This matters because traders usually want cleaner pullbacks than this.',
+      setupLocation:'The trend is still partly intact, but the support area is not producing clean reactions.',
+      learningPoint:'A chart can stay in trend, but traders still need to see clean pullbacks before trusting it.',
+      whatNext:'Watch for proof that the pullbacks are cleaning up and buyers are pushing back with more strength.'
+    }, [], {
+      dominantEventKey:'extended_after_run'
+    }, {
+      traderInterpretation:{
+        dominantEventKey:'extended_after_run',
+        supportSemantic:'support_unknown',
+        buyerResponseSemantic:'response_unknown',
+        confirmationSemantic:'follow_through_unconfirmed'
+      }
+    }).ok,
+    true,
+    'Fading-quality narration should pass when deterioration leads the chart story.'
+  );
+  assert.strictEqual(
+    hooks.validateFinalProseResponse({
+      chartStory:'This situation indicates a potential opportunity as market participants assess the constructive backdrop.',
+      whyItMatters:'This situation indicates that buyer commitment may facilitate a more favourable position.',
+      setupLocation:'The price is near support.',
+      learningPoint:'Always be cautious.',
+      whatNext:'Watch for proof.'
+    }, [], {
+      supportSemantic:'support_present',
+      buyerResponseSemantic:'response_absent',
+      confirmationSemantic:'follow_through_unconfirmed'
+    }, {
+      traderInterpretation:{
+        supportSemantic:'support_present',
+        buyerResponseSemantic:'response_absent',
+        confirmationSemantic:'follow_through_unconfirmed'
+      }
+    }).ok,
+    false,
+    'Tutor validation must reject abstract AI wording and generic learning advice.'
+  );
+  assert.strictEqual(
+    hooks.validateFinalProseResponse({
+      chartStory:'The pullback is near the 20-day average. Buyers have not shown enough yet. The setup is still early.',
+      whyItMatters:'This matters because support still needs proof.',
+      setupLocation:'Price is near the 20-day average support area.',
+      learningPoint:'Wait for confirmation.',
+      whatNext:'Watch for buyers to hold the 20-day average and add follow-through.'
+    }, [], {
+      dominantEventKey:'constructive_pullback_awaiting_confirmation',
+      supportSemantic:'support_present',
+      buyerResponseSemantic:'response_absent',
+      confirmationSemantic:'follow_through_unconfirmed'
+    }, {
+      traderInterpretation:{
+        dominantEventKey:'constructive_pullback_awaiting_confirmation',
+        supportSemantic:'support_present',
+        buyerResponseSemantic:'response_absent',
+        confirmationSemantic:'follow_through_unconfirmed'
+      }
+    }).ok,
+    false,
+    'Tutor validation must reject learningPoint text that falls back to generic advice-only wording.'
+  );
+  assert.strictEqual(
+    hooks.validateFinalProseResponse({
+      chartStory:'Buyers tried to bounce from the 20-day average, but that first bounce faded quickly. Support has not proved itself yet.',
+      whyItMatters:'This matters because a failed first bounce often means the pullback still needs more work.',
+      setupLocation:'Price is still working around the 20-day average, with the 50-day average below as backup support.',
+      learningPoint:'A support touch matters less than what buyers do next. A failed first bounce is a reason to stay patient.',
+      whatNext:'Watch for buyers to reclaim the 20-day average and add follow-through before trusting the pullback again.'
+    }, [], {
+      dominantEventKey:'failed_first_bounce_from_20ma',
+      supportSemantic:'support_present',
+      buyerResponseSemantic:'response_present',
+      confirmationSemantic:'follow_through_unconfirmed'
+    }, {
+      traderInterpretation:{
+        dominantEventKey:'failed_first_bounce_from_20ma',
+        supportSemantic:'support_present',
+        buyerResponseSemantic:'response_present',
+        confirmationSemantic:'follow_through_unconfirmed'
+      }
+    }).ok,
+    true,
+    'Failed-bounce prose should pass when chartStory is event-led and learningPoint teaches the specific event lesson.'
+  );
 }
 
 function verifyAppPayloadIncludesDeterministicEventPacket(){
@@ -518,6 +647,8 @@ function verifyInterpreterContractAndTutorBoundary(){
     [
       'dominantEvent',
       'dominantEventKey',
+      'supportLabel',
+      'trendLabel',
       'eventSequence',
       'traderInterpretation',
       'currentRisk',
@@ -547,6 +678,12 @@ function verifyInterpreterContractAndTutorBoundary(){
       assert.ok(!tutorPrompt.includes(forbidden), `${fixture.id}: tutor prompt must not leak ${forbidden}.`);
     });
     assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('Do not inspect raw chart evidence.'), `${fixture.id}: Stage 3 instructions must explicitly forbid raw evidence inspection.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('Chart Guru Style Guide:'), `${fixture.id}: Stage 3 instructions must include the style guide.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('buyers have not regained control'), `${fixture.id}: Stage 3 instructions must prefer natural damaged-rebound wording.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('momentum is fading'), `${fixture.id}: Stage 3 instructions must include preferred momentum-fading phrasing.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('Section jobs are fixed.'), `${fixture.id}: Stage 3 instructions must define each section job explicitly.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('Compact semantic-state examples:'), `${fixture.id}: Stage 3 instructions must include compact semantic-state examples.`);
+    assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('buyers have not shown enough yet'), `${fixture.id}: Stage 3 instructions must reinforce response-absent spoken phrasing.`);
 
     const interpretationContradictions = hooks.semanticContradictionsForEnvelope([
       normalizedInterpretation.dominantEvent,

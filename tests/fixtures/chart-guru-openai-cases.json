@@ -90,16 +90,23 @@
     "verdict": "watch",
     "setupScore": 6,
     "primaryRecentEvent": "constructive_but_early_monitor_watch",
+    "supportLabel": "Near the 20-day average",
+    "trendLabel": "Early constructive pullback",
+    "supportSemantic": "support_present",
+    "buyerResponseSemantic": "response_absent",
+    "confirmationSemantic": "follow_through_unconfirmed",
     "eventSequence": [
-      "constructive trend backdrop",
-      "price is starting to pull back toward a useful area",
-      "the chart still looks early rather than confirmed",
-      "buyers have not fully shown themselves yet",
+      "constructive trend still intact",
+      "price is starting to pull back toward the 20-day average",
+      "the setup is still early rather than confirmed",
+      "buyers have not shown enough yet",
       "this is a monitor watch, not an entry"
     ],
     "technicalContext": [
-      "constructive setup",
+      "constructive setup near the 20-day average",
       "early monitor watch",
+      "support present",
+      "buyers not yet shown",
       "confirmation pending",
       "not actionable yet"
     ],

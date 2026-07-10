@@ -97,11 +97,11 @@
     "nextSignal": "The next useful signal is either a cleaner repair sequence or a calmer reset back toward support instead of more sloppy action."
   },
   "finalProse": {
-    "chartStory": "The main event is that momentum has started fading after an extended run, so the structure looks less clean now.",
-    "whyItMatters": "When a move gets stretched and then starts losing quality, traders become more careful because continuation is no longer as straightforward.",
+    "chartStory": "The pullbacks are getting messier, and buyers are not pushing back as strongly as before. That tells traders momentum is fading after the earlier run.",
+    "whyItMatters": "This matters because when a move starts losing quality, continuation is no longer as easy to trust.",
     "setupLocation": "Price is still above bigger support areas, but the recent action looks more tired and less organised.",
-    "learningPoint": "A strong trend can stay bullish overall while still becoming harder to time well in the short term.",
-    "whatNext": "Watch for the chart to repair itself with calmer action or reset closer to support before trusting it more again."
+    "learningPoint": "A strong trend can stay up overall while still becoming harder to time well. Traders still need to see cleaner pullbacks before trusting it again.",
+    "whatNext": "Watch for proof that the chart can calm down and rebuild before trusting it more again."
   },
   "semanticExpectations": {
     "dominantEventTokens": ["momentum", "fading", "extended"],
