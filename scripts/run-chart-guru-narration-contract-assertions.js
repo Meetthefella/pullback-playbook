@@ -162,6 +162,20 @@ function buildEventPacketSandbox(){
   return sandbox;
 }
 
+function buildStage15SelectorSandbox(){
+  const sandbox = {console};
+  sandbox.globalThis = sandbox;
+  vm.runInNewContext([
+    extractFunction('chartCoachRecentColorRun'),
+    extractFunction('chartCoachLargeBodyRun'),
+    extractFunction('chartGuruBuyerResponsePresent'),
+    extractFunction('chartGuruRecentSupportType'),
+    extractFunction('chartGuruRecentSupportResponsePresent'),
+    extractFunction('chartCoachPrimaryStoryCandidates')
+  ].join('\n\n'), sandbox, {filename:'chart-guru-stage15-selector.js'});
+  return sandbox;
+}
+
 function buildAnalysisPayloadSandbox(eventPacket){
   const sandbox = {
     console,
@@ -554,6 +568,18 @@ function verifySemanticClassifierCoverage(){
     true,
     'Failed-bounce prose should pass when chartStory is event-led and learningPoint teaches the specific event lesson.'
   );
+  assert.ok(
+    hooks.semanticContradictionsForEnvelope(
+      'Price is not near support right now and needs to move back into the 20-day average before this becomes interesting.',
+      {
+        dominantEventKey:'early_rebound_from_20ma',
+        supportSemantic:'support_present',
+        buyerResponseSemantic:'response_present',
+        confirmationSemantic:'follow_through_unconfirmed'
+      }
+    ).length >= 1,
+    'UNP-style near-support rebound narration must reject support-absent meaning after buyers have already responded.'
+  );
 }
 
 function verifyAppPayloadIncludesDeterministicEventPacket(){
@@ -696,6 +722,112 @@ function verifyInterpreterContractAndTutorBoundary(){
     assert.deepStrictEqual(toPlainJson(structuredFacts.eventSequence), toPlainJson(packet.eventSequence), `${fixture.id}: structured facts must retain deterministic event sequence.`);
     assert.deepStrictEqual(toPlainJson(structuredFacts.deterministicEvidence.stepDetails), toPlainJson(packet.stepDetails), `${fixture.id}: structured facts must retain deterministic evidence trace.`);
   }
+}
+
+function verifyStage15PostSupportReboundSelection(){
+  const sandbox = buildStage15SelectorSandbox();
+  const selectPrimaryStory = context => {
+    const candidates = sandbox.chartCoachPrimaryStoryCandidates(context);
+    return Array.isArray(candidates) && candidates.length ? candidates[0] : null;
+  };
+
+  const baseTrendContext = {
+    recentSequence:[],
+    latestDirection:'green',
+    latestWickRejection:'',
+    bodyDescriptor:'strong',
+    maRelation:{above20:true, above50:true, above200:true},
+    structureIntact:true,
+    structureBroken:false,
+    structureWeakening:false,
+    pullbackNear20:false,
+    pullbackNear50:false,
+    recentlyLeftSupportZone:false,
+    offLevelWithoutStructureDamage:false,
+    bounceAttempt:false,
+    followThroughConfirmed:false,
+    failedBounce:false,
+    weakVolume:true,
+    activeVolume:false,
+    extendedAfterRun:true,
+    actionable:false,
+    setupLocationState:'extended',
+    evaluationScanType:'unknown',
+    bounceState:'none',
+    stabilisationState:'none',
+    reclaimConfirmed:false,
+    candleEvidenceUpClosesAfterLow:0,
+    candleEvidenceReclaimedPriorDayHigh:false,
+    candleEvidenceHigherLowHold:false,
+    candleEvidenceReclaimRangeMeaningful:false
+  };
+
+  const extendedWithoutPullback = selectPrimaryStory(baseTrendContext);
+  assert.strictEqual(extendedWithoutPullback && extendedWithoutPullback.key, 'extended_after_run', 'A strong run with no recent support response must stay extended_after_run.');
+
+  const postSupportRebound = selectPrimaryStory({
+    ...baseTrendContext,
+    recentlyLeftSupportZone:true,
+    offLevelWithoutStructureDamage:true,
+    setupLocationState:'off_level',
+    evaluationScanType:'20MA',
+    bounceAttempt:true,
+    bounceState:'attempt',
+    reclaimConfirmed:true,
+    candleEvidenceUpClosesAfterLow:2,
+    candleEvidenceReclaimedPriorDayHigh:true,
+    candleEvidenceHigherLowHold:true
+  });
+  assert.strictEqual(postSupportRebound && postSupportRebound.key, 'early_rebound_from_20ma', 'A recent buyer response after support interaction must outrank extended_after_run.');
+
+  const postSupportStabilising = selectPrimaryStory({
+    ...baseTrendContext,
+    recentlyLeftSupportZone:true,
+    offLevelWithoutStructureDamage:true,
+    setupLocationState:'off_level',
+    evaluationScanType:'20MA',
+    bounceAttempt:false,
+    bounceState:'none',
+    stabilisationState:'early',
+    reclaimConfirmed:true,
+    candleEvidenceUpClosesAfterLow:1,
+    candleEvidenceHigherLowHold:true
+  });
+  assert.strictEqual(postSupportStabilising && postSupportStabilising.key, 'early_rebound_from_20ma', 'A stabilising move higher after support interaction must classify as the rebound story.');
+
+  const reclaimAfterSupportResponse = selectPrimaryStory({
+    ...baseTrendContext,
+    recentlyLeftSupportZone:true,
+    offLevelWithoutStructureDamage:true,
+    setupLocationState:'off_level',
+    evaluationScanType:'20MA',
+    bounceAttempt:false,
+    bounceState:'improving',
+    stabilisationState:'clear',
+    reclaimConfirmed:true,
+    candleEvidenceReclaimedPriorDayHigh:true,
+    candleEvidenceReclaimRangeMeaningful:true
+  });
+  assert.strictEqual(reclaimAfterSupportResponse && reclaimAfterSupportResponse.key, 'early_rebound_from_20ma', 'A reclaim after support response must classify as the rebound story.');
+
+  const failedBounce = selectPrimaryStory({
+    ...baseTrendContext,
+    structureIntact:false,
+    structureWeakening:true,
+    extendedAfterRun:false,
+    offLevelWithoutStructureDamage:false,
+    recentlyLeftSupportZone:false,
+    pullbackNear20:true,
+    bounceAttempt:false,
+    bounceState:'none',
+    failedBounce:true,
+    latestDirection:'red',
+    bodyDescriptor:'strong'
+  });
+  assert.ok(
+    ['failed_bounce', 'pullback_still_repairing', 'structure_breaking_down'].includes(failedBounce && failedBounce.key),
+    'A support touch followed by a failed bounce must stay in the failed-bounce/support-failure family.'
+  );
 }
 
 async function verifyAuthorityContract(){
@@ -953,6 +1085,7 @@ async function run(){
   verifySemanticClassifierCoverage();
   verifyAppPayloadIncludesDeterministicEventPacket();
   verifyEventPacketContract();
+  verifyStage15PostSupportReboundSelection();
   verifyInterpreterContractAndTutorBoundary();
   await verifyAuthorityContract();
   verifyStoryContinuityAndBenchmarks();

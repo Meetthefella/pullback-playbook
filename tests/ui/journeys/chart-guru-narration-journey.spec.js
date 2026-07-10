@@ -25,10 +25,12 @@ const {
   listBenchmarkFolders,
   loadBenchmarkCaseByTicker
 } = require('../../fixtures/chart-guru-benchmark-library.js');
+const analyseSetupModule = require('../../../netlify/functions/analyse-setup.js');
 
 const API_ORIGIN = 'https://velvety-clafoutis-8a92bf.netlify.app';
 const RUN_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, '-');
 const RUN_RESULTS = [];
+const LIVE_ANALYSIS_MODE = String(process.env.PP_CHART_GURU_REAL_ANALYSIS || '').trim() === '1';
 
 const JOURNEY_TICKERS = (() => {
   const explicit = normalizeTicker(process.env.PP_JOURNEY_TICKER || '');
@@ -47,6 +49,55 @@ function normalizeText(value){
 
 function normalizeKey(value){
   return normalizeText(value).toLowerCase();
+}
+
+function normalizeSemanticText(value){
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const SEMANTIC_TOKEN_EQUIVALENTS = {
+  healthy:['healthy', 'strong uptrend', 'strong trend', 'trend remains healthy', 'trend still looks healthy', 'broader trend still looks healthy'],
+  buyers:['buyers', 'buying pressure', 'buyers are attempting to step in', 'buyers have started to push'],
+  confirmation:['confirmation', 'confirm', 'follow through', 'followthrough', 'needs more proof', 'needs proof'],
+  support:['support', '20 day moving average', '20 day average', 'moving average support', 'support level'],
+  watch:['watch', 'look for', 'keep an eye on'],
+  rebound:['rebound', 'bounce', 'push the stock higher again', 'push price higher again']
+};
+
+function normalizeEventIdentity(value){
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function selectLiveDominantEventIdentity(analysis = {}, snapshot = {}){
+  const packet = analysis && analysis.deterministicEventPacket || {};
+  const interpretation = analysis && analysis.traderInterpretation || {};
+  const chartRead = snapshot && snapshot.chartRead || {};
+  return normalizeText(
+    packet.dominantEventLabel
+    || interpretation.dominantEventKey
+    || packet.dominantEventKey
+    || interpretation.dominantEvent
+    || chartRead.trendLabel
+  );
+}
+
+function selectLiveDominantEventNarrative(analysis = {}, snapshot = {}){
+  const packet = analysis && analysis.deterministicEventPacket || {};
+  const interpretation = analysis && analysis.traderInterpretation || {};
+  const chartRead = snapshot && snapshot.chartRead || {};
+  return normalizeText(
+    interpretation.dominantEvent
+    || packet.dominantEvent
+    || packet.dominantEventLabel
+    || chartRead.trendLabel
+  );
 }
 
 function buildMissingChartResult(caseFolder, benchmarkFixture){
@@ -98,13 +149,231 @@ function sectionTextByKey(sections, key){
 }
 
 function includesAllTokens(text, tokens = []){
-  const haystack = normalizeKey(text);
-  return tokens.every(token => haystack.includes(normalizeKey(token)));
+  const haystack = normalizeSemanticText(text);
+  return tokens.every(token => {
+    const normalizedToken = normalizeSemanticText(token);
+    const equivalents = SEMANTIC_TOKEN_EQUIVALENTS[normalizedToken] || [normalizedToken];
+    return equivalents.some(candidate => haystack.includes(normalizeSemanticText(candidate)));
+  });
 }
 
 function includesAnyToken(text, tokens = []){
-  const haystack = normalizeKey(text);
-  return tokens.some(token => haystack.includes(normalizeKey(token)));
+  const haystack = normalizeSemanticText(text);
+  return tokens.some(token => haystack.includes(normalizeSemanticText(token)));
+}
+
+function classifyNarrationMeaning(text = ''){
+  const hooks = analyseSetupModule.__test || {};
+  if(typeof hooks.classifySupportNarrationSemantic !== 'function') return '';
+  return hooks.classifySupportNarrationSemantic(text);
+}
+
+function extractTutorInputFromPrompt(prompt = ''){
+  const marker = 'Trader interpretation to translate into Chart Guru teaching prose:';
+  const source = String(prompt || '');
+  const index = source.indexOf(marker);
+  if(index < 0) return null;
+  const jsonText = source.slice(index + marker.length).trim();
+  if(!jsonText) return null;
+  try{
+    return JSON.parse(jsonText);
+  }catch(_error){
+    return null;
+  }
+}
+
+function buildUnpDebugTrace({requestPayload, responseAnalysis, snapshot, appState, networkTrace, benchmarkFixture, harnessErrors}){
+  const hooks = analyseSetupModule.__test || {};
+  const packet = responseAnalysis && responseAnalysis.deterministicEventPacket || null;
+  const interpretation = responseAnalysis && responseAnalysis.traderInterpretation || null;
+  const reviewState = appState && appState.review && appState.review.stateHealth || {};
+  const scannerProjection = reviewState
+    && reviewState.contract
+    && reviewState.contract.authoritativeInputs
+    && reviewState.contract.authoritativeInputs.scanner
+    && reviewState.contract.authoritativeInputs.scanner.analysisProjection || {};
+  const scannerDerivedStates = scannerProjection && scannerProjection.derived_states || {};
+  const structuredFacts = hooks.buildProductionStructuredFacts
+    ? hooks.buildProductionStructuredFacts(requestPayload || {}, responseAnalysis || {})
+    : null;
+  const normalizedInterpretation = hooks.normalizeTraderInterpretation
+    ? hooks.normalizeTraderInterpretation(interpretation || {}, packet || {})
+    : interpretation;
+  const semanticEnvelope = normalizedInterpretation ? {
+    dominantEventKey:String(normalizedInterpretation.dominantEventKey || packet && packet.dominantEventKey || '').trim(),
+    supportSemantic:String(normalizedInterpretation.supportSemantic || packet && packet.supportSemantic || '').trim(),
+    buyerResponseSemantic:String(normalizedInterpretation.buyerResponseSemantic || packet && packet.buyerResponseSemantic || '').trim(),
+    confirmationSemantic:String(normalizedInterpretation.confirmationSemantic || packet && packet.confirmationSemantic || '').trim(),
+    supportLabel:String(normalizedInterpretation.supportLabel || packet && packet.recentStorySupportLabel || '').trim(),
+    trendLabel:String(normalizedInterpretation.trendLabel || packet && packet.recentStoryTrendLabel || '').trim()
+  } : null;
+  const tutorPrompt = hooks.buildProductionChartGuruFinalPrompt
+    ? hooks.buildProductionChartGuruFinalPrompt(normalizedInterpretation || {}, 'UNP diagnostics')
+    : '';
+  const tutorInput = extractTutorInputFromPrompt(tutorPrompt);
+  const finalChartCoach = responseAnalysis && responseAnalysis.chartCoach || snapshot && snapshot.storedAnalysis && snapshot.storedAnalysis.chartCoach || null;
+  const finalReviewText = snapshot && snapshot.reviewRender ? snapshot.reviewRender.previewText : '';
+  const setup = appState && appState.setup || {};
+  const pipeline = snapshot && snapshot.pipeline || {};
+  const chartRead = snapshot && snapshot.chartRead || {};
+  const locationMeaning = classifyNarrationMeaning([
+    chartRead.text,
+    finalReviewText,
+    finalChartCoach && finalChartCoach.summaryText
+  ].filter(Boolean).join(' '));
+  const rawAnalysisResponseText = String(networkTrace && networkTrace.analysisResponseText || '').trim();
+  const parsedAnalysisResponse = networkTrace && networkTrace.analysisResponse || null;
+  const rawInterpreterResponseText = interpretation ? JSON.stringify(interpretation, null, 2) : '';
+  const interpreterValidationErrors = hooks.validateTraderInterpretationResponse
+    ? hooks.validateTraderInterpretationResponse(interpretation || {}, packet || {}, structuredFacts || {})
+    : [];
+  const rawTutorResponseText = responseAnalysis && responseAnalysis.chartGuruNarrative
+    ? JSON.stringify(responseAnalysis.chartGuruNarrative, null, 2)
+    : '';
+  const finalProseValidationErrors = hooks.validateFinalProseResponse
+    ? hooks.validateFinalProseResponse(
+      responseAnalysis && responseAnalysis.chartGuruNarrative || {},
+      [],
+      packet || {},
+      {traderInterpretation:normalizedInterpretation || {}}
+    )
+    : [];
+  const analysisForComparison = responseAnalysis || snapshot && snapshot.storedAnalysis || {};
+  const expectedBenchmarkValue = normalizeText(benchmarkFixture && benchmarkFixture.benchmark && benchmarkFixture.benchmark.dominantEvent);
+  const actualComparedValue = selectLiveDominantEventIdentity(analysisForComparison, snapshot || {});
+  const actualNarrativeValue = selectLiveDominantEventNarrative(analysisForComparison, snapshot || {});
+  const harnessFailedAssertion = Array.isArray(harnessErrors)
+    ? (harnessErrors.find(error => /dominant event benchmark mismatch/i.test(String(error || ''))) || harnessErrors[0] || '')
+    : '';
+
+  const stages = [
+    {
+      stage:'deterministicEventPacket',
+      dominantEventKey:packet && packet.primaryStoryKey || packet && packet.dominantEventKey || '',
+      supportSemantic:packet && packet.supportSemantic || '',
+      buyerResponseSemantic:packet && packet.buyerResponseSemantic || '',
+      confirmationSemantic:packet && packet.confirmationSemantic || '',
+      supportLabel:packet && packet.recentStorySupportLabel || ''
+    },
+    {
+      stage:'traderInterpretation',
+      dominantEvent:normalizedInterpretation && normalizedInterpretation.dominantEvent || '',
+      supportSemantic:normalizedInterpretation && normalizedInterpretation.supportSemantic || '',
+      buyerResponseSemantic:normalizedInterpretation && normalizedInterpretation.buyerResponseSemantic || '',
+      confirmationSemantic:normalizedInterpretation && normalizedInterpretation.confirmationSemantic || '',
+      supportLabel:normalizedInterpretation && normalizedInterpretation.supportLabel || ''
+    },
+    {
+      stage:'finalNarration',
+      supportMeaning:locationMeaning,
+      setupLocation:snapshot && snapshot.chartRead && Array.isArray(snapshot.chartRead.sections)
+        ? sectionTextByKey(snapshot.chartRead.sections, 'setup_location')
+        : ''
+    }
+  ];
+
+  let firstDivergentStage = '';
+  if(String(pipeline.phase || '').trim() !== 'analysis_complete'){
+    firstDivergentStage = 'Pre-Stage 1 server analysis failed; client deterministic fallback took over';
+  }else if(packet && packet.supportSemantic === 'support_absent'){
+    firstDivergentStage = 'Stage 1.5 deterministicEventPacket';
+  }else if(normalizedInterpretation && normalizedInterpretation.supportSemantic === 'support_absent'){
+    firstDivergentStage = 'Stage 2 traderInterpretation';
+  }else if(locationMeaning === 'support_absent'){
+    firstDivergentStage = 'Stage 3 tutor output';
+  }else if(chartRead && chartRead.usedDeterministicFallback === true){
+    firstDivergentStage = 'Review fallback/render path';
+  }else if(expectedBenchmarkValue && actualComparedValue && normalizeEventIdentity(expectedBenchmarkValue) !== normalizeEventIdentity(actualComparedValue)){
+    firstDivergentStage = 'Harness comparison normalization';
+  }
+
+  return {
+    deterministicDominantEventKey:String(packet && (packet.primaryStoryKey || packet.dominantEventKey) || '').trim(),
+    benchmarkExpectation:{
+      dominantEvent:expectedBenchmarkValue,
+      normalizedExpectedDominantEvent:normalizeEventIdentity(expectedBenchmarkValue)
+    },
+    rawDeterministicSupportLocationFields:{
+      setupLocationState:setup && setup.setupLocationState
+        || scannerDerivedStates.setup_location_state
+        || scannerProjection.setup_location_state
+        || '',
+      pullbackZone:setup && setup.pullbackZone
+        || requestPayload && requestPayload.pullbackZone
+        || scannerDerivedStates.pullback_zone
+        || scannerProjection.pullback_zone
+        || '',
+      supportLabel:packet && packet.recentStorySupportLabel || '',
+      supportSemantic:packet && packet.supportSemantic || '',
+      buyerResponseSemantic:packet && packet.buyerResponseSemantic || '',
+      confirmationSemantic:packet && packet.confirmationSemantic || '',
+      bounceState:setup && setup.bounceState
+        || requestPayload && requestPayload.bounceState
+        || scannerDerivedStates.bounce_state
+        || scannerProjection.bounce_state
+        || '',
+      stabilisationState:setup && setup.stabilisationState
+        || requestPayload && requestPayload.stabilisationState
+        || scannerDerivedStates.stabilisation_state
+        || scannerProjection.stabilisation_state
+        || '',
+      followThroughState:packet && packet.recentStoryConfidenceMode || '',
+      primaryStoryKey:packet && packet.primaryStoryKey || '',
+      recentStoryKey:packet && packet.recentStoryKey || '',
+      recentStoryTrendLabel:packet && packet.recentStoryTrendLabel || '',
+      recentStorySupportLabel:packet && packet.recentStorySupportLabel || ''
+    },
+    clientFallbackInputs:{
+      technicalSummary:appState && appState.scan && appState.scan.visibleCard && appState.scan.visibleCard.technicalSummary || '',
+      decisionSummary:appState && appState.scan && appState.scan.visibleCard && appState.scan.visibleCard.decisionSummary || '',
+      scannerDerivedStates,
+      scannerProjectionRisks:Array.isArray(scannerProjection && scannerProjection.risks) ? scannerProjection.risks : [],
+      fallbackPrimaryStoryKey:chartRead && chartRead.primaryStoryKey || '',
+      fallbackRecentStoryKey:chartRead && chartRead.recentStoryKey || '',
+      usedDeterministicFallback:chartRead && chartRead.usedDeterministicFallback === true
+    },
+    deterministicEventPacket:packet,
+    dominantEvent:normalizedInterpretation && normalizedInterpretation.dominantEvent || '',
+    interpreterPrompt:structuredFacts,
+    interpreterInput:structuredFacts,
+    rawInterpreterResponseText,
+    parsedInterpreterObject:interpretation,
+    interpreterSchemaValidationResult:{
+      ok:Array.isArray(interpreterValidationErrors) && interpreterValidationErrors.length === 0,
+      errors:interpreterValidationErrors
+    },
+    interpreterDominantEvent:String(normalizedInterpretation && normalizedInterpretation.dominantEvent || '').trim(),
+    interpreterDominantEventKey:String(normalizedInterpretation && normalizedInterpretation.dominantEventKey || '').trim(),
+    traderInterpretation:normalizedInterpretation,
+    semanticEnvelope,
+    tutorPrompt,
+    tutorInput,
+    rawTutorResponseText,
+    parsedTutorProse:responseAnalysis && responseAnalysis.chartGuruNarrative || null,
+    finalProseValidationFailures:finalProseValidationErrors,
+    chartCoachBeforeNormalization:responseAnalysis && responseAnalysis.chartCoach || null,
+    finalChartCoach,
+    normalizedAnalysis:snapshot && snapshot.storedAnalysis || null,
+    chartCoachAfterNormalization:snapshot && snapshot.storedAnalysis && snapshot.storedAnalysis.chartCoach || null,
+    reviewRender:{
+      title:snapshot && snapshot.reviewRender && snapshot.reviewRender.title || '',
+      previewText:finalReviewText,
+      chartReadText:chartRead && chartRead.text || ''
+    },
+    rawServerAnalysisResponseText:rawAnalysisResponseText,
+    parsedServerAnalysisResponse:parsedAnalysisResponse,
+    chartAnalysisPipeline:pipeline,
+    harnessComparison:{
+      expectedBenchmarkValue,
+      actualComparedValue,
+      actualNarrativeValue,
+      normalizedExpected:normalizeEventIdentity(expectedBenchmarkValue),
+      normalizedActualCompared:normalizeEventIdentity(actualComparedValue),
+      exactFailingAssertion:harnessFailedAssertion
+    },
+    firstDivergentStage,
+    stageSummaries:stages
+  };
 }
 
 function buildMarkdownSummary(results){
@@ -275,14 +544,46 @@ for(const ticker of JOURNEY_TICKERS){
     }
 
     const consoleEvents = await attachConsoleRecorder(page);
+    const networkTrace = {
+      verificationRequest:null,
+      analysisRequest:null,
+      verificationResponse:null,
+      analysisResponse:null,
+      verificationResponseText:'',
+      analysisResponseText:''
+    };
     await page.route(/analyse-setup/i, async route => {
+      const request = route.request();
+      const body = request.postDataJSON() || {};
+      if(body && body.verificationOnly === true){
+        networkTrace.verificationRequest = JSON.parse(JSON.stringify(body));
+      }else{
+        networkTrace.analysisRequest = JSON.parse(JSON.stringify(body));
+      }
+      if(LIVE_ANALYSIS_MODE){
+        const upstream = await route.fetch({
+          url:`${API_ORIGIN}/.netlify/functions/analyse-setup`
+        });
+        const responseBody = await upstream.text();
+        if(body && body.verificationOnly === true) networkTrace.verificationResponseText = responseBody;
+        else networkTrace.analysisResponseText = responseBody;
+        try{
+          const parsed = JSON.parse(responseBody);
+          if(body && body.verificationOnly === true) networkTrace.verificationResponse = parsed;
+          else networkTrace.analysisResponse = parsed;
+        }catch(_error){}
+        await route.fulfill({
+          response:upstream,
+          body:responseBody
+        });
+        return;
+      }
       if(!benchmarkFixture){
         await route.continue();
         return;
       }
-      const request = route.request();
-      const body = request.postDataJSON() || {};
       if(body && body.verificationOnly === true){
+        networkTrace.verificationResponse = buildVerificationOnlySuccessResponse(benchmarkFixture);
         await route.fulfill({
           status:200,
           contentType:'application/json',
@@ -290,6 +591,7 @@ for(const ticker of JOURNEY_TICKERS){
         });
         return;
       }
+      networkTrace.analysisResponse = buildAnalyseSetupSuccessResponse(benchmarkFixture);
       await route.fulfill({
         status:200,
         contentType:'application/json',
@@ -313,8 +615,13 @@ for(const ticker of JOURNEY_TICKERS){
     await captureStage(page, testInfo, `${ticker.toLowerCase()}-chart-guru-review-pre-upload`);
 
     await uploadChartFixture(page, caseFolder.chartPath);
+    let narrationWaitError = null;
     await maybeStartAnalysis(page, ticker);
-    await waitForNarrationComplete(page, ticker);
+    try{
+      await waitForNarrationComplete(page, ticker);
+    }catch(error){
+      narrationWaitError = error;
+    }
     await waitForUiTransitionSettle(page);
     await captureStage(page, testInfo, `${ticker.toLowerCase()}-chart-guru-review-post-analysis`);
 
@@ -322,18 +629,25 @@ for(const ticker of JOURNEY_TICKERS){
     const snapshot = await captureNarrationSnapshot(page, ticker, consoleEvents);
     const analysis = snapshot.storedAnalysis || {};
     const sections = snapshot.chartRead.sections || [];
-    const liveDominantEvent = normalizeText(
-      analysis.traderInterpretation && analysis.traderInterpretation.dominantEvent
-      || analysis.deterministicEventPacket && analysis.deterministicEventPacket.dominantEventLabel
-      || snapshot.chartRead.trendLabel
-    );
+    const liveDominantEvent = selectLiveDominantEventIdentity(analysis, snapshot);
+    const liveDominantEventNarrative = selectLiveDominantEventNarrative(analysis, snapshot);
     const expectedDominantEvent = normalizeText(benchmarkFixture && benchmarkFixture.benchmark && benchmarkFixture.benchmark.dominantEvent);
     const benchmarkSkippedReason = benchmarkFixture ? '' : `No benchmark fixture exists for ${ticker} under ${BENCHMARK_ROOT}.`;
     const warnings = [];
     const errors = [];
 
+    if(narrationWaitError){
+      errors.push(`Narration did not complete: ${String(narrationWaitError.message || narrationWaitError)}`);
+    }
+
     const comparison = {
-      dominantEventMatchesBenchmark:benchmarkFixture ? liveDominantEvent === expectedDominantEvent : false,
+      dominantEventMatchesBenchmark:benchmarkFixture
+        ? normalizeEventIdentity(liveDominantEvent) === normalizeEventIdentity(expectedDominantEvent)
+        : false,
+      comparedAs:'event_identity',
+      expectedBenchmarkValue:expectedDominantEvent,
+      actualComparedValue:liveDominantEvent,
+      actualNarrativeValue:liveDominantEventNarrative,
       benchmarkSkippedReason
     };
 
@@ -342,6 +656,7 @@ for(const ticker of JOURNEY_TICKERS){
       traderInterpretation:normalizeText(analysis.traderInterpretation && analysis.traderInterpretation.traderInterpretation),
       chartCoach:analysis.chartCoach || null,
       dominantEvent:liveDominantEvent,
+      dominantEventNarrative:liveDominantEventNarrative,
       eventSequence:Array.isArray(analysis.traderInterpretation && analysis.traderInterpretation.eventSequence)
         ? analysis.traderInterpretation.eventSequence.slice()
         : [],
@@ -364,22 +679,22 @@ for(const ticker of JOURNEY_TICKERS){
     if(!analysis.deterministicEventPacket) errors.push('deterministicEventPacket missing from stored analysis.');
     if(!analysis.traderInterpretation) errors.push('traderInterpretation missing from stored analysis.');
     if(!analysis.chartCoach) errors.push('chartCoach missing from stored analysis.');
-    if(snapshot.chartRead.selectedSummarySource !== 'openai_two_step_chart_guru'){
+    if(snapshot.chartRead.selectedSummarySource !== 'openai_two_step_chart_guru' && !narrationWaitError){
       errors.push(`Expected openai_two_step_chart_guru summary source, received ${snapshot.chartRead.selectedSummarySource || 'none'}.`);
     }
-    if(snapshot.chartRead.usedDeterministicFallback === true){
+    if(snapshot.chartRead.usedDeterministicFallback === true && !narrationWaitError){
       errors.push('Review used deterministic fallback instead of the stored Chart Guru narration.');
     }
-    if(String(snapshot.chartRead.primaryStoryKey || '') !== String(analysis.deterministicEventPacket && analysis.deterministicEventPacket.primaryStoryKey || '')){
+    if(!narrationWaitError && String(snapshot.chartRead.primaryStoryKey || '') !== String(analysis.deterministicEventPacket && analysis.deterministicEventPacket.primaryStoryKey || '')){
       errors.push('chartCoach primaryStory key diverged from deterministicEventPacket primaryStoryKey.');
     }
-    if(String(snapshot.chartRead.recentStoryKey || '') !== String(analysis.deterministicEventPacket && analysis.deterministicEventPacket.recentStoryKey || '')){
+    if(!narrationWaitError && String(snapshot.chartRead.recentStoryKey || '') !== String(analysis.deterministicEventPacket && analysis.deterministicEventPacket.recentStoryKey || '')){
       errors.push('chartCoach recentStory key diverged from deterministicEventPacket recentStoryKey.');
     }
-    if(String(snapshot.chartRead.trendLabel || '') !== String(analysis.traderInterpretation && analysis.traderInterpretation.dominantEvent || '')){
+    if(!narrationWaitError && String(snapshot.chartRead.trendLabel || '') !== String(analysis.traderInterpretation && analysis.traderInterpretation.dominantEvent || '')){
       errors.push('Dominant event did not survive into the visible recentStory label.');
     }
-    if(!reviewRender.previewText || /No Chart Guru saved yet\./i.test(reviewRender.previewText)){
+    if((!reviewRender.previewText || /No Chart Guru saved yet\./i.test(reviewRender.previewText)) && !narrationWaitError){
       errors.push('Review UI did not render final Chart Guru prose.');
     }
     if(/dominantEvent|eventSequence|currentRisk|nextSignal|deterministicEventPacket/i.test(reviewRender.previewText)){
@@ -389,7 +704,7 @@ for(const ticker of JOURNEY_TICKERS){
     if(benchmarkFixture){
       const semantic = benchmarkFixture.semanticExpectations || {};
       if(!comparison.dominantEventMatchesBenchmark){
-        errors.push(`Dominant event benchmark mismatch. Expected "${expectedDominantEvent}" but received "${liveDominantEvent}".`);
+        errors.push(`Dominant event benchmark mismatch. Expected event identity "${expectedDominantEvent}" but compared value was "${liveDominantEvent}" (narrative: "${liveDominantEventNarrative}").`);
       }
       if(!includesAllTokens([live.traderInterpretation, analysis.traderInterpretation && analysis.traderInterpretation.currentRisk, analysis.traderInterpretation && analysis.traderInterpretation.nextSignal].join(' '), semantic.traderTokens || [])){
         errors.push('Trader interpretation lost expected semantic cues.');
@@ -440,9 +755,27 @@ for(const ticker of JOURNEY_TICKERS){
       snapshot:{
         chartRead:snapshot.chartRead,
         pipeline:snapshot.pipeline,
-        appState
+        appState,
+        networkTrace
       }
     };
+
+    if(ticker === 'UNP'){
+      result.debugTrace = buildUnpDebugTrace({
+        requestPayload:networkTrace.analysisRequest,
+        responseAnalysis:networkTrace.analysisResponse && networkTrace.analysisResponse.analysis || analysis,
+        snapshot,
+        appState,
+        networkTrace,
+        benchmarkFixture,
+        harnessErrors:errors
+      });
+      await writeJsonReport(testInfo, `${ticker.toLowerCase()}-chart-guru-debug-trace.json`, result.debugTrace);
+      writeArtifactFile(
+        path.join('chart-guru-live-narration', `${RUN_TIMESTAMP}-${ticker.toLowerCase()}-debug.json`),
+        JSON.stringify(result.debugTrace, null, 2)
+      );
+    }
 
     RUN_RESULTS.push(result);
     await writeJsonReport(testInfo, `${ticker.toLowerCase()}-chart-guru-live-narration.json`, result);

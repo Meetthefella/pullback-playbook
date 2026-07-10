@@ -7902,7 +7902,7 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
   const status = phase === 'analysis_failed'
     ? (hasVerifiedIdentity
       ? (safe.manualConfirmed === true ? 'user_confirmed_match' : 'verified_match')
-      : 'manual_confirmation_required')
+      : 'analysis_failed')
     : chartPipelineStatusFromPhase(phase);
   const diagnostics = Array.isArray(safe.diagnostics) ? safe.diagnostics.slice() : [];
   const detailText = reason === 'chart_context_mismatch'
@@ -7911,11 +7911,15 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
       ? `AI analysis has been skipped because the uploaded chart does not appear to match ${expectedTicker || 'this review'}.`
       : (phase === 'analysis_failed' && hasVerifiedIdentity
         ? 'Chart verified, but AI analysis failed. Try again.'
+        : (phase === 'analysis_failed'
+          ? (Array.isArray(safe.evidence) && safe.evidence.length
+            ? String(safe.evidence[0] || '').trim()
+            : 'Chart verification could not run. Try again.')
         : ((phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete')
           ? (safe.manualConfirmed === true && !hasDetectedTickerMatch
             ? 'Chart was manually confirmed for this review. AI analysis can continue.'
             : `Quick chart verification matched the uploaded chart to ${expectedTicker || 'the selected ticker'}.`)
-          : 'Unable to read the chart ticker. Please confirm this is the correct chart.')));
+          : 'Unable to read the chart ticker. Please confirm this is the correct chart.'))));
   return {
     visible:true,
     status,
@@ -7929,11 +7933,13 @@ function buildSimplifiedChartPipelineTrace(record = {}, pipeline = {}){
           ? (safe.manualConfirmed === true && !hasDetectedTickerMatch
             ? 'Chart manually confirmed'
             : `Chart matched ${expectedTicker || 'selected ticker'}`)
+          : (phase === 'analysis_failed'
+            ? 'Chart verification unavailable'
           : (phase === 'verified' || phase === 'analysis_running' || phase === 'analysis_complete'
             ? (safe.manualConfirmed === true && !hasDetectedTickerMatch
               ? 'Chart manually confirmed'
               : `Chart matched ${expectedTicker || 'selected ticker'}`)
-            : 'Unable to read chart ticker'))),
+            : 'Unable to read chart ticker')))),
     summary:detailText,
     detail:detailText,
     reviewTicker:expectedTicker,
@@ -8021,6 +8027,18 @@ function buildSimplifiedChartPipelineDecision(record = {}, pipeline = {}) {
       trace
     };
   }
+  if(phase === 'analysis_failed'){
+    return {
+      key:'analysis_failed',
+      title:'Chart verification unavailable',
+      summary:Array.isArray(trace.evidence) && trace.evidence.length
+        ? String(trace.evidence[0] || '').trim()
+        : 'Chart verification failed. Try again.',
+      detail:'',
+      visible:true,
+      trace
+    };
+  }
   if(chartPipelineAllowsAi(phase) && hasVerifiedIdentity){
     const summary = safe.manualConfirmed === true && !hasDetectedTickerMatch
       ? 'This chart was manually confirmed. AI analysis can continue.'
@@ -8051,7 +8069,7 @@ function renderSimplifiedChartPipelineMarkup(record = {}, pipeline = {}){
   const decision = buildSimplifiedChartPipelineDecision(record, normalizedPipeline);
   const trace = decision.trace;
   const decisionKey = String(decision && decision.key || '').trim();
-  const isFailurePanel = ['chart_mismatch', 'cant_read', 'chart_context_mismatch'].includes(decisionKey)
+  const isFailurePanel = ['chart_mismatch', 'cant_read', 'chart_context_mismatch', 'analysis_failed'].includes(decisionKey)
     && !chartPipelineHasVerifiedIdentity(normalizedPipeline);
   const detailsOpen = !!(uiState.reviewChartDetailsOpen && uiState.reviewChartDetailsOpen[normalizeTicker(record && record.ticker || '')]);
   const detailsOpenAttr = detailsOpen ? ' open' : '';
@@ -8168,7 +8186,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       imageId,
       requestId,
       source,
-      phase:'cant_read',
+      phase:'analysis_failed',
       expectedFacts:buildChartPipelineExpectedFacts(liveRecord),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
@@ -8205,7 +8223,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       imageId,
       requestId,
       source,
-      phase:'cant_read',
+      phase:'analysis_failed',
       expectedFacts:buildChartPipelineExpectedFacts(currentRecord),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
@@ -8228,7 +8246,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       imageId,
       requestId,
       source,
-      phase:'cant_read',
+      phase:'analysis_failed',
       expectedFacts:buildChartPipelineExpectedFacts(currentRecord),
       readFacts:{},
       missing:['visible ticker', 'visible timeframe', 'latest price'],
@@ -8401,7 +8419,7 @@ async function runSimplifiedChartAnalysis(record = {}, options = {}){
       imageId,
       requestId,
       source,
-      phase:'cant_read',
+      phase:'analysis_failed',
       expectedFacts:buildChartPipelineExpectedFacts(failedRecord),
       readFacts:recoverChartPipelineReadFacts(failedRecord, getReviewChartAnalysisPipeline(failedRecord) || {}),
       missing:['visible ticker'],
@@ -25926,6 +25944,8 @@ function chartNarratorDeterministicPick(options = [], seed = 0){
 function chartNarratorSupportLabel(context = {}){
   if(context.near20 === 'near' || context.pullbackNear20 === true) return '20-day average';
   if(context.near50 === 'near' || context.pullbackNear50 === true) return '50-day average';
+  if(context.recentSupportType === '20ma') return '20-day average';
+  if(context.recentSupportType === '50ma') return '50-day average';
   return 'support';
 }
 
@@ -25936,6 +25956,37 @@ function chartGuruBuyerResponsePresent(context = {}){
   return context.bounceAttempt === true
     || responseStates.has(bounceState)
     || responseStates.has(stabilisationState);
+}
+
+function chartGuruRecentSupportType(context = {}){
+  const evaluationScanType = String(context.evaluationScanType || context.scanType || '').trim().toLowerCase();
+  if(context.pullbackNear20 === true || context.near20 === 'near' || evaluationScanType === '20ma') return '20ma';
+  if(context.pullbackNear50 === true || context.near50 === 'near' || evaluationScanType === '50ma') return '50ma';
+  return '';
+}
+
+function chartGuruRecentSupportResponsePresent(context = {}){
+  const supportType = chartGuruRecentSupportType(context);
+  const bounceState = String(context.bounceState || '').trim().toLowerCase();
+  const stabilisationState = String(context.stabilisationState || '').trim().toLowerCase();
+  const recentlyLeftSupportZone = context.recentlyLeftSupportZone === true
+    || ['off_level', 'extended', 'extended_from_support'].includes(String(context.setupLocationState || '').trim().toLowerCase());
+  const reclaimEvidencePresent = context.reclaimConfirmed === true
+    || context.followThroughConfirmed === true
+    || context.candleEvidenceReclaimedPriorDayHigh === true
+    || context.candleEvidenceReclaimRangeMeaningful === true
+    || context.candleEvidenceHigherLowHold === true
+    || Number(context.candleEvidenceUpClosesAfterLow) >= 1
+    || ['improving', 'rebound', 'confirmed'].includes(bounceState)
+    || ['clear', 'present'].includes(stabilisationState);
+  return !!(
+    supportType
+    && recentlyLeftSupportZone
+    && context.structureIntact === true
+    && context.failedBounce !== true
+    && chartGuruBuyerResponsePresent(context)
+    && reclaimEvidencePresent
+  );
 }
 
 function chartGuruSemanticEnvelopeFromStory(storyKey = '', context = {}){
@@ -26682,6 +26733,8 @@ function chartCoachPrimaryStoryCandidates(context = {}){
   const offLevelWithoutStructureDamage = context.offLevelWithoutStructureDamage === true;
   const bounceAttempt = context.bounceAttempt === true;
   const buyerResponsePresent = chartGuruBuyerResponsePresent(context);
+  const recentSupportType = chartGuruRecentSupportType(context);
+  const recentSupportResponsePresent = chartGuruRecentSupportResponsePresent(context);
   const followThroughConfirmed = context.followThroughConfirmed === true;
   const failedBounce = context.failedBounce === true;
   const weakVolume = context.weakVolume === true;
@@ -26729,11 +26782,21 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:126
     });
   }
-  if(structureIntact && pullbackNear20 && buyerResponsePresent && !followThroughConfirmed && !actionable && !failedBounce){
+  if(
+    structureIntact
+    && (
+      (pullbackNear20 && buyerResponsePresent)
+      || (recentSupportType === '20ma' && recentSupportResponsePresent)
+    )
+    && !followThroughConfirmed
+    && !actionable
+    && !failedBounce
+  ){
     const evidenceFactIds = ['trend_context', 'support_short_term_average'];
     if(bounceAttempt) evidenceFactIds.push('bounce_attempt');
     if(['improving', 'rebound'].includes(String(context.bounceState || '').trim().toLowerCase())) evidenceFactIds.push('buyer_response_state');
     if(['early', 'clear', 'present'].includes(String(context.stabilisationState || '').trim().toLowerCase())) evidenceFactIds.push('stabilisation_present');
+    if(recentSupportResponsePresent) evidenceFactIds.push('extended_above_support');
     if(weakVolume) evidenceFactIds.push('weak_volume');
     candidates.push({
       key:'early_rebound_from_20ma',
@@ -26831,7 +26894,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:106
     });
   }
-  if(structureIntact && extendedAfterRun && !pullbackNear20 && !pullbackNear50){
+  if(structureIntact && extendedAfterRun && !pullbackNear20 && !pullbackNear50 && !recentSupportResponsePresent){
     candidates.push({
       key:'extended_after_run',
       label:'Biggest clue',
@@ -26981,6 +27044,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   const resolvedVolumeState = lower(derivedStates.volumeState || globalVerdict.volume_state || globalVerdict.volumeState);
   const resolvedPriceabilityState = lower(derivedStates.priceabilityState || globalVerdict.priceability_state || globalVerdict.priceabilityState);
   const resolvedFinalVerdict = lower(globalVerdict.final_verdict || globalVerdict.finalVerdict || '');
+  const evaluationScanType = String(derivedStates.evaluationScanType || derivedStates.evaluation_scan_type || '').trim();
   const marketStatusText = lower(item.marketStatus || state.marketStatus || '');
   const structureIntact = ['strong', 'intact', 'developing_clean'].includes(resolvedStructureState)
     || ['alive', 'messy'].includes(resolvedStructureEligibility);
@@ -27216,6 +27280,17 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     stabilisationState:lower(derivedStates.stabilisationState || globalVerdict.stabilisation_state || globalVerdict.stabilisationState),
     volumeState:resolvedVolumeState,
     priceabilityState:resolvedPriceabilityState,
+    evaluationScanType,
+    reclaimConfirmed:(
+      (evaluationScanType === '20MA' && facts.maRelation.above20 === true)
+      || (evaluationScanType === '50MA' && facts.maRelation.above50 === true)
+      || derivedStates.candleEvidenceReclaimedPriorDayHigh === true
+      || derivedStates.candleEvidenceReclaimRangeMeaningful === true
+    ),
+    candleEvidenceUpClosesAfterLow:derivedStates.candleEvidenceUpClosesAfterLow,
+    candleEvidenceReclaimedPriorDayHigh:derivedStates.candleEvidenceReclaimedPriorDayHigh === true,
+    candleEvidenceHigherLowHold:derivedStates.candleEvidenceHigherLowHold === true,
+    candleEvidenceReclaimRangeMeaningful:derivedStates.candleEvidenceReclaimRangeMeaningful === true,
     structureIntact,
     structureBroken,
     structureWeakening,
@@ -27229,6 +27304,8 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     extendedAfterRun,
     marketSupportive
   };
+  storyContext.recentSupportType = chartGuruRecentSupportType(storyContext);
+  storyContext.recentSupportResponsePresent = chartGuruRecentSupportResponsePresent(storyContext);
   const primaryStory = chartCoachPrimaryStoryCandidates(storyContext)[0] || null;
   const chartNarrator = primaryStory ? buildChartNarrator(primaryStory, storyContext) : null;
   const recentStory = chartNarrator && chartNarrator.recentStory ? chartNarrator.recentStory : null;
@@ -34996,10 +35073,19 @@ function buildChartGuruDeterministicAuthorityPayload(card, options = {}){
       structureState:String(derivedStates.structure_state || '').trim(),
       pullbackZone:String(derivedStates.pullback_zone || '').trim(),
       bounceState:String(derivedStates.bounce_state || '').trim(),
+      stabilisationState:String(derivedStates.stabilisation_state || '').trim(),
       volumeState:String(derivedStates.volume_state || '').trim(),
-      setupLocationState:'',
-      structureEligibility:'',
-      priceabilityState:''
+      setupLocationState:String(derivedStates.setup_location_state || '').trim(),
+      structureEligibility:String(derivedStates.structure_eligibility || '').trim(),
+      priceabilityState:String(derivedStates.priceability_state || '').trim(),
+      evaluationScanType:String(derivedStates.evaluation_scan_type || '').trim(),
+      candleEvidenceUpClosesAfterLow:numericOrNull(derivedStates.candle_evidence_up_closes_after_low),
+      candleEvidenceReclaimedPriorDayHigh:String(derivedStates.candle_evidence_reclaimed_prior_day_high || '').trim().toLowerCase() === 'yes',
+      candleEvidenceDownsideMomentumSlowing:String(derivedStates.candle_evidence_downside_momentum_slowing || '').trim().toLowerCase() === 'yes',
+      candleEvidenceTighterRanges:String(derivedStates.candle_evidence_tighter_ranges || '').trim().toLowerCase() === 'yes',
+      candleEvidenceSmallerBodies:String(derivedStates.candle_evidence_smaller_bodies || '').trim().toLowerCase() === 'yes',
+      candleEvidenceHigherLowHold:String(derivedStates.candle_evidence_higher_low_hold || '').trim().toLowerCase() === 'yes',
+      candleEvidenceReclaimRangeMeaningful:String(derivedStates.candle_evidence_reclaim_range_meaningful || '').trim().toLowerCase() === 'yes'
     }
   });
   return {

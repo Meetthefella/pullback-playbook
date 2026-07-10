@@ -13,13 +13,18 @@ const CHART_GURU_PRIMARY_STORY_ICON = '🧭';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v1';
 const INTERPRETATION_REQUIRED_FIELDS = [
   'dominantEvent',
+  'dominantEventKey',
   'eventSequence',
   'supportSemantic',
   'buyerResponseSemantic',
   'confirmationSemantic',
   'traderInterpretation',
   'currentRisk',
-  'nextSignal'
+  'nextSignal',
+  'whatChanged',
+  'traderRead',
+  'riskToWatch',
+  'nextUsefulSignal'
 ];
 const FINAL_PROSE_REQUIRED_FIELDS = [
   'chartStory',
@@ -61,6 +66,90 @@ const FINAL_PROSE_SCHEMA = {
     setupLocation:{type:'string'},
     learningPoint:{type:'string'},
     whatNext:{type:'string'}
+  }
+};
+const PRIMARY_ANALYSIS_SCHEMA = {
+  type:'object',
+  additionalProperties:false,
+  required:[
+    'visible_ticker',
+    'visible_timeframe',
+    'visible_latest_price',
+    'visible_ma20',
+    'visible_ma50',
+    'visible_ma200',
+    'visible_numeric_labels',
+    'ma20_visible',
+    'ma50_visible',
+    'ma200_visible',
+    'ma200_line_detected',
+    'ma200_text_detected',
+    'ma200_value_extracted',
+    'ma200_confidence',
+    'ma200_extraction_method_used',
+    'visible_price_range',
+    'visible_date_range',
+    'extraction_confidence',
+    'extraction_warnings',
+    'chart_match_status',
+    'chart_match_warning',
+    'coach_summary',
+    'plain_english_chart_read',
+    'constructive_evidence',
+    'risk_evidence',
+    'what_needs_to_improve',
+    'confidenceWarnings',
+    'candleStructureAnalysis',
+    'tradePlanCommentary',
+    'ai_observation_only'
+  ],
+  properties:{
+    visible_ticker:{type:'string'},
+    visible_timeframe:{type:'string'},
+    visible_latest_price:{type:['number', 'null']},
+    visible_ma20:{type:['number', 'null']},
+    visible_ma50:{type:['number', 'null']},
+    visible_ma200:{type:['number', 'null']},
+    visible_numeric_labels:{type:'array', items:{type:'number'}},
+    ma20_visible:{type:'boolean'},
+    ma50_visible:{type:'boolean'},
+    ma200_visible:{type:'boolean'},
+    ma200_line_detected:{type:'boolean'},
+    ma200_text_detected:{type:'boolean'},
+    ma200_value_extracted:{type:'boolean'},
+    ma200_confidence:{type:['number', 'null']},
+    ma200_extraction_method_used:{type:'string'},
+    visible_price_range:{type:'string'},
+    visible_date_range:{type:'string'},
+    extraction_confidence:{type:['number', 'null']},
+    extraction_warnings:{type:'array', items:{type:'string'}},
+    chart_match_status:{type:'string'},
+    chart_match_warning:{type:'string'},
+    coach_summary:{type:'string'},
+    plain_english_chart_read:{type:'string'},
+    constructive_evidence:{type:'array', items:{type:'string'}},
+    risk_evidence:{type:'array', items:{type:'string'}},
+    what_needs_to_improve:{type:'array', items:{type:'string'}},
+    confidenceWarnings:{type:'array', items:{type:'string'}},
+    candleStructureAnalysis:{
+      type:'object',
+      additionalProperties:false,
+      required:['summary', 'noviceFriendlyCandleRead', 'source'],
+      properties:{
+        summary:{type:'string'},
+        noviceFriendlyCandleRead:{type:'string'},
+        source:{type:'string'}
+      }
+    },
+    tradePlanCommentary:{
+      type:'object',
+      additionalProperties:false,
+      required:['summary'],
+      properties:{
+        summary:{type:'string'}
+      }
+    },
+    ai_observation_only:{type:'boolean'}
   }
 };
 
@@ -1314,13 +1403,46 @@ function validateFinalProseResponse(response, allowedPriceMentions = [], eventPa
 }
 
 async function sendStrictSchemaOpenAiRequest(apiKey, model, instructions, prompt, schemaName, schema, maxOutputTokens = 600){
+  return sendStrictSchemaOpenAiContentRequest(
+    apiKey,
+    model,
+    instructions,
+    [{
+      type:'input_text',
+      text:String(prompt || '')
+    }],
+    schemaName,
+    schema,
+    maxOutputTokens
+  );
+}
+
+async function sendStrictSchemaOpenAiContentRequest(apiKey, model, instructions, content, schemaName, schema, maxOutputTokens = 600){
   let upstream;
   let upstreamJson = {};
+  const buildBody = () => ({
+    model,
+    instructions,
+    input:[{
+      role:'user',
+      content:Array.isArray(content) ? content : []
+    }],
+    text:{
+      format:{
+        type:'json_schema',
+        name:schemaName,
+        strict:true,
+        schema
+      }
+    },
+    temperature:0.2,
+    max_output_tokens:maxOutputTokens
+  });
 
   try{
     ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
       apiKey,
-      buildStrictSchemaRequestBody(model, instructions, prompt, schemaName, schema, maxOutputTokens)
+      buildBody()
     ));
   }catch(err){
     const error = new Error(err?.name === 'AbortError' ? 'OpenAI request timed out.' : 'Could not reach the OpenAI API.');
@@ -1333,7 +1455,7 @@ async function sendStrictSchemaOpenAiRequest(apiKey, model, instructions, prompt
     try{
       ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
         apiKey,
-        buildStrictSchemaRequestBody(model, instructions, prompt, schemaName, schema, maxOutputTokens)
+        buildBody()
       ));
     }catch(err){
       const error = new Error(err?.name === 'AbortError' ? 'OpenAI request timed out.' : 'Could not reach the OpenAI API.');
@@ -1516,6 +1638,15 @@ function buildMalformedJsonFallbackAnalysis(payload = {}, rawText = ''){
     ai_observation_only:true,
     final_verdict:''
   };
+}
+
+function shouldUsePrimaryAnalysisParseFallback(error = {}, payload = {}, verificationOnly = false){
+  return verificationOnly !== true
+    && String(error && error.stage || '').trim() === 'chart_guru_primary_analysis'
+    && /parsed as json/i.test(String(error && error.message || ''))
+    && payload
+    && payload.trustedMarketContext
+    && typeof payload.trustedMarketContext === 'object';
 }
 
 function normaliseAnalysis(obj, payload = {}){
@@ -1766,11 +1897,33 @@ exports.handler = async function handler(event){
   let activeContent = content;
 
   try{
-    ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
-      apiKey,
-      buildRequestBody(model, instructions, activeContent, verificationOnly ? 600 : 1000)
-    ));
+    if(verificationOnly){
+      ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
+        apiKey,
+        buildRequestBody(model, instructions, activeContent, 600)
+      ));
+    }else{
+      const primaryAnalysisResult = await sendStrictSchemaOpenAiContentRequest(
+        apiKey,
+        model,
+        instructions,
+        activeContent,
+        'chart_guru_primary_analysis',
+        PRIMARY_ANALYSIS_SCHEMA,
+        1000
+      );
+      upstream = { ok:true, status:200 };
+      upstreamJson = { output_text: primaryAnalysisResult.rawText };
+    }
   }catch(err){
+    if(shouldUsePrimaryAnalysisParseFallback(err, payload, verificationOnly)){
+      const analysis = normaliseAnalysis(buildMalformedJsonFallbackAnalysis(payload, err.raw || ''), payload);
+      return jsonResponse(200, {
+        ok:true,
+        model,
+        analysis
+      });
+    }
     const message = err?.name === 'AbortError'
       ? 'OpenAI request timed out.'
       : 'Could not reach the OpenAI API.';
@@ -1802,11 +1955,33 @@ exports.handler = async function handler(event){
     activeContent = activeContent.filter(item => item.type !== 'input_image');
 
     try{
-      ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
-        apiKey,
-        buildRequestBody(model, instructions, activeContent, verificationOnly ? 600 : 1000)
-      ));
+      if(verificationOnly){
+        ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
+          apiKey,
+          buildRequestBody(model, instructions, activeContent, 600)
+        ));
+      }else{
+        const primaryAnalysisResult = await sendStrictSchemaOpenAiContentRequest(
+          apiKey,
+          model,
+          instructions,
+          activeContent,
+          'chart_guru_primary_analysis',
+          PRIMARY_ANALYSIS_SCHEMA,
+          1000
+        );
+        upstream = { ok:true, status:200 };
+        upstreamJson = { output_text: primaryAnalysisResult.rawText };
+      }
     }catch(err){
+      if(shouldUsePrimaryAnalysisParseFallback(err, payload, verificationOnly)){
+        const analysis = normaliseAnalysis(buildMalformedJsonFallbackAnalysis(payload, err.raw || ''), payload);
+        return jsonResponse(200, {
+          ok:true,
+          model,
+          analysis
+        });
+      }
       const message = err?.name === 'AbortError'
         ? 'OpenAI request timed out.'
         : 'Could not reach the OpenAI API.';
@@ -1818,11 +1993,33 @@ exports.handler = async function handler(event){
     await sleep(800);
 
     try{
-      ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
-        apiKey,
-        buildRequestBody(model, instructions, activeContent, verificationOnly ? 600 : 1000)
-      ));
+      if(verificationOnly){
+        ({ upstream, payload: upstreamJson } = await sendOpenAiRequest(
+          apiKey,
+          buildRequestBody(model, instructions, activeContent, 600)
+        ));
+      }else{
+        const primaryAnalysisResult = await sendStrictSchemaOpenAiContentRequest(
+          apiKey,
+          model,
+          instructions,
+          activeContent,
+          'chart_guru_primary_analysis',
+          PRIMARY_ANALYSIS_SCHEMA,
+          1000
+        );
+        upstream = { ok:true, status:200 };
+        upstreamJson = { output_text: primaryAnalysisResult.rawText };
+      }
     }catch(err){
+      if(shouldUsePrimaryAnalysisParseFallback(err, payload, verificationOnly)){
+        const analysis = normaliseAnalysis(buildMalformedJsonFallbackAnalysis(payload, err.raw || ''), payload);
+        return jsonResponse(200, {
+          ok:true,
+          model,
+          analysis
+        });
+      }
       const message = err?.name === 'AbortError'
         ? 'OpenAI request timed out.'
         : 'Could not reach the OpenAI API.';
@@ -1894,6 +2091,8 @@ exports.handler = async function handler(event){
 
   try{
     const structuredFacts = buildProductionStructuredFacts(payload, analysis);
+    let normalizedInterpretation = null;
+    analysis.deterministicEventPacket = structuredFacts.deterministicEventPacket;
     const allowedPriceMentions = Array.from(collectAllowedNumericMentions(structuredFacts));
     const interpretationPrompt = buildProductionChartGuruInterpretationPrompt(structuredFacts, tightenedPrompt);
     const interpretationResult = await sendStrictSchemaOpenAiRequest(
@@ -1925,6 +2124,11 @@ exports.handler = async function handler(event){
         analysis
       });
     }
+    normalizedInterpretation = normalizeTraderInterpretation(
+      interpretationResult.parsed,
+      structuredFacts.deterministicEventPacket
+    );
+    analysis.traderInterpretation = normalizedInterpretation;
 
     const finalPrompt = buildProductionChartGuruFinalPrompt(interpretationResult.parsed, tightenedPrompt);
     const finalResult = await sendStrictSchemaOpenAiRequest(
