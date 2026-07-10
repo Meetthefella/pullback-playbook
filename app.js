@@ -25807,6 +25807,9 @@ function chartCoachDiagnosticsForSections(sections = [], recentStory = null, pri
       storyKey:String(recentStory.key || '').trim(),
       toneMode:String(recentStory.toneMode || '').trim(),
       confidenceMode:String(recentStory.confidenceMode || '').trim(),
+      supportSemantic:String(recentStory.supportSemantic || '').trim(),
+      buyerResponseSemantic:String(recentStory.buyerResponseSemantic || '').trim(),
+      confirmationSemantic:String(recentStory.confirmationSemantic || '').trim(),
       steps:Array.isArray(recentStory.steps) ? recentStory.steps.map(step => String(step || '').trim()).filter(Boolean) : [],
       stepDetails:Array.isArray(recentStory.stepDetails) ? recentStory.stepDetails.map(detail => ({
         key:String(detail && detail.key || '').trim(),
@@ -25849,6 +25852,47 @@ function chartNarratorSupportLabel(context = {}){
   if(context.near20 === 'near' || context.pullbackNear20 === true) return '20-day average';
   if(context.near50 === 'near' || context.pullbackNear50 === true) return '50-day average';
   return 'support';
+}
+
+function chartGuruBuyerResponsePresent(context = {}){
+  const bounceState = String(context.bounceState || '').trim().toLowerCase();
+  const stabilisationState = String(context.stabilisationState || '').trim().toLowerCase();
+  const responseStates = new Set(['attempt', 'early', 'developing', 'improving', 'rebound', 'stabilising', 'stabilizing', 'constructive', 'present', 'clear', 'confirmed']);
+  return context.bounceAttempt === true
+    || responseStates.has(bounceState)
+    || responseStates.has(stabilisationState);
+}
+
+function chartGuruSemanticEnvelopeFromStory(storyKey = '', context = {}){
+  const normalizedKey = String(storyKey || '').trim().toLowerCase();
+  const supportSemantic = (() => {
+    if(['early_rebound_from_20ma', 'constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(normalizedKey)){
+      return 'support_present';
+    }
+    if(['off_level_wait_for_clearer_support', 'extended_after_run'].includes(normalizedKey)) return 'support_absent';
+    if(['structure_breaking_down', 'failed_bounce', 'pullback_still_repairing'].includes(normalizedKey)) return 'support_failed';
+    if(['bounce_attempt', 'long_lower_wick_support_test'].includes(normalizedKey)) return 'support_reclaimed';
+    if(context.pullbackNear20 === true || context.pullbackNear50 === true) return 'support_present';
+    if(context.recentlyLeftSupportZone === true) return 'support_absent';
+    return 'support_unknown';
+  })();
+  const buyerResponseSemantic = (() => {
+    if(['failed_bounce', 'structure_breaking_down', 'sharp_selloff'].includes(normalizedKey)) return 'response_failed';
+    if(chartGuruBuyerResponsePresent(context)) return 'response_present';
+    if(['off_level_wait_for_clearer_support', 'extended_after_run'].includes(normalizedKey)) return 'response_absent';
+    return 'response_unknown';
+  })();
+  const confirmationSemantic = (() => {
+    if(context.followThroughConfirmed === true || normalizedKey === 'bounce_confirmation_pending') return 'follow_through_confirmed';
+    if(context.failedBounce === true || ['failed_bounce', 'structure_breaking_down'].includes(normalizedKey)) return 'follow_through_failed';
+    if(buyerResponseSemantic === 'response_present') return 'follow_through_unconfirmed';
+    return 'follow_through_unknown';
+  })();
+  return {
+    supportSemantic,
+    buyerResponseSemantic,
+    confirmationSemantic
+  };
 }
 
 function chartNarratorTrendLabel(context = {}){
@@ -26033,7 +26077,13 @@ function chartNarratorRecentStoryForPrimaryStory(primaryStory = {}, context = {}
   const key = String(primaryStory && primaryStory.key || '').trim();
   const supportLabel = chartNarratorSupportLabel(context);
   const steps = [];
-  if(key === 'constructive_pullback_near_20ma' || key === 'constructive_pullback_near_50ma'){
+  if(key === 'early_rebound_from_20ma'){
+    steps.push('strong_uptrend');
+    steps.push('pullback_to_20ma');
+    steps.push('buyer_response');
+    steps.push(context.weakVolume === true ? 'weak_volume' : (context.activeVolume === true ? 'volume_supports_move' : 'volume_not_a_problem'));
+    steps.push('confirmation_needed');
+  }else if(key === 'constructive_pullback_near_20ma' || key === 'constructive_pullback_near_50ma'){
     steps.push('strong_uptrend');
     steps.push(key === 'constructive_pullback_near_20ma' ? 'pullback_to_20ma' : 'pullback_to_50ma');
     steps.push(context.bounceAttempt === true ? 'buyer_response' : 'support_test');
@@ -26089,6 +26139,7 @@ function chartNarratorRecentStoryForPrimaryStory(primaryStory = {}, context = {}
     ...(Array.isArray(primaryStory && primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds.slice() : []),
     ...stepDetails.flatMap(detail => Array.isArray(detail.evidenceFactIds) ? detail.evidenceFactIds : [])
   ];
+  const semanticEnvelope = chartGuruSemanticEnvelopeFromStory(key, context);
   return {
     key:key || 'trend_context',
     bias:chartNarratorBiasForStory(key, context),
@@ -26096,6 +26147,9 @@ function chartNarratorRecentStoryForPrimaryStory(primaryStory = {}, context = {}
     confidenceMode,
     trendLabel:chartNarratorTrendLabel(context),
     supportLabel,
+    supportSemantic:semanticEnvelope.supportSemantic,
+    buyerResponseSemantic:semanticEnvelope.buyerResponseSemantic,
+    confirmationSemantic:semanticEnvelope.confirmationSemantic,
     steps,
     stepDetails,
     evidenceFactIds:[...new Set(evidenceFactIds.map(id => String(id || '').trim()).filter(Boolean))]
@@ -26109,6 +26163,20 @@ function chartNarratorStoryTextForPrimaryStory(primaryStory = {}, context = {}, 
   const hasStep = step => chartNarratorHasStep(story, step);
   const confidenceMode = String(story && story.confidenceMode || '').trim();
   const seed = story.steps.length + (context.marketSupportive === true ? 1 : 0) + (context.weakVolume === true ? 2 : 0) + (context.bounceAttempt === true ? 3 : 0);
+  if(key === 'early_rebound_from_20ma'){
+    const opener = chartNarratorDeterministicPick([
+      'After a controlled pullback into the 20-day average, buyers have started to push the stock higher again.',
+      'Price pulled back into the 20-day average in a controlled way, and buyers have started to respond from that support area.'
+    ], seed);
+    const contextLine = chartNarratorDeterministicPick([
+      'The trend still looks healthy, but this rebound now needs to prove it has enough strength to continue.',
+      'The broader trend still looks healthy, but the rebound still needs follow-through before it means much.'
+    ], seed + 1);
+    const volumeLine = confidenceMode === 'buyer_response_needs_volume_proof'
+      ? 'Volume is still a bit light, so the move needs more proof before traders can trust it more.'
+      : '';
+    return [opener, contextLine, volumeLine].filter(Boolean).join(' ');
+  }
   if(key === 'constructive_pullback_near_20ma' || key === 'constructive_pullback_near_50ma'){
     const opener = chartNarratorDeterministicPick([
       'The bigger trend still looks healthy, so this recent dip reads more like a normal pause than a chart falling apart.',
@@ -26195,6 +26263,9 @@ function chartNarratorWhyItMattersForStory(primaryStory = {}, context = {}, rece
   const story = recentStory && typeof recentStory === 'object' ? recentStory : chartNarratorRecentStoryForPrimaryStory(primaryStory, context);
   const key = String(story && story.key || '').trim();
   const supportLabel = story.supportLabel || chartNarratorSupportLabel(context);
+  if(key === 'early_rebound_from_20ma'){
+    return `The first rebound from the ${supportLabel} is encouraging, but one strong response does not confirm the pullback is complete.`;
+  }
   if(key === 'constructive_pullback_near_20ma' || key === 'constructive_pullback_near_50ma'){
     return context.bounceAttempt === true
       ? `If buyers can keep holding around the ${supportLabel}, this can turn into a cleaner continuation of the trend instead of just a one-day pop.`
@@ -26401,6 +26472,9 @@ function buildChartNarrator(primaryStory = {}, context = {}){
 
 function chartCoachLearningPointForStory(storyKey = '', context = {}){
   const volumeRatio = Number(context.volumeRatio);
+  if(storyKey === 'early_rebound_from_20ma'){
+    return 'Strong trends often resume from the 20-day average, but waiting for buyers to follow through can reduce the risk of chasing a failed rebound.';
+  }
   if(storyKey === 'constructive_pullback_near_20ma' || storyKey === 'constructive_pullback_near_50ma'){
     return volumeRatio <= 0.8
       ? 'A pullback looks healthier when the selling stays controlled instead of getting heavier as price dips.'
@@ -26434,6 +26508,9 @@ function chartCoachWhatNextForStory(storyKey = '', context = {}){
   const supportLabel = context.near20 === 'near' || context.pullbackNear20 === true
     ? '20-day average'
     : ((context.near50 === 'near' || context.pullbackNear50 === true) ? '50-day average' : 'support');
+  if(storyKey === 'early_rebound_from_20ma'){
+    return `Watch for price to hold above the ${supportLabel} and build on the recent rebound. A decisive move back below support would weaken the setup.`;
+  }
   if(storyKey === 'strong_upside_acceleration'){
     return `After a strong run, a calm pullback that holds above the 20-day average would be healthier than the price racing straight up.`;
   }
@@ -26500,6 +26577,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
   const recentlyLeftSupportZone = context.recentlyLeftSupportZone === true;
   const offLevelWithoutStructureDamage = context.offLevelWithoutStructureDamage === true;
   const bounceAttempt = context.bounceAttempt === true;
+  const buyerResponsePresent = chartGuruBuyerResponsePresent(context);
   const followThroughConfirmed = context.followThroughConfirmed === true;
   const failedBounce = context.failedBounce === true;
   const weakVolume = context.weakVolume === true;
@@ -26543,6 +26621,25 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       confidence:0.92,
       rankReason:'structure_break_is_clearest_setup_story',
       score:126
+    });
+  }
+  if(structureIntact && pullbackNear20 && buyerResponsePresent && !followThroughConfirmed && !actionable && !failedBounce){
+    const evidenceFactIds = ['trend_context', 'support_short_term_average'];
+    if(bounceAttempt) evidenceFactIds.push('bounce_attempt');
+    if(['improving', 'rebound'].includes(String(context.bounceState || '').trim().toLowerCase())) evidenceFactIds.push('buyer_response_state');
+    if(['early', 'clear', 'present'].includes(String(context.stabilisationState || '').trim().toLowerCase())) evidenceFactIds.push('stabilisation_present');
+    if(weakVolume) evidenceFactIds.push('weak_volume');
+    candidates.push({
+      key:'early_rebound_from_20ma',
+      label:'Biggest clue',
+      icon:'ðŸŸ¢',
+      text:weakVolume
+        ? 'After a controlled pullback into the rising 20-day average, buyers have started to push price higher again, but the rebound still needs follow-through and volume is not helping yet.'
+        : 'After a controlled pullback into the rising 20-day average, buyers have started to push price higher again, but the rebound still needs follow-through.',
+      evidenceFactIds,
+      confidence:0.92,
+      rankReason:'buyer_response_after_controlled_20ma_pullback_is_primary_story',
+      score:116
     });
   }
   if(structureIntact && pullbackNear20 && !followThroughConfirmed && !actionable){
@@ -27010,6 +27107,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     setupLocationState:resolvedSetupLocationState,
     pullbackZone:resolvedPullbackZone,
     bounceState:resolvedBounceState,
+    stabilisationState:lower(derivedStates.stabilisationState || globalVerdict.stabilisation_state || globalVerdict.stabilisationState),
     volumeState:resolvedVolumeState,
     priceabilityState:resolvedPriceabilityState,
     structureIntact,
@@ -34654,6 +34752,7 @@ function buildAnalysisPayload(card){
 }
 
 const CHART_GURU_EVENT_LABELS = {
+  early_rebound_from_20ma:'Early rebound from 20MA',
   constructive_pullback_near_20ma:'First pullback to 20MA',
   bounce_confirmation_pending:'Successful 20MA defence',
   failed_bounce:'Failed first bounce from 20MA',
@@ -34677,6 +34776,10 @@ function chartGuruDominantEventLabel(storyKey = ''){
   return CHART_GURU_EVENT_LABELS[normalized] || 'Market event in progress';
 }
 
+function eventPacketEvidenceIncludes(ids = [], expected = ''){
+  return (Array.isArray(ids) ? ids : []).some(id => String(id || '').trim() === String(expected || '').trim());
+}
+
 function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
   const primaryStory = chartCoach && chartCoach.primaryStory && typeof chartCoach.primaryStory === 'object'
     ? chartCoach.primaryStory
@@ -34693,6 +34796,18 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
     ...(Array.isArray(primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds : []),
     ...(Array.isArray(recentStory.evidenceFactIds) ? recentStory.evidenceFactIds : [])
   ].map(id => String(id || '').trim()).filter(Boolean))];
+  const supportLabel = String(recentStory.supportLabel || '').trim().toLowerCase();
+  const context = {
+    bounceAttempt:eventPacketEvidenceIncludes(evidenceFactIds, 'bounce_attempt'),
+    followThroughConfirmed:String(recentStory.confidenceMode || '').trim().toLowerCase() === 'follow_through_confirmed',
+    failedBounce:dominantEventKey === 'failed_bounce',
+    pullbackNear20:/20-day/.test(supportLabel),
+    pullbackNear50:/50-day/.test(supportLabel),
+    recentlyLeftSupportZone:['off_level_wait_for_clearer_support', 'extended_after_run'].includes(dominantEventKey),
+    bounceState:eventPacketEvidenceIncludes(evidenceFactIds, 'buyer_response_state') ? 'improving' : '',
+    stabilisationState:eventPacketEvidenceIncludes(evidenceFactIds, 'stabilisation_present') ? 'early' : ''
+  };
+  const semanticEnvelope = chartGuruSemanticEnvelopeFromStory(dominantEventKey, context);
   return {
     dominantEventKey,
     dominantEventLabel,
@@ -34710,6 +34825,9 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
     recentStoryConfidenceMode:String(recentStory.confidenceMode || '').trim(),
     recentStoryTrendLabel:String(recentStory.trendLabel || '').trim(),
     recentStorySupportLabel:String(recentStory.supportLabel || '').trim(),
+    supportSemantic:semanticEnvelope.supportSemantic,
+    buyerResponseSemantic:semanticEnvelope.buyerResponseSemantic,
+    confirmationSemantic:semanticEnvelope.confirmationSemantic,
     stepDetails:Array.isArray(recentStory.stepDetails)
       ? recentStory.stepDetails.map(detail => ({
         key:String(detail && detail.key || '').trim(),
@@ -34836,7 +34954,71 @@ function normalizeAnalysisResponse(raw){
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric : null;
   };
+  const normalizeStringSequence = value => Array.isArray(value)
+    ? value.map(item => String(item || '').trim()).filter(Boolean)
+    : [];
   const normalizeObject = value => value && typeof value === 'object' && !Array.isArray(value) ? cloneData(value, {}) : null;
+  const normalizeDeterministicEventPacket = value => {
+    const safe = normalizeObject(value) || {};
+    return {
+      dominantEventKey:String(safe.dominantEventKey || safe.primaryStoryKey || '').trim(),
+      dominantEventLabel:String(safe.dominantEventLabel || '').trim(),
+      dominantEvent:String(safe.dominantEvent || '').trim(),
+      eventSequence:normalizeStringSequence(safe.eventSequence),
+      evidenceFactIds:Array.isArray(safe.evidenceFactIds)
+        ? safe.evidenceFactIds.map(item => String(item || '').trim()).filter(Boolean)
+        : [],
+      confidence:Number.isFinite(Number(safe.confidence)) ? Number(safe.confidence) : null,
+      rankReason:String(safe.rankReason || '').trim(),
+      primaryStoryKey:String(safe.primaryStoryKey || safe.dominantEventKey || '').trim(),
+      primaryStoryLabel:String(safe.primaryStoryLabel || '').trim(),
+      primaryStoryIcon:String(safe.primaryStoryIcon || '').trim(),
+      recentStoryKey:String(safe.recentStoryKey || '').trim(),
+      recentStoryBias:String(safe.recentStoryBias || '').trim(),
+      recentStoryToneMode:String(safe.recentStoryToneMode || '').trim(),
+      recentStoryConfidenceMode:String(safe.recentStoryConfidenceMode || '').trim(),
+      recentStoryTrendLabel:String(safe.recentStoryTrendLabel || '').trim(),
+      recentStorySupportLabel:String(safe.recentStorySupportLabel || '').trim(),
+      supportSemantic:String(safe.supportSemantic || '').trim(),
+      buyerResponseSemantic:String(safe.buyerResponseSemantic || '').trim(),
+      confirmationSemantic:String(safe.confirmationSemantic || '').trim(),
+      stepDetails:Array.isArray(safe.stepDetails)
+        ? safe.stepDetails.map(detail => {
+          const item = normalizeObject(detail) || {};
+          return {
+            key:String(item.key || '').trim(),
+            evidenceFactIds:Array.isArray(item.evidenceFactIds)
+              ? item.evidenceFactIds.map(value => String(value || '').trim()).filter(Boolean)
+              : [],
+            derivedFromSteps:Array.isArray(item.derivedFromSteps)
+              ? item.derivedFromSteps.map(value => String(value || '').trim()).filter(Boolean)
+              : [],
+            derivedFromConditions:Array.isArray(item.derivedFromConditions)
+              ? item.derivedFromConditions.map(value => String(value || '').trim()).filter(Boolean)
+              : []
+          };
+        }).filter(detail => detail.key)
+        : []
+    };
+  };
+  const normalizeTraderInterpretation = value => {
+    const safe = normalizeObject(value) || {};
+    return {
+      dominantEventKey:String(safe.dominantEventKey || '').trim(),
+      dominantEvent:String(safe.dominantEvent || '').trim(),
+      supportSemantic:String(safe.supportSemantic || '').trim(),
+      buyerResponseSemantic:String(safe.buyerResponseSemantic || '').trim(),
+      confirmationSemantic:String(safe.confirmationSemantic || '').trim(),
+      whatChanged:String(safe.whatChanged || '').trim(),
+      eventSequence:normalizeStringSequence(safe.eventSequence),
+      traderInterpretation:String(safe.traderInterpretation || safe.traderRead || '').trim(),
+      currentRisk:String(safe.currentRisk || safe.riskToWatch || '').trim(),
+      nextSignal:String(safe.nextSignal || safe.nextUsefulSignal || '').trim(),
+      traderRead:String(safe.traderRead || safe.traderInterpretation || '').trim(),
+      riskToWatch:String(safe.riskToWatch || safe.currentRisk || '').trim(),
+      nextUsefulSignal:String(safe.nextUsefulSignal || safe.nextSignal || '').trim()
+    };
+  };
   const normalizeChartCoach = value => {
     const safe = normalizeObject(value) || {};
     const primaryStorySource = normalizeObject(safe.primaryStory || safe.primary_story) || null;
@@ -34891,6 +35073,8 @@ function normalizeAnalysisResponse(raw){
   const rawCanonicalValues = normalizeObject(raw.canonicalValues || raw.canonical_values) || {};
   const candleStructureAnalysis = normalizeObject(raw.candleStructureAnalysis || raw.candle_structure_analysis) || {};
   const tradePlanCommentary = normalizeObject(raw.tradePlanCommentary || raw.trade_plan_commentary) || {};
+  const deterministicEventPacket = normalizeDeterministicEventPacket(raw.deterministicEventPacket || raw.deterministic_event_packet);
+  const traderInterpretation = normalizeTraderInterpretation(raw.traderInterpretation || raw.trader_interpretation);
   const chartCoach = normalizeChartCoach(raw.chartGuru || raw.chart_guru || raw.chartCoach || raw.chart_coach);
   const confidenceWarnings = Array.isArray(raw.confidenceWarnings || raw.confidence_warnings)
     ? (raw.confidenceWarnings || raw.confidence_warnings).map(item => String(item || '').trim()).filter(Boolean)
@@ -34993,6 +35177,21 @@ function normalizeAnalysisResponse(raw){
     extractedFromImage:imageFacts,
     trustedMarketContext:trustedMarketContext,
     canonicalValues:canonicalValues,
+    deterministicEventPacket:(
+      deterministicEventPacket.dominantEventKey
+      || deterministicEventPacket.dominantEventLabel
+      || deterministicEventPacket.primaryStoryKey
+      || deterministicEventPacket.recentStoryKey
+      || deterministicEventPacket.eventSequence.length
+    ) ? deterministicEventPacket : null,
+    traderInterpretation:(
+      traderInterpretation.dominantEvent
+      || traderInterpretation.dominantEventKey
+      || traderInterpretation.traderInterpretation
+      || traderInterpretation.currentRisk
+      || traderInterpretation.nextSignal
+      || traderInterpretation.eventSequence.length
+    ) ? traderInterpretation : null,
     candleStructureAnalysis:candleStructureAnalysis,
     tradePlanCommentary:tradePlanCommentary,
     chartCoach,
@@ -35705,6 +35904,12 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
   const chartCoach = parsed.chartCoach && typeof parsed.chartCoach === 'object'
     ? cloneData(parsed.chartCoach, {})
     : {primaryStory:null, sections:[], summaryText:'', source:'', renderVersion:'v1', explanationFacts:[]};
+  const deterministicEventPacket = parsed.deterministicEventPacket && typeof parsed.deterministicEventPacket === 'object'
+    ? cloneData(parsed.deterministicEventPacket, {})
+    : null;
+  const traderInterpretation = parsed.traderInterpretation && typeof parsed.traderInterpretation === 'object'
+    ? cloneData(parsed.traderInterpretation, {})
+    : null;
   const confidenceWarnings = Array.isArray(parsed.confidenceWarnings) ? parsed.confidenceWarnings.slice() : [];
   if(debugFlagEnabled('PP_DEBUG_CHART_TRACE') && typeof console !== 'undefined' && console.info){
     const failureReason = !parsed.visible_ticker && !parsed.visible_timeframe && parsed.visible_latest_price == null
@@ -35765,6 +35970,8 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     extractedFromImage,
     trustedMarketContext,
     canonicalValues,
+    deterministicEventPacket,
+    traderInterpretation,
     candleStructureAnalysis,
     tradePlanCommentary,
     chartCoach,

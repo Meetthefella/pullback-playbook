@@ -153,6 +153,9 @@ function buildEventPacketSandbox(){
   const snippets = [
     extractConstAssignment('CHART_GURU_EVENT_LABELS'),
     extractFunction('chartGuruDominantEventLabel'),
+    extractFunction('chartGuruBuyerResponsePresent'),
+    extractFunction('chartGuruSemanticEnvelopeFromStory'),
+    extractFunction('eventPacketEvidenceIncludes'),
     extractFunction('buildDeterministicEventPacketFromChartCoach')
   ].join('\n\n');
   vm.runInNewContext(snippets, sandbox, {filename:appPath});
@@ -238,11 +241,33 @@ function verifyDeterministicEventPacketPreservesTrace(){
     assert.strictEqual(packet.primaryStoryKey, story.key, `${fixture.id}: primaryStoryKey should be preserved.`);
     assert.strictEqual(packet.recentStoryKey, recent.key, `${fixture.id}: recentStoryKey should be preserved.`);
     assert.strictEqual(packet.dominantEventLabel, sandbox.chartGuruDominantEventLabel(story.key), `${fixture.id}: dominant event label should be mapped from the existing story key.`);
+    assert.ok(String(packet.supportSemantic || '').trim(), `${fixture.id}: packet should include supportSemantic.`);
+    assert.ok(String(packet.buyerResponseSemantic || '').trim(), `${fixture.id}: packet should include buyerResponseSemantic.`);
+    assert.ok(String(packet.confirmationSemantic || '').trim(), `${fixture.id}: packet should include confirmationSemantic.`);
     assert.deepStrictEqual(toPlainJson(packet.eventSequence), toPlainJson(recent.steps), `${fixture.id}: event sequence should preserve deterministic recent story steps.`);
     assert.deepStrictEqual(toPlainJson(packet.stepDetails), toPlainJson(recent.stepDetails), `${fixture.id}: step details should preserve deterministic recent story trace.`);
     assert.ok(packet.evidenceFactIds.includes(story.evidenceFactIds[0]), `${fixture.id}: packet should carry primary story evidence ids.`);
     assert.ok(packet.evidenceFactIds.includes(recent.evidenceFactIds[0]), `${fixture.id}: packet should carry recent story evidence ids.`);
   }
+}
+
+function verifyBuyerResponsePresentStates(){
+  const sandbox = buildEventPacketSandbox();
+  const cases = [
+    {label:'bounceAttempt', context:{bounceAttempt:true}, expected:true},
+    {label:'improving', context:{bounceState:'improving'}, expected:true},
+    {label:'rebound', context:{bounceState:'rebound'}, expected:true},
+    {label:'early stabilisation', context:{stabilisationState:'early'}, expected:true},
+    {label:'clear stabilisation', context:{stabilisationState:'clear'}, expected:true},
+    {label:'no response', context:{bounceState:'none', stabilisationState:'none', bounceAttempt:false}, expected:false}
+  ];
+  cases.forEach(testCase => {
+    assert.strictEqual(
+      sandbox.chartGuruBuyerResponsePresent(testCase.context),
+      testCase.expected,
+      `buyerResponsePresent should classify ${testCase.label} correctly.`
+    );
+  });
 }
 
 function verifyNetlifyNormalizationAndTutorBoundary(){
@@ -272,6 +297,9 @@ function verifyNetlifyNormalizationAndTutorBoundary(){
       nextUsefulSignal:fixture.interpreterResponse.nextSignal
     }, structuredFacts.deterministicEventPacket);
     assert.strictEqual(compatInterpretation.dominantEvent, fixture.interpreterResponse.dominantEvent, `${fixture.id}: trader interpretation should preserve dominantEvent.`);
+    assert.strictEqual(compatInterpretation.supportSemantic, sourcePacket.supportSemantic, `${fixture.id}: trader interpretation should preserve supportSemantic.`);
+    assert.strictEqual(compatInterpretation.buyerResponseSemantic, sourcePacket.buyerResponseSemantic, `${fixture.id}: trader interpretation should preserve buyerResponseSemantic.`);
+    assert.strictEqual(compatInterpretation.confirmationSemantic, sourcePacket.confirmationSemantic, `${fixture.id}: trader interpretation should preserve confirmationSemantic.`);
     assert.deepStrictEqual(toPlainJson(compatInterpretation.eventSequence), toPlainJson(sourcePacket.eventSequence), `${fixture.id}: trader interpretation should fall back to deterministic event sequence when omitted by the model.`);
     assert.strictEqual(compatInterpretation.traderInterpretation, fixture.interpreterResponse.traderInterpretation, `${fixture.id}: trader interpretation should normalize traderInterpretation.`);
     assert.strictEqual(compatInterpretation.currentRisk, fixture.interpreterResponse.currentRisk, `${fixture.id}: trader interpretation should normalize currentRisk.`);
@@ -294,8 +322,14 @@ function verifyNetlifyNormalizationAndTutorBoundary(){
     assert.notStrictEqual(chartCoach.primaryStory.key, 'openai_two_step_primary_story', `${fixture.id}: chartCoach must not create an OpenAI-only primary story contract when deterministic authority exists.`);
     assert.notStrictEqual(chartCoach.recentStory.key, 'openai_two_step_narrative', `${fixture.id}: chartCoach must not replace deterministic recent story key with an OpenAI-only story key.`);
     assert.deepStrictEqual(toPlainJson(chartCoach.recentStory.steps), toPlainJson(sourcePacket.eventSequence), `${fixture.id}: chartCoach must preserve the deterministic event sequence.`);
+    assert.strictEqual(chartCoach.recentStory.supportSemantic, compatInterpretation.supportSemantic, `${fixture.id}: chartCoach debug should preserve supportSemantic.`);
+    assert.strictEqual(chartCoach.recentStory.buyerResponseSemantic, compatInterpretation.buyerResponseSemantic, `${fixture.id}: chartCoach debug should preserve buyerResponseSemantic.`);
+    assert.strictEqual(chartCoach.recentStory.confirmationSemantic, compatInterpretation.confirmationSemantic, `${fixture.id}: chartCoach debug should preserve confirmationSemantic.`);
     assert.strictEqual(chartCoach.diagnostics.storyContract.primaryStoryKey, sourcePacket.primaryStoryKey, `${fixture.id}: diagnostics must point to deterministic primary story authority.`);
     assert.strictEqual(chartCoach.diagnostics.storyContract.storyKey, sourcePacket.recentStoryKey, `${fixture.id}: diagnostics must point to deterministic recent story authority.`);
+    assert.strictEqual(chartCoach.diagnostics.storyContract.supportSemantic, compatInterpretation.supportSemantic, `${fixture.id}: diagnostics must expose supportSemantic.`);
+    assert.strictEqual(chartCoach.diagnostics.storyContract.buyerResponseSemantic, compatInterpretation.buyerResponseSemantic, `${fixture.id}: diagnostics must expose buyerResponseSemantic.`);
+    assert.strictEqual(chartCoach.diagnostics.storyContract.confirmationSemantic, compatInterpretation.confirmationSemantic, `${fixture.id}: diagnostics must expose confirmationSemantic.`);
 
     const mergedAnalysis = hooks.mergeTwoStepNarrativeIntoAnalysis({}, fixture.finalProse, compatInterpretation, {
       deterministicEventPacket:sourcePacket
@@ -310,10 +344,12 @@ function verifyFixtureCoverage(){
   const ids = fixtures.map(fixture => fixture.id);
   assert.ok(ids.includes('CAT_event_first_failed_bounce'), 'Fixture set must include the CAT failed-first-bounce event-first case.');
   assert.ok(ids.includes('ALLY_event_first_50ma_test'), 'Fixture set must include the ALLY 50MA-test event-first case.');
+  assert.ok(ids.includes('UNP_event_first_early_rebound_20ma'), 'Fixture set must include the UNP early-rebound-from-20MA event-first case.');
 }
 
 function run(){
   verifyFixtureCoverage();
+  verifyBuyerResponsePresentStates();
   verifyAppPayloadIncludesDeterministicEventPacket();
   verifyDeterministicEventPacketPreservesTrace();
   verifyNetlifyNormalizationAndTutorBoundary();

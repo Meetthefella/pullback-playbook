@@ -6,6 +6,7 @@ const {
 } = require('../../fixtures/chart-guru-benchmark-library.js');
 
 const EVENT_LABELS = {
+  early_rebound_from_20ma:'Early rebound from 20MA',
   constructive_pullback_near_20ma:'First pullback to 20MA',
   bounce_confirmation_pending:'Successful 20MA defence',
   failed_bounce:'Failed first bounce from 20MA',
@@ -32,10 +33,48 @@ function findNarrationFixtureByTicker(ticker){
   return loadBenchmarkCaseByTicker(ticker);
 }
 
+function inferSemanticEnvelope(primaryStory = {}, recentStory = {}){
+  const storyKey = String(primaryStory.key || recentStory.key || '').trim().toLowerCase();
+  if(storyKey === 'early_rebound_from_20ma'){
+    return {
+      supportSemantic:'support_present',
+      buyerResponseSemantic:'response_present',
+      confirmationSemantic:'follow_through_unconfirmed'
+    };
+  }
+  if(['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma'].includes(storyKey)){
+    return {
+      supportSemantic:'support_present',
+      buyerResponseSemantic:'response_absent',
+      confirmationSemantic:'follow_through_unknown'
+    };
+  }
+  if(storyKey === 'failed_bounce'){
+    return {
+      supportSemantic:'support_failed',
+      buyerResponseSemantic:'response_failed',
+      confirmationSemantic:'follow_through_failed'
+    };
+  }
+  if(storyKey === 'off_level_wait_for_clearer_support'){
+    return {
+      supportSemantic:'support_absent',
+      buyerResponseSemantic:'response_absent',
+      confirmationSemantic:'follow_through_unknown'
+    };
+  }
+  return {
+    supportSemantic:'',
+    buyerResponseSemantic:'',
+    confirmationSemantic:''
+  };
+}
+
 function buildDeterministicEventPacketFromFixture(chartCoach = {}){
   const primaryStory = chartCoach.primaryStory || {};
   const recentStory = chartCoach.recentStory || {};
   const dominantKey = String(primaryStory.key || recentStory.key || '').trim();
+  const semanticEnvelope = inferSemanticEnvelope(primaryStory, recentStory);
   const evidenceFactIds = [...new Set([
     ...(Array.isArray(primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds : []),
     ...(Array.isArray(recentStory.evidenceFactIds) ? recentStory.evidenceFactIds : [])
@@ -57,6 +96,9 @@ function buildDeterministicEventPacketFromFixture(chartCoach = {}){
     recentStoryConfidenceMode:String(recentStory.confidenceMode || '').trim(),
     recentStoryTrendLabel:String(recentStory.trendLabel || '').trim(),
     recentStorySupportLabel:String(recentStory.supportLabel || '').trim(),
+    supportSemantic:String(recentStory.supportSemantic || semanticEnvelope.supportSemantic || '').trim(),
+    buyerResponseSemantic:String(recentStory.buyerResponseSemantic || semanticEnvelope.buyerResponseSemantic || '').trim(),
+    confirmationSemantic:String(recentStory.confirmationSemantic || semanticEnvelope.confirmationSemantic || '').trim(),
     stepDetails:Array.isArray(recentStory.stepDetails) ? recentStory.stepDetails.slice() : []
   };
 }

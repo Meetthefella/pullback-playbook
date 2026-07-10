@@ -14,6 +14,9 @@ const CHART_GURU_RENDER_VERSION = 'chart-guru-v1';
 const INTERPRETATION_REQUIRED_FIELDS = [
   'dominantEvent',
   'eventSequence',
+  'supportSemantic',
+  'buyerResponseSemantic',
+  'confirmationSemantic',
   'traderInterpretation',
   'currentRisk',
   'nextSignal'
@@ -32,6 +35,9 @@ const TRADER_INTERPRETATION_SCHEMA = {
   properties:{
     dominantEvent:{type:'string'},
     dominantEventKey:{type:'string'},
+    supportSemantic:{type:'string'},
+    buyerResponseSemantic:{type:'string'},
+    confirmationSemantic:{type:'string'},
     eventSequence:{
       type:'array',
       items:{type:'string'}
@@ -312,6 +318,7 @@ function normalizeStringSequence(value){
 }
 
 const CHART_GURU_EVENT_LABELS = {
+  early_rebound_from_20ma:'Early rebound from 20MA',
   constructive_pullback_near_20ma:'First pullback to 20MA',
   bounce_confirmation_pending:'Successful 20MA defence',
   failed_bounce:'Failed first bounce from 20MA',
@@ -356,6 +363,9 @@ function normalizeDeterministicEventPacket(value = {}){
     recentStoryConfidenceMode:normaliseString(source.recentStoryConfidenceMode, ''),
     recentStoryTrendLabel:normaliseString(source.recentStoryTrendLabel || dominantEventLabel, ''),
     recentStorySupportLabel:normaliseString(source.recentStorySupportLabel, ''),
+    supportSemantic:normaliseString(source.supportSemantic, ''),
+    buyerResponseSemantic:normaliseString(source.buyerResponseSemantic, ''),
+    confirmationSemantic:normaliseString(source.confirmationSemantic, ''),
     stepDetails:Array.isArray(source.stepDetails)
       ? source.stepDetails.map(detail => {
         const safe = safeObject(detail);
@@ -380,6 +390,9 @@ function normalizeTraderInterpretation(value = {}, eventPacket = {}){
   return {
     dominantEvent:normaliseString(source.dominantEvent, '') || deterministicPacket.dominantEventLabel,
     dominantEventKey:normaliseString(source.dominantEventKey, '') || deterministicPacket.dominantEventKey,
+    supportSemantic:normaliseString(source.supportSemantic, '') || deterministicPacket.supportSemantic,
+    buyerResponseSemantic:normaliseString(source.buyerResponseSemantic, '') || deterministicPacket.buyerResponseSemantic,
+    confirmationSemantic:normaliseString(source.confirmationSemantic, '') || deterministicPacket.confirmationSemantic,
     eventSequence:eventSequence.length ? eventSequence : deterministicPacket.eventSequence,
     traderInterpretation,
     currentRisk,
@@ -391,11 +404,114 @@ function normalizeTraderInterpretation(value = {}, eventPacket = {}){
   };
 }
 
+function deterministicNearSupportContext(eventPacket = {}, structuredFacts = {}){
+  const packet = normalizeDeterministicEventPacket(eventPacket);
+  const facts = safeObject(structuredFacts);
+  const setupStates = safeObject(facts.setupStates);
+  const pullbackZone = normaliseString(setupStates.pullbackZone || facts.pullbackZone, '').trim().toLowerCase();
+  const primaryStoryKey = normaliseString(packet.primaryStoryKey || packet.dominantEventKey, '').trim().toLowerCase();
+  const recentStoryKey = normaliseString(packet.recentStoryKey, '').trim().toLowerCase();
+  const explicitlyOffSupport = ['off_level_wait_for_clearer_support', 'extended_after_run'].includes(primaryStoryKey)
+    || ['off_level_wait_for_clearer_support', 'extended_after_run'].includes(recentStoryKey)
+    || ['off_level', 'extended', 'none'].includes(pullbackZone);
+  const nearSupport = ['near_20ma', 'near_50ma', 'between_20_50ma'].includes(pullbackZone)
+    || ['early_rebound_from_20ma', 'constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(primaryStoryKey)
+    || ['early_rebound_from_20ma', 'constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(recentStoryKey);
+  return nearSupport && !explicitlyOffSupport;
+}
+
+function normalizeSemanticToken(value = '', fallback = ''){
+  return normaliseString(value, fallback).trim().toLowerCase();
+}
+
+function buildSemanticEnvelope(value = {}, fallback = {}){
+  const source = safeObject(value);
+  const packet = safeObject(fallback);
+  return {
+    supportSemantic:normalizeSemanticToken(source.supportSemantic, packet.supportSemantic),
+    buyerResponseSemantic:normalizeSemanticToken(source.buyerResponseSemantic, packet.buyerResponseSemantic),
+    confirmationSemantic:normalizeSemanticToken(source.confirmationSemantic, packet.confirmationSemantic)
+  };
+}
+
+function classifySupportNarrationSemantic(text = ''){
+  const safe = String(text || '').trim().toLowerCase();
+  if(!safe) return 'support_unknown';
+  const groups = {
+    support_absent:[
+      /\baway from support\b/,
+      /\bnot near support\b/,
+      /\bnot sitting near support\b/,
+      /\baway from the main support areas\b/,
+      /\bwait(?:ing)? for (?:price to )?pull back into support\b/,
+      /\bneeds? a clearer support area elsewhere\b/,
+      /\bsupport is not currently relevant\b/,
+      /\bnot in the cleaner pullback zone\b/
+    ],
+    support_failed:[
+      /\bsupport (?:gave way|failed|broke|did not hold|has not held)\b/,
+      /\blost support\b/,
+      /\bfell back below support\b/
+    ],
+    support_reclaimed:[
+      /\breclaimed support\b/,
+      /\bback above support\b/,
+      /\bregained the (?:20|50)-day average\b/
+    ],
+    support_present:[
+      /\bnear support\b/,
+      /\bsitting near support\b/,
+      /\bfrom (?:the )?(?:20|50)-day average\b/,
+      /\bat (?:the )?(?:20|50)-day average\b/,
+      /\bholding (?:near|at|above) support\b/,
+      /\brebounding from (?:the )?(?:20|50)-day average\b/,
+      /\bsupport area\b/
+    ]
+  };
+  if(groups.support_absent.some(pattern => pattern.test(safe))) return 'support_absent';
+  if(groups.support_failed.some(pattern => pattern.test(safe))) return 'support_failed';
+  if(groups.support_reclaimed.some(pattern => pattern.test(safe))) return 'support_reclaimed';
+  if(groups.support_present.some(pattern => pattern.test(safe))) return 'support_present';
+  return 'support_unknown';
+}
+
+function classifyBuyerResponseSemantic(text = ''){
+  const safe = String(text || '').trim().toLowerCase();
+  if(!safe) return 'response_unknown';
+  if(/\bfailed bounce\b|\bbuyers (?:lost control|failed to hold)\b|\brebound could fail\b/.test(safe)) return 'response_failed';
+  if(/\bbuyers (?:have )?(?:responded|started to respond|stepped in)\b|\brebound\b|\bbounce attempt\b|\bstabili(?:s|z)ing\b|\bimproving\b/.test(safe)) return 'response_present';
+  if(/\bno buyer response\b|\bbuyers have not responded\b|\bno rebound yet\b/.test(safe)) return 'response_absent';
+  return 'response_unknown';
+}
+
+function semanticContradictionsForEnvelope(text = '', envelope = {}){
+  const safeEnvelope = buildSemanticEnvelope(envelope);
+  const errors = [];
+  const supportSemantic = classifySupportNarrationSemantic(text);
+  const buyerResponseSemantic = classifyBuyerResponseSemantic(text);
+  if(safeEnvelope.supportSemantic === 'support_present' && ['support_absent'].includes(supportSemantic)){
+    errors.push('Narration contradicts support_present by implying price is away from support.');
+  }
+  if(safeEnvelope.supportSemantic === 'support_absent' && ['support_present', 'support_reclaimed'].includes(supportSemantic)){
+    errors.push('Narration contradicts support_absent by implying active support interaction.');
+  }
+  if(safeEnvelope.buyerResponseSemantic === 'response_present' && buyerResponseSemantic === 'response_absent'){
+    errors.push('Narration contradicts response_present by implying buyers have not responded.');
+  }
+  if(safeEnvelope.buyerResponseSemantic === 'response_failed' && buyerResponseSemantic === 'response_present' && !/\bfail(?:ed|ure)\b/i.test(String(text || ''))){
+    errors.push('Narration contradicts response_failed by implying a healthy buyer response.');
+  }
+  return errors;
+}
+
 function buildChartGuruNarrationDiagnostics(value = {}, eventPacket = {}){
   const interpretation = normalizeTraderInterpretation(value, eventPacket);
   return {
     dominantEvent:interpretation.dominantEvent,
     eventSequence:interpretation.eventSequence.slice(),
+    supportSemantic:interpretation.supportSemantic,
+    buyerResponseSemantic:interpretation.buyerResponseSemantic,
+    confirmationSemantic:interpretation.confirmationSemantic,
     traderInterpretation:interpretation.traderInterpretation,
     currentRisk:interpretation.currentRisk,
     nextSignal:interpretation.nextSignal
@@ -492,6 +608,8 @@ function buildProductionChartGuruInterpretationInstructions(){
     'Stay concise, factual, sequence-aware, and trader-focused.',
     'Do not write beginner prose.',
     'Do not invent prices, new indicators, or unsupported chart facts.',
+    'Carry supportSemantic, buyerResponseSemantic, and confirmationSemantic forward from the deterministic evidence instead of re-inferring them.',
+    'If deterministic context says the setup is near the 20-day or 50-day average, do not describe price as away from support unless the deterministic event packet explicitly says the setup is off-level or extended.',
     'Return only the JSON fields defined by the schema.'
   ].join('\n');
 }
@@ -514,6 +632,8 @@ function buildProductionChartGuruFinalInstructions(){
     'Do not inspect raw chart evidence.',
     'Do not classify the event or invent new chart facts.',
     'Do not issue buy/sell advice or app verdicts.',
+    'Use supportSemantic, buyerResponseSemantic, and confirmationSemantic as fixed meaning constraints from the trader interpretation.',
+    'Preserve support-location meaning from the trader interpretation. Do not rewrite a near-support rebound as price being away from support.',
     'Return exactly one JSON object.',
     'Return only these fields as JSON strings: chartStory, whyItMatters, setupLocation, learningPoint, whatNext.',
     'If a field is unknown, return an empty string.'
@@ -594,6 +714,9 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
       confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'deterministic_event_packet_plus_trader_interpretation').trim(),
       trendLabel:String(interpretation.dominantEvent || eventPacket.recentStoryTrendLabel || '').trim(),
       supportLabel:String(prose.setupLocation || eventPacket.recentStorySupportLabel || '').trim(),
+      supportSemantic:String(interpretation.supportSemantic || eventPacket.supportSemantic || '').trim(),
+      buyerResponseSemantic:String(interpretation.buyerResponseSemantic || eventPacket.buyerResponseSemantic || '').trim(),
+      confirmationSemantic:String(interpretation.confirmationSemantic || eventPacket.confirmationSemantic || '').trim(),
       steps:eventSequence,
       stepDetails:storyStepDetails,
       evidenceFactIds:evidenceFactIds.slice()
@@ -618,6 +741,9 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
         storyKey:recentStoryKey,
         toneMode:String(eventPacket.recentStoryToneMode || 'openai_two_step').trim(),
         confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'deterministic_event_packet_plus_trader_interpretation').trim(),
+        supportSemantic:String(interpretation.supportSemantic || eventPacket.supportSemantic || '').trim(),
+        buyerResponseSemantic:String(interpretation.buyerResponseSemantic || eventPacket.buyerResponseSemantic || '').trim(),
+        confirmationSemantic:String(interpretation.confirmationSemantic || eventPacket.confirmationSemantic || '').trim(),
         steps:eventSequence.slice(),
         stepDetails:storyStepDetails.map(detail => ({
           key:detail.key,
@@ -663,6 +789,9 @@ function mergeTwoStepNarrativeIntoAnalysis(analysis = {}, finalResponse = {}, tr
     traderInterpretation:{
       dominantEventKey:interpretation.dominantEventKey,
       dominantEvent:interpretation.dominantEvent,
+      supportSemantic:interpretation.supportSemantic,
+      buyerResponseSemantic:interpretation.buyerResponseSemantic,
+      confirmationSemantic:interpretation.confirmationSemantic,
       whatChanged:interpretation.whatChanged,
       eventSequence:interpretation.eventSequence.slice(),
       traderInterpretation:interpretation.traderInterpretation,
@@ -714,20 +843,45 @@ function validateNoUnexpectedPriceMentions(response, fields = [], allowedValues 
   return errors;
 }
 
-function validateTraderInterpretationResponse(response){
-  const interpretation = normalizeTraderInterpretation(response);
+function validateTraderInterpretationResponse(response, eventPacket = {}, structuredFacts = {}){
+  const packet = normalizeDeterministicEventPacket(eventPacket);
+  const interpretation = normalizeTraderInterpretation(response, packet);
   const errors = [];
   if(!interpretation.dominantEvent) errors.push('Missing required field: dominantEvent.');
   if(!interpretation.eventSequence.length) errors.push('Missing required field: eventSequence.');
   if(!interpretation.traderInterpretation) errors.push('Missing required field: traderInterpretation.');
   if(!interpretation.currentRisk) errors.push('Missing required field: currentRisk.');
   if(!interpretation.nextSignal) errors.push('Missing required field: nextSignal.');
+  if(!interpretation.supportSemantic) errors.push('Missing required field: supportSemantic.');
+  if(!interpretation.buyerResponseSemantic) errors.push('Missing required field: buyerResponseSemantic.');
+  if(!interpretation.confirmationSemantic) errors.push('Missing required field: confirmationSemantic.');
+  if(deterministicNearSupportContext(eventPacket, structuredFacts)){
+    const text = [
+      interpretation.dominantEvent,
+      interpretation.traderInterpretation,
+      interpretation.currentRisk,
+      interpretation.nextSignal
+    ].join('\n');
+    errors.push(...semanticContradictionsForEnvelope(text, interpretation));
+  }
+  errors.push(...semanticContradictionsForEnvelope([
+    interpretation.dominantEvent,
+    interpretation.traderInterpretation,
+    interpretation.currentRisk,
+    interpretation.nextSignal
+  ].join('\n'), interpretation));
   return {ok:errors.length === 0, errors};
 }
 
-function validateFinalProseResponse(response, allowedPriceMentions = []){
+function validateFinalProseResponse(response, allowedPriceMentions = [], eventPacket = {}, structuredFacts = {}){
+  const packet = normalizeDeterministicEventPacket(eventPacket);
+  const envelope = buildSemanticEnvelope(safeObject(structuredFacts).traderInterpretation, packet);
   const errors = validateRequiredStringFields(response, FINAL_PROSE_REQUIRED_FIELDS);
   errors.push(...validateNoUnexpectedPriceMentions(response, FINAL_PROSE_REQUIRED_FIELDS, allowedPriceMentions));
+  const text = FINAL_PROSE_REQUIRED_FIELDS.map(field => String(safeObject(response)[field] || '').trim()).join('\n');
+  if(deterministicNearSupportContext(eventPacket, structuredFacts) || envelope.supportSemantic || envelope.buyerResponseSemantic){
+    errors.push(...semanticContradictionsForEnvelope(text, envelope));
+  }
   return {ok:errors.length === 0, errors};
 }
 
@@ -1323,7 +1477,11 @@ exports.handler = async function handler(event){
       TRADER_INTERPRETATION_SCHEMA,
       500
     );
-    const interpretationValidation = validateTraderInterpretationResponse(interpretationResult.parsed);
+    const interpretationValidation = validateTraderInterpretationResponse(
+      interpretationResult.parsed,
+      structuredFacts.deterministicEventPacket,
+      structuredFacts
+    );
     if(!interpretationValidation.ok){
       console.error('Chart Guru trader interpretation validation failed; falling back to deterministic Chart Guru', {
         model,
@@ -1350,7 +1508,12 @@ exports.handler = async function handler(event){
       FINAL_PROSE_SCHEMA,
       700
     );
-    const finalValidation = validateFinalProseResponse(finalResult.parsed, allowedPriceMentions);
+    const finalValidation = validateFinalProseResponse(
+      finalResult.parsed,
+      allowedPriceMentions,
+      structuredFacts.deterministicEventPacket,
+      structuredFacts
+    );
     if(!finalValidation.ok){
       console.error('Chart Guru final prose validation failed; falling back to deterministic Chart Guru', {
         model,
@@ -1418,6 +1581,9 @@ exports.__test = {
   buildTwoStepChartCoach,
   mergeTwoStepNarrativeIntoAnalysis,
   buildEmptyChartCoach,
+  classifySupportNarrationSemantic,
+  classifyBuyerResponseSemantic,
+  semanticContradictionsForEnvelope,
   validateTraderInterpretationResponse,
   validateFinalProseResponse
 };

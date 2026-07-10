@@ -64,10 +64,10 @@ function buildMissingChartResult(caseFolder, benchmarkFixture){
       benchmarkSkippedReason:reason
     },
     reviewRender:null,
-    warnings:[reason],
-    errors:[],
-    status:'skipped',
-    skipReason:reason
+    warnings:[],
+    errors:[reason],
+    status:'blocked',
+    blockedReason:reason
   };
 }
 
@@ -268,10 +268,10 @@ for(const ticker of JOURNEY_TICKERS){
 
     const benchmarkFixture = loadBenchmarkCaseByTicker(ticker);
     if(!caseFolder.hasChart){
-      const skipped = buildMissingChartResult(caseFolder, benchmarkFixture);
-      RUN_RESULTS.push(skipped);
-      await writeJsonReport(testInfo, `${ticker.toLowerCase()}-chart-guru-live-narration-skip.json`, skipped);
-      test.skip(true, skipped.skipReason);
+      const blocked = buildMissingChartResult(caseFolder, benchmarkFixture);
+      RUN_RESULTS.push(blocked);
+      await writeJsonReport(testInfo, `${ticker.toLowerCase()}-chart-guru-live-narration-blocked.json`, blocked);
+      expect(blocked.errors, JSON.stringify(blocked, null, 2)).toEqual([]);
     }
 
     const consoleEvents = await attachConsoleRecorder(page);

@@ -153,6 +153,9 @@ function buildEventPacketSandbox(){
   vm.runInNewContext([
     extractConstAssignment('CHART_GURU_EVENT_LABELS'),
     extractFunction('chartGuruDominantEventLabel'),
+    extractFunction('chartGuruBuyerResponsePresent'),
+    extractFunction('chartGuruSemanticEnvelopeFromStory'),
+    extractFunction('eventPacketEvidenceIncludes'),
     extractFunction('buildDeterministicEventPacketFromChartCoach'),
     extractFunction('chartCoachModelIsUsable')
   ].join('\n\n'), sandbox, {filename:appPath});
@@ -377,10 +380,34 @@ function verifyFixtureCoverage(){
     'UPS_event_first_constructive_pullback',
     'AMAT_event_first_pullback_20ma',
     'GEV_event_first_early_constructive',
-    'VRT_event_first_momentum_fading'
+    'VRT_event_first_momentum_fading',
+    'UNP_event_first_early_rebound_20ma'
   ].forEach(id => {
     assert.ok(ids.includes(id), `Fixture set must include ${id}.`);
   });
+}
+
+function verifySemanticClassifierCoverage(){
+  const hooks = analyseSetupModule.__test;
+  [
+    'Price is away from support right now.',
+    'It is not sitting near support anymore.',
+    'Traders may need a clearer support area elsewhere.',
+    'This setup is waiting for price to pull back into support.'
+  ].forEach(text => {
+    assert.strictEqual(hooks.classifySupportNarrationSemantic(text), 'support_absent', `Support classifier should treat "${text}" as support_absent.`);
+  });
+  [
+    'Price is rebounding from the 20-day average.',
+    'The setup is still sitting near support.',
+    'Buyers are defending the support area.'
+  ].forEach(text => {
+    assert.strictEqual(hooks.classifySupportNarrationSemantic(text), 'support_present', `Support classifier should treat "${text}" as support_present.`);
+  });
+  assert.ok(
+    hooks.semanticContradictionsForEnvelope('Price is away from support and waiting for a cleaner pullback.', {supportSemantic:'support_present'}).length >= 1,
+    'Semantic envelope should reject support-absent narration when supportSemantic is support_present.'
+  );
 }
 
 function verifyAppPayloadIncludesDeterministicEventPacket(){
@@ -449,9 +476,12 @@ function verifyInterpreterContractAndTutorBoundary(){
       deterministicEventPacket:packet
     }, {});
     const normalizedInterpretation = hooks.normalizeTraderInterpretation(fixture.interpreterResponse, packet);
-    const validation = hooks.validateTraderInterpretationResponse(normalizedInterpretation);
+    const validation = hooks.validateTraderInterpretationResponse(normalizedInterpretation, packet, structuredFacts);
     assert.strictEqual(validation.ok, true, `${fixture.id}: normalized interpreter output must satisfy schema.`);
     ['dominantEvent', 'traderInterpretation', 'currentRisk', 'nextSignal'].forEach(field => {
+      assert.ok(String(normalizedInterpretation[field] || '').trim(), `${fixture.id}: interpreter output must include ${field}.`);
+    });
+    ['supportSemantic', 'buyerResponseSemantic', 'confirmationSemantic'].forEach(field => {
       assert.ok(String(normalizedInterpretation[field] || '').trim(), `${fixture.id}: interpreter output must include ${field}.`);
     });
     assert.ok(Array.isArray(normalizedInterpretation.eventSequence) && normalizedInterpretation.eventSequence.length, `${fixture.id}: interpreter output must include eventSequence.`);
@@ -475,6 +505,9 @@ function verifyInterpreterContractAndTutorBoundary(){
       'traderInterpretation',
       'currentRisk',
       'nextSignal',
+      'supportSemantic',
+      'buyerResponseSemantic',
+      'confirmationSemantic',
       'whatChanged',
       'traderRead',
       'riskToWatch',
@@ -497,6 +530,14 @@ function verifyInterpreterContractAndTutorBoundary(){
       assert.ok(!tutorPrompt.includes(forbidden), `${fixture.id}: tutor prompt must not leak ${forbidden}.`);
     });
     assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('Do not inspect raw chart evidence.'), `${fixture.id}: Stage 3 instructions must explicitly forbid raw evidence inspection.`);
+
+    const interpretationContradictions = hooks.semanticContradictionsForEnvelope([
+      normalizedInterpretation.dominantEvent,
+      normalizedInterpretation.traderInterpretation,
+      normalizedInterpretation.currentRisk,
+      normalizedInterpretation.nextSignal
+    ].join(' '), normalizedInterpretation);
+    assert.deepStrictEqual(interpretationContradictions, [], `${fixture.id}: interpreter output must stay inside the deterministic semantic envelope.`);
 
     assert.deepStrictEqual(toPlainJson(structuredFacts.eventSequence), toPlainJson(packet.eventSequence), `${fixture.id}: structured facts must retain deterministic event sequence.`);
     assert.deepStrictEqual(toPlainJson(structuredFacts.deterministicEvidence.stepDetails), toPlainJson(packet.stepDetails), `${fixture.id}: structured facts must retain deterministic evidence trace.`);
@@ -684,22 +725,49 @@ function verifyStoryContinuityAndBenchmarks(){
       deterministicEventPacket:packet
     });
     const diagnostics = hooks.buildChartGuruNarrationDiagnostics(interpretation, packet);
+    const tutorValidation = hooks.validateFinalProseResponse(fixture.finalProse, [], packet, {
+      ...normalizeFixturePayload(fixture),
+      deterministicEventPacket:packet
+    });
 
     assert.strictEqual(packet.primaryStoryKey, fixture.deterministicChartCoach.primaryStory.key, `${fixture.id}: deterministic evidence and event packet must agree on the dominant story key.`);
     assert.strictEqual(interpretation.dominantEvent, fixture.interpreterResponse.dominantEvent, `${fixture.id}: interpreter must preserve the intended dominantEvent.`);
     assert.strictEqual(chartCoach.primaryStory.key, packet.primaryStoryKey, `${fixture.id}: stored chartCoach must keep deterministic primary story authority.`);
     assert.strictEqual(chartCoach.recentStory.key, packet.recentStoryKey, `${fixture.id}: stored chartCoach must keep deterministic recent story authority.`);
     assert.strictEqual(chartCoach.recentStory.trendLabel, interpretation.dominantEvent, `${fixture.id}: tutor-mapped chartCoach must keep the interpreter dominantEvent as the visible recent story label.`);
+    assert.strictEqual(chartCoach.recentStory.supportSemantic, interpretation.supportSemantic, `${fixture.id}: stored chartCoach debug must preserve supportSemantic.`);
+    assert.strictEqual(chartCoach.recentStory.buyerResponseSemantic, interpretation.buyerResponseSemantic, `${fixture.id}: stored chartCoach debug must preserve buyerResponseSemantic.`);
+    assert.strictEqual(chartCoach.recentStory.confirmationSemantic, interpretation.confirmationSemantic, `${fixture.id}: stored chartCoach debug must preserve confirmationSemantic.`);
     assert.strictEqual(mergedAnalysis.deterministicEventPacket.primaryStoryKey, packet.primaryStoryKey, `${fixture.id}: stored analysis must preserve deterministicEventPacket.`);
     assert.strictEqual(mergedAnalysis.traderInterpretation.dominantEvent, interpretation.dominantEvent, `${fixture.id}: stored analysis must preserve the interpreter dominantEvent.`);
     assert.deepStrictEqual(toPlainJson(mergedAnalysis.traderInterpretation.eventSequence), toPlainJson(interpretation.eventSequence), `${fixture.id}: stored analysis must preserve eventSequence.`);
     assert.strictEqual(diagnostics.dominantEvent, interpretation.dominantEvent, `${fixture.id}: diagnostics must expose dominantEvent.`);
     assert.deepStrictEqual(toPlainJson(diagnostics.eventSequence), toPlainJson(interpretation.eventSequence), `${fixture.id}: diagnostics must expose eventSequence.`);
+    assert.strictEqual(diagnostics.supportSemantic, interpretation.supportSemantic, `${fixture.id}: diagnostics must expose supportSemantic.`);
+    assert.strictEqual(diagnostics.buyerResponseSemantic, interpretation.buyerResponseSemantic, `${fixture.id}: diagnostics must expose buyerResponseSemantic.`);
+    assert.strictEqual(diagnostics.confirmationSemantic, interpretation.confirmationSemantic, `${fixture.id}: diagnostics must expose confirmationSemantic.`);
     assert.strictEqual(diagnostics.traderInterpretation, interpretation.traderInterpretation, `${fixture.id}: diagnostics must expose traderInterpretation.`);
     assert.strictEqual(diagnostics.currentRisk, interpretation.currentRisk, `${fixture.id}: diagnostics must expose currentRisk.`);
     assert.strictEqual(diagnostics.nextSignal, interpretation.nextSignal, `${fixture.id}: diagnostics must expose nextSignal.`);
     assert.notStrictEqual(chartCoach.primaryStory.key, 'openai_two_step_primary_story', `${fixture.id}: chartCoach must not replace deterministic authority with an OpenAI-only primary story key.`);
     assert.notStrictEqual(chartCoach.recentStory.key, 'openai_two_step_narrative', `${fixture.id}: chartCoach must not replace deterministic recent story authority when deterministic keys exist.`);
+    assert.strictEqual(tutorValidation.ok, true, `${fixture.id}: tutor prose should satisfy validation guards.`);
+
+    if(fixture.setupStates.pullbackZone === 'near_20ma' && ['attempt', 'improving', 'rebound'].includes(fixture.setupStates.bounceState)){
+      assert.notStrictEqual(packet.primaryStoryKey, 'off_level_wait_for_clearer_support', `${fixture.id}: near_20ma bounce attempt must not select an away-from-support dominant event.`);
+      assert.deepStrictEqual(hooks.semanticContradictionsForEnvelope(interpretation.traderInterpretation, interpretation), [], `${fixture.id}: interpreter must not drift outside the near-support rebound envelope.`);
+      assert.deepStrictEqual(hooks.semanticContradictionsForEnvelope(Object.values(fixture.finalProse).join(' '), interpretation), [], `${fixture.id}: tutor prose must not drift outside the near-support rebound envelope.`);
+      assert.strictEqual(chartCoach.primaryStory.key, packet.primaryStoryKey, `${fixture.id}: dominant event must survive into stored chartCoach for near-support rebound cases.`);
+      assert.strictEqual(mergedAnalysis.chartCoach.primaryStory.key, packet.primaryStoryKey, `${fixture.id}: dominant event must survive into stored analysis for near-support rebound cases.`);
+    }
+    if(fixture.id === 'UNP_event_first_early_rebound_20ma'){
+      assert.strictEqual(packet.primaryStoryKey, 'early_rebound_from_20ma', 'UNP should classify as an early rebound from the 20MA.');
+      assert.strictEqual(interpretation.dominantEvent, 'Early rebound from 20MA', 'UNP interpreter dominant event should stay anchored to the near-support rebound story.');
+      assert.strictEqual(interpretation.supportSemantic, 'support_present', 'UNP should preserve support_present semantics.');
+      assert.strictEqual(interpretation.buyerResponseSemantic, 'response_present', 'UNP should preserve response_present semantics.');
+      assert.strictEqual(interpretation.confirmationSemantic, 'follow_through_unconfirmed', 'UNP should preserve follow-through-unconfirmed semantics.');
+      assert.strictEqual(chartCoach.recentStory.trendLabel, 'Early rebound from 20MA', 'UNP tutor-mapped chartCoach should keep the rebound dominant event visible.');
+    }
 
     const judge = buildSemanticJudge(fixture, interpretation, fixture.finalProse);
     judgeSummaries.push({id:fixture.id, total:judge.total});
@@ -712,11 +780,12 @@ function verifyStoryContinuityAndBenchmarks(){
     assert.ok(judge.repetitiveWording >= 2, `${fixture.id}: semantic judge must reject repetitive wording.`);
     assert.ok(judge.total >= 20, `${fixture.id}: semantic benchmark score must stay above regression threshold.`);
   }
-  assert.strictEqual(judgeSummaries.length, 6, 'Benchmark suite must evaluate all six representative narration fixtures.');
+  assert.strictEqual(judgeSummaries.length, 7, 'Benchmark suite must evaluate all seven representative narration fixtures.');
 }
 
 async function run(){
   verifyFixtureCoverage();
+  verifySemanticClassifierCoverage();
   verifyAppPayloadIncludesDeterministicEventPacket();
   verifyEventPacketContract();
   verifyInterpreterContractAndTutorBoundary();

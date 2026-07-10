@@ -1,0 +1,125 @@
+{
+  "id": "UNP_event_first_early_rebound_20ma",
+  "ticker": "UNP",
+  "benchmark": {
+    "dominantEvent": "Early rebound from 20MA",
+    "eventSequence": [
+      "strong trend",
+      "controlled pullback into the 20-day average",
+      "buyers start to rebound",
+      "follow-through is still unproven"
+    ],
+    "expectedTraderInterpretation": "Trend remains healthy and buyers have responded at the 20-day average, but the rebound still needs confirmation.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "Early rebound from 20MA"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "20MA",
+  "setupStates": {
+    "trendState": "strong",
+    "pullbackZone": "near_20ma",
+    "structureState": "intact",
+    "stabilisationState": "early",
+    "bounceState": "attempt",
+    "volumeState": "weak"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "early_rebound_from_20ma",
+      "label": "Chart Story",
+      "icon": "\ud83d\udfe2",
+      "text": "After a controlled pullback into the rising 20-day average, buyers have started to push price higher again, but the rebound still needs follow-through.",
+      "evidenceFactIds": ["trend_context", "support_short_term_average", "bounce_attempt"],
+      "confidence": 0.92,
+      "rankReason": "buyer_response_after_controlled_20ma_pullback_is_primary_story"
+    },
+    "recentStory": {
+      "key": "early_rebound_from_20ma",
+      "bias": "good",
+      "toneMode": "constructive_buyer_response",
+      "confidenceMode": "buyer_response_needs_follow_through",
+      "trendLabel": "Early rebound from 20MA",
+      "supportLabel": "Near the 20-day average",
+      "steps": [
+        "strong_uptrend",
+        "pullback_to_20ma",
+        "buyer_response",
+        "confirmation_needed"
+      ],
+      "stepDetails": [
+        {
+          "key": "pullback_to_20ma",
+          "evidenceFactIds": ["support_short_term_average"],
+          "derivedFromSteps": ["pullback_to_20ma"],
+          "derivedFromConditions": ["near_20ma"]
+        },
+        {
+          "key": "buyer_response",
+          "evidenceFactIds": ["bounce_attempt"],
+          "derivedFromSteps": ["buyer_response"],
+          "derivedFromConditions": ["bounce_attempt", "structure_intact"]
+        },
+        {
+          "key": "confirmation_needed",
+          "evidenceFactIds": ["bounce_attempt"],
+          "derivedFromSteps": ["buyer_response", "confirmation_needed"],
+          "derivedFromConditions": ["follow_through_missing"]
+        }
+      ],
+      "evidenceFactIds": ["trend_context", "support_short_term_average", "bounce_attempt"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "UNP",
+    "timeframe": "1D",
+    "currentPrice": 232.8,
+    "ma20": 231.9,
+    "ma50": 224.7,
+    "ma200": 206.4,
+    "volume": 1650000,
+    "latestCandleOHLC": {
+      "open": 231.6,
+      "high": 233.4,
+      "low": 230.9,
+      "close": 232.8
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "20MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "Early rebound from 20MA",
+    "eventSequence": [
+      "strong trend",
+      "controlled pullback into the 20-day average",
+      "buyers start to rebound",
+      "follow-through is still unproven"
+    ],
+    "traderInterpretation": "Trend remains healthy and buyers have responded at the 20-day average, but the rebound still needs confirmation.",
+    "currentRisk": "The rebound could fail if buyers cannot add follow-through and price slips back below the 20-day average.",
+    "nextSignal": "Watch for buyers to hold above the 20-day average and build on the rebound with another stronger close."
+  },
+  "finalProse": {
+    "chartStory": "After a controlled pullback into the 20-day average, buyers have started to push UNP higher again, but the rebound still needs to prove itself.",
+    "whyItMatters": "The first rebound from support is encouraging, but one strong day on its own does not confirm that the pullback is complete.",
+    "setupLocation": "Price is rebounding from the 20-day average inside a healthy trend, so the setup is still sitting near support rather than away from it.",
+    "learningPoint": "Strong trends often resume from the 20-day average, but waiting for buyers to follow through can reduce the risk of chasing a failed rebound.",
+    "whatNext": "Watch for price to hold above the 20-day average and build on the recent rebound. A failure back below support would weaken the setup."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["rebound", "20-day", "support"],
+    "eventSequenceTokens": ["trend", "pullback", "rebound"],
+    "traderTokens": ["healthy", "buyers", "confirmation"],
+    "tutorTokens": ["support", "follow through", "watch"],
+    "forbiddenTokens": ["away from support", "not near support", "entry ready", "macd", "rsi"]
+  }
+}
