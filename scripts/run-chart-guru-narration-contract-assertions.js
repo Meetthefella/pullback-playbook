@@ -218,6 +218,15 @@ function buildAnalysisPayloadSandbox(eventPacket){
     buildTrustedMarketContextPayload(card){
       return card.__trustedMarketContext || {};
     },
+    resolveCanonicalPullbackState(){
+      return {
+        canonicalPullbackState:'near_20ma',
+        reconciliationReason:'',
+        supportInteractionState:'active_20ma_support',
+        currentLocationState:'near_20ma',
+        pullbackValiditySource:'raw_pullback_zone'
+      };
+    },
     buildChartGuruDeterministicAuthorityPayload(){
       return {eventPacket};
     }
@@ -600,6 +609,8 @@ function verifyAppPayloadIncludesDeterministicEventPacket(){
     __trustedMarketContext:{ticker:'CAT', timeframe:'1D'}
   });
   assert.deepStrictEqual(payload.deterministicEventPacket, eventPacket, 'Client analysis payload must include deterministicEventPacket unchanged.');
+  assert.strictEqual(payload.pullbackZone, 'near_20ma', 'Client analysis payload should use canonical pullback state for narration parity.');
+  assert.strictEqual(payload.canonicalPullbackState, 'near_20ma', 'Client analysis payload should expose canonicalPullbackState.');
 }
 
 function verifyEventPacketContract(){
@@ -719,8 +730,10 @@ function verifyInterpreterContractAndTutorBoundary(){
     ].join(' '), normalizedInterpretation);
     assert.deepStrictEqual(interpretationContradictions, [], `${fixture.id}: interpreter output must stay inside the deterministic semantic envelope.`);
 
-    assert.deepStrictEqual(toPlainJson(structuredFacts.eventSequence), toPlainJson(packet.eventSequence), `${fixture.id}: structured facts must retain deterministic event sequence.`);
-    assert.deepStrictEqual(toPlainJson(structuredFacts.deterministicEvidence.stepDetails), toPlainJson(packet.stepDetails), `${fixture.id}: structured facts must retain deterministic evidence trace.`);
+    assert.deepStrictEqual(toPlainJson(structuredFacts.deterministicEventPacket.eventSequence), toPlainJson(packet.eventSequence), `${fixture.id}: structured facts must retain deterministic event sequence inside deterministicEventPacket.`);
+    assert.deepStrictEqual(toPlainJson(structuredFacts.deterministicEventPacket.stepDetails), toPlainJson(packet.stepDetails), `${fixture.id}: structured facts must retain deterministic evidence trace inside deterministicEventPacket.`);
+    assert.ok(!Object.prototype.hasOwnProperty.call(structuredFacts, 'eventSequence'), `${fixture.id}: structured facts must not duplicate eventSequence outside deterministicEventPacket.`);
+    assert.ok(!Object.prototype.hasOwnProperty.call(structuredFacts, 'deterministicEvidence'), `${fixture.id}: structured facts must not duplicate deterministicEvidence outside deterministicEventPacket.`);
   }
 }
 

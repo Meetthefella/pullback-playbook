@@ -204,6 +204,15 @@ function buildAnalysisPayloadSandbox(eventPacket){
     buildTrustedMarketContextPayload(card){
       return card.__trustedMarketContext || {};
     },
+    resolveCanonicalPullbackState(){
+      return {
+        canonicalPullbackState:'near_20ma',
+        reconciliationReason:'',
+        supportInteractionState:'active_20ma_support',
+        currentLocationState:'near_20ma',
+        pullbackValiditySource:'raw_pullback_zone'
+      };
+    },
     buildChartGuruDeterministicAuthorityPayload(){
       return {eventPacket};
     }
@@ -228,6 +237,8 @@ function verifyAppPayloadIncludesDeterministicEventPacket(){
     __trustedMarketContext:{ticker:'CAT', timeframe:'1D'}
   });
   assert.deepStrictEqual(payload.deterministicEventPacket, eventPacket, 'Client analysis payload must include deterministicEventPacket unchanged.');
+  assert.strictEqual(payload.pullbackZone, 'near_20ma', 'Client analysis payload should carry the canonical pullback state downstream.');
+  assert.strictEqual(payload.canonicalPullbackState, 'near_20ma', 'Client analysis payload should expose canonicalPullbackState for authority parity.');
 }
 
 function verifyDeterministicEventPacketPreservesTrace(){
@@ -288,7 +299,8 @@ function verifyNetlifyNormalizationAndTutorBoundary(){
     };
     const structuredFacts = hooks.buildProductionStructuredFacts(payload, {});
     assert.strictEqual(structuredFacts.deterministicEventPacket.dominantEventLabel, sourcePacket.dominantEventLabel, `${fixture.id}: structured facts should carry normalized deterministicEventPacket.`);
-    assert.deepStrictEqual(toPlainJson(structuredFacts.eventSequence), toPlainJson(sourcePacket.eventSequence), `${fixture.id}: structured facts should mirror deterministic event sequence.`);
+    assert.deepStrictEqual(toPlainJson(structuredFacts.deterministicEventPacket.eventSequence), toPlainJson(sourcePacket.eventSequence), `${fixture.id}: structured facts should mirror deterministic event sequence inside deterministicEventPacket.`);
+    assert.ok(!Object.prototype.hasOwnProperty.call(structuredFacts, 'eventSequence'), `${fixture.id}: structured facts should not duplicate eventSequence outside deterministicEventPacket.`);
 
     const compatInterpretation = hooks.normalizeTraderInterpretation({
       dominantEvent:fixture.interpreterResponse.dominantEvent,

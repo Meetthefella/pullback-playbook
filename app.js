@@ -14931,6 +14931,12 @@ function renderWatchlistDebugPane(record, lifecycleSnapshot, priority, options =
     {label:'Original Bounce State', value:debugStateLabel(globalVerdict.originalBounceState)},
     {label:'Adjusted Bounce State', value:debugStateLabel(globalVerdict.adjustedBounceState)},
     {label:'nearEntryProvisionalBounceApplied', value:globalVerdict.nearEntryProvisionalBounceApplied ? 'true' : 'false'},
+    {label:'rawPullbackState', value:globalVerdict.rawPullbackState || '(none)'},
+    {label:'canonicalPullbackState', value:globalVerdict.canonicalPullbackState || '(none)'},
+    {label:'reconciliationReason', value:globalVerdict.reconciliationReason || '(none)'},
+    {label:'currentLocationState', value:globalVerdict.currentLocationState || '(none)'},
+    {label:'supportInteractionState', value:globalVerdict.supportInteractionState || '(none)'},
+    {label:'pullbackValiditySource', value:globalVerdict.pullbackValiditySource || '(none)'},
     {label:'nearEntryPullbackZoneAccepted', value:globalVerdict.nearEntryPullbackZoneAccepted ? 'true' : 'false'},
     {label:'nearEntryTerminalBlockApplied', value:globalVerdict.nearEntryTerminalBlockApplied ? 'true' : 'false'},
     {label:'nearEntryProvisionalBounceReason', value:nearEntryProvisionalBounceReasonValue},
@@ -25060,7 +25066,14 @@ function resolveTrackCardVisibleModel(record, simplifiedState = {}){
   const structureState = String(derived.structureState || simplified.structureState || '').trim().toLowerCase();
   const structureEligibility = String(derived.structureEligibility || simplified.structureEligibility || resolved.structure_eligibility || resolved.structureEligibility || '').trim().toLowerCase();
   const setupLocationState = String(derived.setupLocationState || simplified.setupLocationState || resolved.setup_location_state || '').trim().toLowerCase();
-  const pullbackZone = String(derived.pullbackZone || simplified.pullbackZone || resolved.pullback_zone || '').trim().toLowerCase();
+  const pullbackZone = String(
+    resolved.canonicalPullbackState
+    || resolved.canonical_pullback_state
+    || derived.pullbackZone
+    || simplified.pullbackZone
+    || resolved.pullback_zone
+    || ''
+  ).trim().toLowerCase();
   const bounceState = String(derived.bounceState || simplified.bounceState || resolved.bounce_state || '').trim().toLowerCase();
   const volumeState = String(derived.volumeState || simplified.volumeState || resolved.volume_state || '').trim().toLowerCase();
   const viability = String(resolved.viability || '').trim().toLowerCase();
@@ -27988,7 +28001,13 @@ function buildEntryConditionsSummary({
   const bounceState = String((derivedStates && derivedStates.bounceState) || (globalVerdict && globalVerdict.bounce_state) || '').toLowerCase();
   const stabilisationState = String((derivedStates && derivedStates.stabilisationState) || '').toLowerCase();
   const volumeState = String((derivedStates && derivedStates.volumeState) || (globalVerdict && globalVerdict.volume_state) || '').toLowerCase();
-  const pullbackState = String((derivedStates && derivedStates.pullbackZone) || (globalVerdict && globalVerdict.pullback_zone) || '').toLowerCase();
+  const pullbackState = String(
+    (resolvedContract && resolvedContract.canonicalPullbackState)
+    || (globalVerdict && (globalVerdict.canonicalPullbackState || globalVerdict.canonical_pullback_state))
+    || (derivedStates && derivedStates.pullbackZone)
+    || (globalVerdict && globalVerdict.pullback_zone)
+    || ''
+  ).toLowerCase();
   const planStatus = String((resolvedContract && resolvedContract.planStatusKey) || '').toLowerCase();
   const rrConfidence = String((resolvedContract && resolvedContract.rrConfidenceLabel) || '').toLowerCase();
   const structuralState = String((resolvedContract && resolvedContract.structuralState) || '').toLowerCase();
@@ -28327,7 +28346,14 @@ function buildTrackLongPressContract(options = {}){
   const presentation = String(options.presentationState || '').trim().toLowerCase();
   const structureState = String(derivedStates.structureState || globalVerdict.structure_state || '').trim().toLowerCase();
   const structureEligibility = String(derivedStates.structureEligibility || globalVerdict.structure_eligibility || '').trim().toLowerCase();
-  const pullbackState = String(derivedStates.pullbackZone || globalVerdict.pullback_zone || '').trim().toLowerCase();
+  const pullbackState = String(
+    resolvedContract.canonicalPullbackState
+    || globalVerdict.canonicalPullbackState
+    || globalVerdict.canonical_pullback_state
+    || derivedStates.pullbackZone
+    || globalVerdict.pullback_zone
+    || ''
+  ).trim().toLowerCase();
   const setupLocationState = String(derivedStates.setupLocationState || globalVerdict.setup_location_state || '').trim().toLowerCase();
   const bounceState = String(derivedStates.bounceState || globalVerdict.bounce_state || '').trim().toLowerCase();
   const priceabilityState = String(derivedStates.priceabilityState || globalVerdict.priceability_state || '').trim().toLowerCase();
@@ -29426,7 +29452,7 @@ function reviewTechnicalPullbackLabel(state){
   return `Pullback ${pullbackStateLabel(safe)}`;
 }
 
-function resolveReviewPullbackBounceDisplayContext({
+function resolveCanonicalPullbackState({
   record,
   simplifiedState,
   globalVerdict,
@@ -29487,15 +29513,78 @@ function resolveReviewPullbackBounceDisplayContext({
   const near50 = Number.isFinite(price) && Number.isFinite(sma50) && sma50 > 0
     ? price >= sma50 * 0.985 && price <= sma50 * 1.07
     : false;
-  const bouncePositive = ['attempt','early','developing','confirmed'].includes(rawBounceState)
-    || ['clear','present','early'].includes(rawStabilisationState);
+  const supportHeld = derived.supportHeld === true || global.support_held === true;
+  const meaningfulReversal = derived.meaningfulReversal === true || global.meaningful_reversal === true;
+  const signalCount = Number(
+    derived.signalCount
+    ?? derived.signal_count
+    ?? global.signal_count
+    ?? global.signalCount
+    ?? 0
+  );
+  const reclaimConfirmedIndependent = derived.reclaimConfirmedIndependent === true
+    || derived.reclaim_confirmed_independent === true
+    || global.reclaim_confirmed_independent === true
+    || global.reclaimConfirmedIndependent === true;
+  const reclaimsLevel = derived.reclaimsLevel === true
+    || derived.reclaims_level === true
+    || global.reclaims_level === true
+    || global.reclaimsLevel === true;
+  const entryTriggerHit = derived.entryTriggerHit === true
+    || derived.entry_trigger_hit === true
+    || global.entry_trigger_hit === true
+    || global.entryTriggerHit === true;
+  const explicitBuyerResponsePresent = derived.buyerResponsePresent === true || global.buyer_response_present === true;
+  const buyerResponsePresent = derived.buyerResponsePresent === true
+    || global.buyer_response_present === true
+    || ['attempt','early','developing','confirmed','improving','rebound'].includes(rawBounceState)
+    || ['clear','present','early'].includes(rawStabilisationState)
+    || supportHeld
+    || meaningfulReversal
+    || signalCount > 0
+    || reclaimConfirmedIndependent
+    || reclaimsLevel
+    || entryTriggerHit;
   const aliveStructure = !evidence.terminalAvoid
     && !evidence.structuralWeakness
     && (['alive','messy'].includes(structureEligibility) || ['strong','intact','developing_clean','developing'].includes(structureState));
+  const supportInteractionHint = String(
+    derived.supportInteractionState
+    || global.support_interaction_state
+    || global.supportInteractionState
+    || ''
+  ).trim().toLowerCase();
+  const recentlyLeftSupportZone = derived.recentlyLeftValidPullbackZone === true
+    || global.recently_left_valid_pullback_zone === true
+    || ['left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(rawPullbackState);
+  const recognizedSupportSetupLocation = ['near_20ma','at_20ma','near_50ma','at_50ma','supportive','support_band','pullback_zone','usable_pullback'].includes(setupLocationState);
+  const recognizedRawSupportHistory = ['near_20ma','at_20ma','near_50ma','at_50ma','left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(rawPullbackState);
+  const explicitSupportInteraction = !!(supportInteractionHint && supportInteractionHint !== 'none');
+  const supportHeldAtRecognizedZone = supportHeld && (near20 || near50 || recognizedSupportSetupLocation || recognizedRawSupportHistory || explicitSupportInteraction || recentlyLeftSupportZone);
+  const meaningfulReversalAtRecognizedZone = meaningfulReversal && (near20 || near50 || recognizedSupportSetupLocation || recognizedRawSupportHistory || explicitSupportInteraction || recentlyLeftSupportZone);
+  const supportInteractionState = (() => {
+    if(explicitSupportInteraction) return supportInteractionHint;
+    if(near20 || ['near_20ma','at_20ma'].includes(setupLocationState)) return 'active_20ma_support';
+    if(near50 || ['near_50ma','at_50ma'].includes(setupLocationState)) return 'active_50ma_support';
+    if(recentlyLeftSupportZone) return 'recent_support_exit';
+    if(['supportive','support_band','pullback_zone','usable_pullback'].includes(setupLocationState)) return 'supportive_pullback_area';
+    if(['near_20ma','at_20ma','left_20ma','recently_left_20ma'].includes(rawPullbackState)) return 'recent_20ma_support';
+    if(['near_50ma','at_50ma','left_50ma','recently_left_50ma'].includes(rawPullbackState)) return 'recent_50ma_support';
+    if(supportHeldAtRecognizedZone || meaningfulReversalAtRecognizedZone) return 'recent_pullback_support';
+    return 'none';
+  })();
+  const recentSupportInteraction = supportInteractionState !== 'none';
+  const currentLocationState = (() => {
+    if(setupLocationState && !['none','unclear'].includes(setupLocationState)) return setupLocationState;
+    if(near20 || ['near_20ma','at_20ma'].includes(setupLocationState)) return 'near_20ma';
+    if(near50 || ['near_50ma','at_50ma'].includes(setupLocationState)) return 'near_50ma';
+    if(['near_20ma','near_50ma','between_20_50ma','extended','off_level','deep','shallow'].includes(rawPullbackState)) return rawPullbackState;
+    return 'off_level';
+  })();
   const rawPullbackNone = !rawPullbackState || ['none','unclear'].includes(rawPullbackState);
-  let resolvedPullbackState = rawPullbackState;
+  let resolvedPullbackState = rawPullbackState || 'none';
   let reconciliationReason = '';
-  if(rawPullbackNone && bouncePositive && aliveStructure){
+  if(rawPullbackNone && buyerResponsePresent && aliveStructure && recentSupportInteraction){
     if(near20 || ['near_20ma','at_20ma'].includes(setupLocationState)){
       resolvedPullbackState = 'near_20ma';
       reconciliationReason = 'bounce_positive_near_20ma';
@@ -29510,21 +29599,28 @@ function resolveReviewPullbackBounceDisplayContext({
       reconciliationReason = 'bounce_positive_pullback_present';
     }
   }
-  const pullbackLabel = reviewTechnicalPullbackLabel(resolvedPullbackState);
-  const bounceLabel = reviewTechnicalBounceLabel({
-    reviewEvidence:evidence,
-    bounceState:rawBounceState,
-    stabilisationState:rawStabilisationState
-  });
+  const canonicalPullbackState = resolvedPullbackState || 'none';
+  const canonicalPullbackValid = ['near_20ma','near_50ma'].includes(canonicalPullbackState);
+  const pullbackValiditySource = canonicalPullbackValid
+    ? (reconciliationReason ? 'reconciled_recent_support_response' : 'raw_pullback_zone')
+    : 'raw_pullback_invalid';
   return {
     rawPullbackState:rawPullbackState || 'none',
     rawPullbackDetected:rawPullbackDetected === true ? true : (rawPullbackDetected === false ? false : null),
     rawBounceState:rawBounceState || 'none',
     rawStabilisationState:rawStabilisationState || 'none',
-    resolvedPullbackState:resolvedPullbackState || 'none',
-    pullbackLabel,
-    bounceLabel,
-    reconciliationApplied:resolvedPullbackState !== rawPullbackState,
+    buyerResponsePresent,
+    explicitBuyerResponsePresent,
+    aliveStructure,
+    recentSupportInteraction,
+    supportInteractionState,
+    currentLocationState,
+    resolvedPullbackState:canonicalPullbackState,
+    canonicalPullbackState,
+    canonicalPullbackValid,
+    nearEntryPullbackZoneAccepted:canonicalPullbackValid,
+    pullbackValiditySource,
+    reconciliationApplied:canonicalPullbackState !== (rawPullbackState || 'none'),
     reconciliationReason,
     setupLocationState:setupLocationState || 'none',
     structureState:structureState || 'none',
@@ -29534,6 +29630,33 @@ function resolveReviewPullbackBounceDisplayContext({
     price,
     sma20,
     sma50
+  };
+}
+
+function resolveReviewPullbackBounceDisplayContext({
+  record,
+  simplifiedState,
+  globalVerdict,
+  derivedStates,
+  reviewEvidence
+} = {}){
+  const pullbackContext = resolveCanonicalPullbackState({
+    record,
+    simplifiedState,
+    globalVerdict,
+    derivedStates,
+    reviewEvidence
+  });
+  const pullbackLabel = reviewTechnicalPullbackLabel(pullbackContext.resolvedPullbackState);
+  const bounceLabel = reviewTechnicalBounceLabel({
+    reviewEvidence:reviewEvidence && typeof reviewEvidence === 'object' ? reviewEvidence : {},
+    bounceState:pullbackContext.rawBounceState,
+    stabilisationState:pullbackContext.rawStabilisationState
+  });
+  return {
+    ...pullbackContext,
+    pullbackLabel,
+    bounceLabel
   };
 }
 
@@ -34879,6 +35002,17 @@ function buildAnalysisPayload(card){
   const scanType = resolveScanType(safeCard, marketData, mergeDerivedChecks(safeCard.checks || {}, baseChecks));
   const tradePlan = deriveTradePlan(marketData, scanTypeForEvaluation(scanType));
   const derivedStates = deriveSetupStates(safeCard, marketData, safeCard.checks || baseChecks, tradePlan);
+  const canonicalPullback = resolveCanonicalPullbackState({
+    record:safeCard,
+    derivedStates:{
+      pullbackZone:derivedStates.pullback_zone,
+      bounceState:derivedStates.bounce_state,
+      stabilisationState:derivedStates.stabilisation_state,
+      setupLocationState:derivedStates.setup_location_state,
+      structureState:derivedStates.structure_state,
+      structureEligibility:derivedStates.structure_eligibility
+    }
+  });
   const trustedMarketContext = buildTrustedMarketContextPayload(safeCard, {
     scanType,
     tradePlan,
@@ -34895,7 +35029,13 @@ function buildAnalysisPayload(card){
     marketStatus:state.marketStatus,
     scanType:derivedStates.scan_type,
     trendState:derivedStates.trend_state,
-    pullbackZone:derivedStates.pullback_zone,
+    pullbackZone:canonicalPullback.canonicalPullbackState,
+    rawPullbackZone:derivedStates.pullback_zone,
+    canonicalPullbackState:canonicalPullback.canonicalPullbackState,
+    reconciliationReason:canonicalPullback.reconciliationReason,
+    supportInteractionState:canonicalPullback.supportInteractionState,
+    currentLocationState:canonicalPullback.currentLocationState,
+    pullbackValiditySource:canonicalPullback.pullbackValiditySource,
     structureState:derivedStates.structure_state,
     stabilisationState:derivedStates.stabilisation_state,
     bounceState:derivedStates.bounce_state,
@@ -35064,6 +35204,17 @@ function buildChartGuruDeterministicAuthorityPayload(card, options = {}){
     }
   };
   const derivedStates = options.derivedStates && typeof options.derivedStates === 'object' ? options.derivedStates : {};
+  const canonicalPullback = resolveCanonicalPullbackState({
+    record,
+    derivedStates:{
+      pullbackZone:derivedStates.pullback_zone,
+      bounceState:derivedStates.bounce_state,
+      stabilisationState:derivedStates.stabilisation_state,
+      setupLocationState:derivedStates.setup_location_state,
+      structureState:derivedStates.structure_state,
+      structureEligibility:derivedStates.structure_eligibility
+    }
+  });
   const deterministicChartCoach = buildDeterministicChartCoach(record, {
     marketStatus:state.marketStatus,
     trustedMarketContext,
@@ -35071,11 +35222,12 @@ function buildChartGuruDeterministicAuthorityPayload(card, options = {}){
   }, {
     derivedStates:{
       structureState:String(derivedStates.structure_state || '').trim(),
-      pullbackZone:String(derivedStates.pullback_zone || '').trim(),
+      pullbackZone:String(canonicalPullback.canonicalPullbackState || derivedStates.pullback_zone || '').trim(),
+      rawPullbackZone:String(derivedStates.pullback_zone || '').trim(),
       bounceState:String(derivedStates.bounce_state || '').trim(),
       stabilisationState:String(derivedStates.stabilisation_state || '').trim(),
       volumeState:String(derivedStates.volume_state || '').trim(),
-      setupLocationState:String(derivedStates.setup_location_state || '').trim(),
+      setupLocationState:String(canonicalPullback.currentLocationState || derivedStates.setup_location_state || '').trim(),
       structureEligibility:String(derivedStates.structure_eligibility || '').trim(),
       priceabilityState:String(derivedStates.priceability_state || '').trim(),
       evaluationScanType:String(derivedStates.evaluation_scan_type || '').trim(),
@@ -48710,7 +48862,8 @@ function capSeverityFromEvaluation(capCode, blockerFlags = {}){
 
 function buildPromotionGateTrace(context = {}){
   const structureState = String(context.structureState || '').toLowerCase();
-  const pullbackState = String(context.pullbackState || '').toLowerCase();
+  const rawPullbackState = String(context.rawPullbackState || context.pullbackState || '').toLowerCase();
+  const pullbackState = String(context.canonicalPullbackState || context.pullbackState || '').toLowerCase();
   const stabilisationState = String(context.stabilisationState || '').toLowerCase();
   const bounceState = String(context.bounceState || '').toLowerCase();
   const setupLocationState = String(context.setupLocationState || '').toLowerCase();
@@ -48859,6 +49012,7 @@ function buildPromotionGateTrace(context = {}){
   return {
     audit_structure_state:structureState,
     audit_pullback_zone:pullbackState,
+    audit_pullback_zone_raw:rawPullbackState,
     audit_stabilisation_state:stabilisationState,
     audit_bounce_state:bounceState,
     audit_plan_state:planStateKey,
@@ -48909,7 +49063,8 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   const bounceState = String(context.bounceState || '').toLowerCase();
   const planStateKey = String(context.planStateKey || '').toLowerCase();
   const displayedPlanStatus = String(context.displayedPlanStatus || '').toLowerCase();
-  const pullbackState = String(context.pullbackState || '').toLowerCase();
+  const rawPullbackState = String(context.rawPullbackState || context.pullbackState || '').toLowerCase();
+  const pullbackState = String(context.canonicalPullbackState || context.pullbackState || '').toLowerCase();
   const stabilisationState = String(context.stabilisationState || '').toLowerCase();
   const bounceGuard = evaluateBouncePriceabilityGuard({
     originalBounceState:bounceState,
@@ -48942,6 +49097,8 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
   const gateTrace = buildPromotionGateTrace({
     structureState,
     pullbackState,
+    rawPullbackState,
+    canonicalPullbackState:pullbackState,
     stabilisationState,
     setupLocationState:String(context.setupLocationState || '').toLowerCase(),
     bounceState:effectiveBounceState,
@@ -48973,6 +49130,7 @@ function capVerdictByBlockingFactors(requestedVerdict, context = {}){
     planStateKey,
     displayedPlanStatus,
     pullbackState,
+    rawPullbackState,
     stabilisationState,
     buyersNotInControl,
     bounceImproving,
@@ -49082,6 +49240,18 @@ function resolveFinalStateContract(record, options = {}){
   const pullbackState = String(derivedStates.pullbackZone || derivedStates.pullbackState || '').toLowerCase();
   const stabilisationState = String(derivedStates.stabilisationState || '').toLowerCase();
   const volumeState = String(derivedStates.volumeState || '').toLowerCase();
+  const canonicalPullback = resolveCanonicalPullbackState({
+    record:item,
+    derivedStates:{
+      pullbackZone:derivedStates.pullbackZone || derivedStates.pullbackState,
+      bounceState:derivedStates.bounceState,
+      stabilisationState:derivedStates.stabilisationState,
+      setupLocationState:derivedStates.setupLocationState,
+      structureState:derivedStates.structureState,
+      structureEligibility:derivedStates.structureEligibility
+    }
+  });
+  const canonicalPullbackState = String(canonicalPullback.canonicalPullbackState || pullbackState || '').toLowerCase();
   const currentPrice = numericOrNull(item.marketData && item.marketData.price);
   const sma50 = numericOrNull(item.marketData && item.marketData.sma50);
   const stop = numericOrNull(item.plan && item.plan.stop);
@@ -49196,7 +49366,9 @@ function resolveFinalStateContract(record, options = {}){
     structureState,
     trendState,
     bounceState,
-    pullbackState,
+    pullbackState:canonicalPullbackState,
+    rawPullbackState:pullbackState,
+    canonicalPullbackState,
     stabilisationState,
     planStateKey,
     displayedPlanStatus:displayedPlan.status,
@@ -49216,7 +49388,9 @@ function resolveFinalStateContract(record, options = {}){
     rr:numericOrNull(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio),
     reclaimAttempt:currentPrice != null && planEntry != null && currentPrice >= (planEntry * 0.985),
     unpriceableBlockReason:effectiveUnpriceableBlockReason,
-    hasClearInvalidationLevel:softReadinessOnlyPriceabilityBlock ? true : bounceGuard.hasClearInvalidationLevel
+    hasClearInvalidationLevel:softReadinessOnlyPriceabilityBlock ? true : bounceGuard.hasClearInvalidationLevel,
+    pullbackValid:canonicalPullback.canonicalPullbackValid === true,
+    setupLocationState:canonicalPullback.currentLocationState || derivedStates.setupLocationState || ''
   });
   const finalVerdict = verdictCap.verdict;
   const promotionTrace = verdictCap.blockerFlags && typeof verdictCap.blockerFlags === 'object'
@@ -49419,6 +49593,13 @@ function resolveFinalStateContract(record, options = {}){
     duplicateValidateCurrentPlanRemoved:true,
     promotion_watch_to_near_allowed:!!promotionTrace.promotion_watch_to_near_allowed,
     promotion_near_to_entry_allowed:!!promotionTrace.promotion_near_to_entry_allowed,
+    rawPullbackState:pullbackState || 'none',
+    canonicalPullbackState:canonicalPullbackState || 'none',
+    reconciliationReason:String(canonicalPullback.reconciliationReason || ''),
+    supportInteractionState:String(canonicalPullback.supportInteractionState || 'none'),
+    currentLocationState:String(canonicalPullback.currentLocationState || derivedStates.setupLocationState || 'none'),
+    pullbackValiditySource:String(canonicalPullback.pullbackValiditySource || ''),
+    nearEntryPullbackZoneAccepted:canonicalPullback.nearEntryPullbackZoneAccepted === true,
     promotion_watch_to_near_reason:String(promotionTrace.promotion_watch_to_near_reason || ''),
     promotion_near_to_entry_reason:String(promotionTrace.promotion_near_to_entry_reason || ''),
     rawResolverVerdict:rrResolution.rawResolverVerdict || rrResolution.status || finalVerdict,
@@ -49455,6 +49636,12 @@ function resolveFinalStateContract(record, options = {}){
       planTradeability:tradeability,
       planRiskStatus:riskStatus,
       planCapitalFit:String(displayedPlan.capitalFit && displayedPlan.capitalFit.capital_fit || '').trim().toLowerCase(),
+      rawPullbackState:pullbackState || 'none',
+      canonicalPullbackState:canonicalPullbackState || 'none',
+      reconciliationReason:String(canonicalPullback.reconciliationReason || ''),
+      supportInteractionState:String(canonicalPullback.supportInteractionState || 'none'),
+      currentLocationState:String(canonicalPullback.currentLocationState || derivedStates.setupLocationState || 'none'),
+      pullbackValiditySource:String(canonicalPullback.pullbackValiditySource || ''),
       verdictCap:{
         verdict:finalVerdict,
         capApplied:!!verdictCap.capApplied,
@@ -49555,6 +49742,10 @@ function scannerStageVerdictDiagnosticsForRecord(record){
   const item = normalizeTickerRecord(record);
   const ticker = normalizeTicker(item.ticker || '');
   const derivedStates = analysisDerivedStatesFromRecord(item);
+  const canonicalPullback = resolveCanonicalPullbackState({
+    record:item,
+    derivedStates
+  });
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
   const displayedPlan = deriveCurrentPlanState(
     effectivePlan.entry,
@@ -49606,6 +49797,11 @@ function scannerStageVerdictDiagnosticsForRecord(record){
     stabilisationState:String(derivedStates.stabilisationState || ''),
     pullbackState:String(derivedStates.pullbackState || ''),
     pullbackZone:String(derivedStates.pullbackZone || ''),
+    canonicalPullbackState:String(canonicalPullback.canonicalPullbackState || ''),
+    reconciliationReason:String(canonicalPullback.reconciliationReason || ''),
+    supportInteractionState:String(canonicalPullback.supportInteractionState || ''),
+    currentLocationState:String(canonicalPullback.currentLocationState || ''),
+    pullbackValiditySource:String(canonicalPullback.pullbackValiditySource || ''),
     planState:String(planUiState.state || item.plan.planValidationState || ''),
     tradeability:String(displayedPlan.tradeability || ''),
     scannerRawBaseVerdict,
@@ -49819,6 +50015,12 @@ function runVerdictCapAudit(options = {}){
       gate_blockers_clear_for_entry:!!blockers.gate_blockers_clear_for_entry,
       audit_structure_state:String(blockers.audit_structure_state || derivedStates.structureState || ''),
       audit_pullback_zone:String(blockers.audit_pullback_zone || derivedStates.pullbackZone || ''),
+      audit_pullback_zone_raw:String(blockers.audit_pullback_zone_raw || derivedStates.pullbackZone || ''),
+      canonical_pullback_state:String(resolved.canonicalPullbackState || ''),
+      reconciliation_reason:String(resolved.reconciliationReason || ''),
+      support_interaction_state:String(resolved.supportInteractionState || ''),
+      current_location_state:String(resolved.currentLocationState || ''),
+      pullback_validity_source:String(resolved.pullbackValiditySource || ''),
       audit_stabilisation_state:String(blockers.audit_stabilisation_state || derivedStates.stabilisationState || ''),
       audit_bounce_state:String(blockers.audit_bounce_state || derivedStates.bounceState || ''),
       audit_candle_up_closes_after_low:numericOrNull(derivedStates.candleEvidenceUpClosesAfterLow),

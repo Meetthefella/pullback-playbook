@@ -29,6 +29,12 @@ const cases = [
     groups:['all', 'contracts']
   },
   {
+    id:'pullback-authority',
+    label:'Pullback authority assertions',
+    script:'scripts/run-pullback-authority-assertions.js',
+    groups:['all', 'contracts', 'pullback-authority']
+  },
+  {
     id:'review-draft-authority',
     label:'Review draft authority assertions',
     script:'scripts/run-review-draft-authority-assertions.js',
@@ -44,6 +50,12 @@ const cases = [
     id:'chart-guru-event-first',
     label:'Chart Guru event-first assertions',
     script:'scripts/run-chart-guru-event-first-assertions.js',
+    groups:['all', 'contracts']
+  },
+  {
+    id:'chart-guru-ai-contracts',
+    label:'Chart Guru AI contract assertions',
+    script:'scripts/run-chart-guru-ai-contract-assertions.js',
     groups:['all', 'contracts']
   },
   {
@@ -96,7 +108,7 @@ function main(){
   const selectedCases = cases.filter(testCase => testCase.groups.includes(requestedGroup));
 
   if(!selectedCases.length){
-    console.error(`[unit] Unknown group "${requestedGroup}". Available groups: all, resolver, pure, contracts, persistence, execution.`);
+    console.error(`[unit] Unknown group "${requestedGroup}". Available groups: all, resolver, pure, contracts, pullback-authority, persistence, execution.`);
     process.exit(1);
   }
 

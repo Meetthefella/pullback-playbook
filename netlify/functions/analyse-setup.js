@@ -984,17 +984,7 @@ function buildProductionStructuredFacts(payload = {}, analysis = {}){
     },
     trustedMarketContext,
     canonicalValues,
-    deterministicEventPacket,
-    eventSequence:deterministicEventPacket.eventSequence,
-    deterministicEvidence:{
-      evidenceFactIds:deterministicEventPacket.evidenceFactIds.slice(),
-      stepDetails:deterministicEventPacket.stepDetails.map(detail => ({
-        key:detail.key,
-        evidenceFactIds:detail.evidenceFactIds.slice(),
-        derivedFromSteps:detail.derivedFromSteps.slice(),
-        derivedFromConditions:detail.derivedFromConditions.slice()
-      }))
-    }
+    deterministicEventPacket
   };
 }
 
@@ -1049,8 +1039,6 @@ function buildProductionChartGuruInterpretationInstructions(){
 
 function buildProductionChartGuruInterpretationPrompt(structuredFacts, originalPrompt = ''){
   return [
-    String(originalPrompt || '').trim(),
-    '',
     'Before writing the final Chart Guru prose, produce the internal trader interpretation from these structured chart facts.',
     '',
     JSON.stringify(safeObject(structuredFacts), null, 2)
@@ -1156,8 +1144,6 @@ function buildProductionChartGuruFinalInstructions(){
 
 function buildProductionChartGuruFinalPrompt(traderInterpretation, originalPrompt = ''){
   return [
-    String(originalPrompt || '').trim(),
-    '',
     'Trader interpretation to translate into Chart Guru teaching prose:',
     JSON.stringify(safeObject(traderInterpretation), null, 2)
   ].join('\n');
@@ -2202,6 +2188,10 @@ exports.handler = async function handler(event){
 };
 
 exports.__test = {
+  buildRequestBody,
+  buildStrictSchemaRequestBody,
+  buildVerificationOnlyContent,
+  buildProductionAnalysisInstructionLines,
   normalizeDeterministicEventPacket,
   normalizeTraderInterpretation,
   buildChartGuruNarrationDiagnostics,
@@ -2221,5 +2211,8 @@ exports.__test = {
   validateTutorSectionRoles,
   validateTutorVoice,
   validateTraderInterpretationResponse,
-  validateFinalProseResponse
+  validateFinalProseResponse,
+  PRIMARY_ANALYSIS_SCHEMA,
+  TRADER_INTERPRETATION_SCHEMA,
+  FINAL_PROSE_SCHEMA
 };

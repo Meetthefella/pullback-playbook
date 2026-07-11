@@ -211,13 +211,17 @@
     const structureHealthy = ['strong', 'intact', 'developing_clean'].includes(structureState);
     const structureDamaged = ['weakening', 'weak', 'broken', 'developing_loose'].includes(structureState);
     const marketSeverity = canonicalMarketSeverity(ctx);
+    const canonicalPullback = resolveCanonicalPullbackContext(ctx);
+    const explicitPullbackValid = typeof ctx.pullback_valid === 'boolean' ? ctx.pullback_valid : null;
     const checks = {
       structure_healthy:structureHealthy,
       structure_damaged:structureDamaged,
       price_above_50ma:ctx.price_above_50ma === true || ctx.price_below_50ma === false,
       price_above_200ma:ctx.price_above_200ma === true || ctx.price_below_200ma === false,
       ma50_above_200ma:ctx.ma50_above_200ma === true || ctx.ma50_below_200ma === false,
-      pullback_valid:ctx.pullback_valid !== false,
+      pullback_valid:explicitPullbackValid === null
+        ? canonicalPullback.canonicalPullbackValid
+        : (explicitPullbackValid || canonicalPullback.canonicalPullbackValid),
       no_hard_invalidation:ctx.structurally_broken !== true && ctx.terminal_avoid_applied !== true && ctx.terminalAvoidFlag !== true,
       market_not_hostile:marketSeverity !== 'hostile',
       market_severity:marketSeverity
@@ -492,6 +496,110 @@
     ].includes(zone);
   }
 
+  function resolveCanonicalPullbackContext(ctx = {}){
+    const rawPullbackState = String(ctx.pullback_zone || ctx.pullbackState || '').trim().toLowerCase();
+    const bounceState = String(ctx.bounce_state || '').trim().toLowerCase();
+    const stabilisationState = String(ctx.stabilisation_state || '').trim().toLowerCase();
+    const setupLocationState = String(ctx.setup_location_state || '').trim().toLowerCase();
+    const structureState = String(ctx.structure_state || '').trim().toLowerCase();
+    const currentPrice = numericValueOrNull(ctx.current_price);
+    const ma20 = numericValueOrNull(ctx.ma20);
+    const ma50 = numericValueOrNull(ctx.ma50);
+    const near20 = currentPrice !== null && ma20 !== null && ma20 !== 0
+      ? currentPrice >= ma20 * 0.97 && currentPrice <= ma20 * 1.06
+      : false;
+    const near50 = currentPrice !== null && ma50 !== null && ma50 !== 0
+      ? currentPrice >= ma50 * 0.985 && currentPrice <= ma50 * 1.07
+      : false;
+    const structureEligibility = String(ctx.structure_eligibility || ctx.structureEligibility || '').trim().toLowerCase();
+    const supportInteractionHint = String(ctx.support_interaction_state || ctx.supportInteractionState || '').trim().toLowerCase();
+    const explicitSupportInteraction = !!(supportInteractionHint && supportInteractionHint !== 'none');
+    const supportHeld = ctx.support_held === true || ctx.supportHeld === true;
+    const meaningfulReversal = ctx.meaningful_reversal === true || ctx.meaningfulReversal === true;
+    const signalCount = Number(ctx.signal_count ?? ctx.signalCount ?? 0);
+    const reclaimConfirmedIndependent = ctx.reclaim_confirmed_independent === true || ctx.reclaimConfirmedIndependent === true;
+    const reclaimsLevel = ctx.reclaims_level === true || ctx.reclaimsLevel === true;
+    const entryTriggerHit = ctx.entry_trigger_hit === true || ctx.entryTriggerHit === true;
+    const recentlyLeftSupportZone = ctx.recently_left_valid_pullback_zone === true
+      || ctx.recentlyLeftValidPullbackZone === true
+      || ['left_20ma', 'left_50ma', 'recently_left_20ma', 'recently_left_50ma'].includes(rawPullbackState);
+    const recognizedSupportSetupLocation = ['near_20ma','at_20ma','near_50ma','at_50ma','supportive','support_band','pullback_zone','usable_pullback'].includes(setupLocationState);
+    const recognizedRawSupportHistory = ['near_20ma','at_20ma','near_50ma','at_50ma','left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(rawPullbackState);
+    const supportHeldAtRecognizedZone = supportHeld
+      && (near20 || near50 || recognizedSupportSetupLocation || recognizedRawSupportHistory || explicitSupportInteraction || recentlyLeftSupportZone);
+    const meaningfulReversalAtRecognizedZone = meaningfulReversal
+      && (near20 || near50 || recognizedSupportSetupLocation || recognizedRawSupportHistory || explicitSupportInteraction || recentlyLeftSupportZone);
+    const explicitBuyerResponsePresent = ctx.buyer_response_present === true || ctx.buyerResponsePresent === true;
+    const buyerResponsePresent = explicitBuyerResponsePresent
+      || ['attempt','early','developing','confirmed','improving','rebound'].includes(bounceState)
+      || ['clear','present','early'].includes(stabilisationState)
+      || meaningfulReversal
+      || supportHeld
+      || signalCount > 0
+      || reclaimConfirmedIndependent
+      || reclaimsLevel
+      || entryTriggerHit;
+    const aliveStructure = ['alive','messy'].includes(structureEligibility)
+      || ['strong','intact','developing_clean','developing'].includes(structureState);
+    const recentSupportInteraction = explicitSupportInteraction
+      || recentlyLeftSupportZone
+      || near20
+      || near50
+      || recognizedSupportSetupLocation
+      || recognizedRawSupportHistory
+      || supportHeldAtRecognizedZone
+      || meaningfulReversalAtRecognizedZone;
+    let canonicalPullbackState = rawPullbackState || 'none';
+    let reconciliationReason = '';
+    if((!rawPullbackState || ['none','unclear'].includes(rawPullbackState)) && buyerResponsePresent && aliveStructure && recentSupportInteraction){
+      if(near20 || ['near_20ma','at_20ma'].includes(setupLocationState)){
+        canonicalPullbackState = 'near_20ma';
+        reconciliationReason = 'bounce_positive_near_20ma';
+      }else if(near50 || ['near_50ma','at_50ma'].includes(setupLocationState)){
+        canonicalPullbackState = 'near_50ma';
+        reconciliationReason = 'bounce_positive_near_50ma';
+      }else if(['supportive','support_band','pullback_zone','usable_pullback'].includes(setupLocationState)){
+        canonicalPullbackState = 'shallow';
+        reconciliationReason = 'bounce_positive_supportive_location';
+      }else{
+        canonicalPullbackState = 'shallow';
+        reconciliationReason = 'bounce_positive_pullback_present';
+      }
+    }
+    const supportInteractionState = explicitSupportInteraction
+      ? supportInteractionHint
+      : (near20 || ['near_20ma','at_20ma'].includes(canonicalPullbackState)
+      ? 'active_20ma_support'
+      : (near50 || ['near_50ma','at_50ma'].includes(canonicalPullbackState)
+        ? 'active_50ma_support'
+        : (recentlyLeftSupportZone
+          ? 'recent_support_exit'
+          : (recentSupportInteraction ? 'recent_pullback_support' : 'none'))));
+    const currentLocationState = setupLocationState && !['none','unclear'].includes(setupLocationState)
+      ? setupLocationState
+      : (near20
+        ? 'near_20ma'
+        : (near50
+          ? 'near_50ma'
+          : (rawPullbackState || 'off_level')));
+    const canonicalPullbackValid = nearEntryPullbackZoneOk(canonicalPullbackState);
+    return {
+      rawPullbackState:rawPullbackState || 'none',
+      canonicalPullbackState:canonicalPullbackState || 'none',
+      canonicalPullbackValid,
+      explicitBuyerResponsePresent,
+      buyerResponsePresent,
+      aliveStructure,
+      recentSupportInteraction,
+      reconciliationReason,
+      supportInteractionState,
+      currentLocationState,
+      pullbackValiditySource:canonicalPullbackValid
+        ? (reconciliationReason ? 'reconciled_recent_support_response' : 'raw_pullback_zone')
+        : 'raw_pullback_invalid'
+    };
+  }
+
   function inferRecentlyLeftValidPullbackZone(ctx = {}){
     if(ctx.recently_left_valid_pullback_zone === true) return true;
     const zone = String(ctx.pullback_zone || '').trim().toLowerCase();
@@ -533,7 +641,7 @@
   function independentEntryTriggerHit(ctx = {}){
     const structureState = String(ctx.structure_state || '').trim().toLowerCase();
     const trendState = String(ctx.trend_state || '').trim().toLowerCase();
-    const pullbackZone = String(ctx.pullback_zone || '').trim().toLowerCase();
+    const pullbackZone = String(resolveCanonicalPullbackContext(ctx).canonicalPullbackState || ctx.pullback_zone || '').trim().toLowerCase();
     const stabilisationState = String(ctx.stabilisation_state || '').trim().toLowerCase();
     const bounceState = String(ctx.bounce_state || '').trim().toLowerCase();
     const currentPrice = numericValueOrNull(ctx.current_price);
@@ -594,6 +702,7 @@
     const trendState = String(ctx.trend_state || '').trim().toLowerCase();
     const bounceState = String(bouncePriceability.adjustedBounceState || ctx.bounce_state || '').trim().toLowerCase();
     const originalBounceState = String(bouncePriceability.originalBounceState || ctx.bounce_state || '').trim().toLowerCase() || 'none';
+    const canonicalPullback = resolveCanonicalPullbackContext(ctx);
     const entry = provisionalNumericValue(ctx, 'entry', 'provisional_entry');
     const stop = provisionalNumericValue(ctx, 'stop', 'provisional_stop');
     const target = provisionalNumericValue(ctx, 'target', 'provisional_target');
@@ -602,7 +711,7 @@
       ...ctx,
       reclaim_confirmed_independent:bouncePriceability.reclaimConfirmed === true
     });
-    const pullbackOk = nearEntryPullbackZoneOk(ctx.pullback_zone) || recentlyLeftValidPullbackZone;
+    const pullbackOk = nearEntryPullbackZoneOk(canonicalPullback.canonicalPullbackState) || recentlyLeftValidPullbackZone;
     const structureOk = ['strong', 'intact', 'developing_clean'].includes(structureState);
     const hardStructureBlocked = ['weakening', 'weak', 'broken', 'developing_loose'].includes(structureState) || trendState === 'broken';
     const hasClearInvalidationLevel = bouncePriceability.hasClearInvalidationLevel === true
@@ -724,11 +833,12 @@
     const trendGate = resolveTrendGate(ctx);
     const buyerControlGate = resolveBuyerControlGate(ctx);
     const latePullbackGate = resolveLatePullbackGate(ctx);
+    const canonicalPullback = resolveCanonicalPullbackContext(ctx);
     const credibleRrValue = numericValueOrNull(ctx.credible_rr);
     const rrValue = numericValueOrNull(ctx.rr);
     const provisionalRrValue = numericValueOrNull(ctx.provisional_rr);
     const bounceState = String(provisionalPlan.adjustedBounceState || bouncePriceability.adjustedBounceState || ctx.bounce_state || '').trim().toLowerCase();
-    const pullbackZone = String(ctx.pullback_zone || '').trim().toLowerCase();
+    const pullbackZone = String(canonicalPullback.canonicalPullbackState || ctx.pullback_zone || '').trim().toLowerCase();
     const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
     const planStatus = String(ctx.plan_status || '').trim().toLowerCase();
     const planText = String(ctx.plan_status_text || '').trim().toLowerCase();
@@ -751,8 +861,14 @@
       bounce_ok:confirmedBounceOk || provisionalBounceOk || reclaimConfirmedAfterLeavingZone,
       bounce_hard_blocked:!(confirmedBounceOk || provisionalBounceOk || reclaimConfirmedAfterLeavingZone),
       pullback_ok:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone,
-      pullback_valid:trendGate.checks.pullback_valid === true || provisionalPlan.pullbackOk === true,
-      near_entry_pullback_zone_accepted:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone,
+      pullback_valid:trendGate.checks.pullback_valid === true || provisionalPlan.pullbackOk === true || canonicalPullback.canonicalPullbackValid === true,
+      near_entry_pullback_zone_accepted:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone || canonicalPullback.canonicalPullbackValid === true,
+      raw_pullback_zone:canonicalPullback.rawPullbackState,
+      canonical_pullback_state:canonicalPullback.canonicalPullbackState,
+      reconciliation_reason:canonicalPullback.reconciliationReason,
+      support_interaction_state:canonicalPullback.supportInteractionState,
+      current_location_state:canonicalPullback.currentLocationState,
+      pullback_validity_source:canonicalPullback.pullbackValiditySource,
       near_entry_terminal_block_applied:nearEntryTerminalBlocked(ctx),
       plan_visible:ctx.plan_visible === true || hasProvisionalPlan,
       has_entry:ctx.has_entry === true || numericValueOrNull(ctx.provisional_entry) !== null,
@@ -889,13 +1005,25 @@
             ? (nearEntryGate.checks.near_entry_provisional_bounce_reason || 'Provisional plan - waiting for confirmation. Bounce is developing but not confirmed.')
             : (nearEntryGate.checks && nearEntryGate.checks.near_entry_pullback_zone_accepted
               ? 'Recently-left pullback zone accepted for provisional Near Entry.'
-              : 'Near Entry gate passed.')
+            : 'Near Entry gate passed.')
         )
         : 'Near Entry gate failed.'];
+    const canonicalPullback = resolveCanonicalPullbackContext(current);
     return {
       ...current,
       final_verdict:softenedVerdict,
       reason,
+      raw_pullback_zone:canonicalPullback.rawPullbackState,
+      canonical_pullback_state:canonicalPullback.canonicalPullbackState,
+      canonicalPullbackState:canonicalPullback.canonicalPullbackState,
+      reconciliation_reason:canonicalPullback.reconciliationReason,
+      reconciliationReason:canonicalPullback.reconciliationReason,
+      support_interaction_state:canonicalPullback.supportInteractionState,
+      supportInteractionState:canonicalPullback.supportInteractionState,
+      current_location_state:canonicalPullback.currentLocationState,
+      currentLocationState:canonicalPullback.currentLocationState,
+      pullback_validity_source:canonicalPullback.pullbackValiditySource,
+      pullbackValiditySource:canonicalPullback.pullbackValiditySource,
       trend_gate_pass:trendGate.pass,
       trend_gate_reasons:Array.isArray(trendGate.reasons) && trendGate.reasons.length ? trendGate.reasons : [trendGate.pass ? 'Trend gate passed.' : 'Trend gate failed.'],
       trend_gate_checks:trendGate.checks || {},
@@ -2205,7 +2333,18 @@
       low_priority_by_viability_gate:viability.viability === 'low_priority',
       structure_state:structureState || '',
       bounce_state:bounceState || '',
-      pullback_zone:pullbackZone || '',
+      raw_pullback_zone:pullbackZone || '',
+      pullback_zone:(guardedVerdict.canonical_pullback_state || pullbackZone || ''),
+      canonical_pullback_state:guardedVerdict.canonical_pullback_state || '',
+      canonicalPullbackState:guardedVerdict.canonical_pullback_state || '',
+      reconciliation_reason:guardedVerdict.reconciliation_reason || '',
+      reconciliationReason:guardedVerdict.reconciliation_reason || '',
+      support_interaction_state:guardedVerdict.support_interaction_state || '',
+      supportInteractionState:guardedVerdict.support_interaction_state || '',
+      current_location_state:guardedVerdict.current_location_state || '',
+      currentLocationState:guardedVerdict.current_location_state || '',
+      pullback_validity_source:guardedVerdict.pullback_validity_source || '',
+      pullbackValiditySource:guardedVerdict.pullback_validity_source || '',
       volume_state:volumeState || '',
       market_regime:marketSeverity,
       planPriceabilitySource:'resolver-core:effectivePlan+marketData',
@@ -3548,6 +3687,7 @@
     getBucket,
     getBadge,
     getActions,
+    resolveCanonicalPullbackContext,
     canPromoteToEntry,
     canPromoteToNearEntry,
     applyPromotionGuards,

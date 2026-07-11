@@ -5945,6 +5945,18 @@ function runAiContractAssertions(){
     cloneData(value, fallback){
       if(value === undefined || value === null) return fallback;
       return JSON.parse(JSON.stringify(value));
+    },
+    repairChartGuruStoredText(value = ''){
+      return String(value || '').trim();
+    },
+    normalizeChartGuruSectionKey(value = ''){
+      return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    },
+    chartGuruSectionDisplayForKey(key = '', fallback = {}){
+      return {
+        icon:String(fallback.icon || '').trim(),
+        label:String(fallback.label || '').trim()
+      };
     }
   };
   vm.createContext(normalizeSandbox);
@@ -6375,20 +6387,6 @@ function runAiContractAssertions(){
   if(unknownStructurePromotion.entry_gate_pass === true || unknownStructurePromotion.near_entry_gate_pass === true){
     throw new Error('Unknown structure from AI fallback must not allow Entry/Near Entry promotion.');
   }
-  const analyseSetupSource = fs.readFileSync(path.join(root, 'netlify/functions/analyse-setup.js'), 'utf8');
-  if(!analyseSetupSource.includes('max_output_tokens: maxOutputTokens')
-    || !analyseSetupSource.includes('buildRequestBody(model, instructions, activeContent, verificationOnly ? 600 : 1000)')){
-    throw new Error('AI chart-coach endpoint must keep separate token budgets for verification-only and full-analysis requests.');
-  }
-  if(!analyseSetupSource.includes('buildVerificationOnlyContent(payload, chartRef)')
-    || !analyseSetupSource.includes('const content = verificationOnly')
-    || !analyseSetupSource.includes('Do not perform setup analysis.')
-    || !analyseSetupSource.includes('Do not generate coaching, entry, stop, target, or verdict content.')){
-    throw new Error('Verification-only backend requests must use a narrow chart-identity prompt path instead of the full setup-analysis prompt.');
-  }
-  if(/Entry, Near Entry, Watch, Monitor, Diminishing, Avoid, Buy, Sell, or Hold/.test(analyseSetupSource)){
-    throw new Error('AI endpoint prompt must not prime explicit final app labels.');
-  }
 }
 
 runAiContractAssertions();
@@ -6539,6 +6537,7 @@ function runPlanSemanticsAssertions(){
     'resolveScannerEstimatePlanAuthority',
     'planCheckStateForRecord',
     'capSeverityFromEvaluation',
+    'resolveCanonicalPullbackState',
     'buildPromotionGateTrace',
     'capVerdictByBlockingFactors',
     'legacyResolveFinalStateContract',
@@ -7786,6 +7785,90 @@ function runPlanSemanticsAssertions(){
   });
   if(noBouncePromotionTrace.promotion_watch_to_near_allowed === true || noBouncePromotionTrace.gate_bounce_ok_for_near === true){
     throw new Error('Near-20MA pullbacks without any bounce attempt must remain Watch.');
+  }
+
+  const carrLikePromotionTrace = sandbox.buildPromotionGateTrace({
+    structureState:'strong',
+    pullbackState:'near_20ma',
+    rawPullbackState:'none',
+    canonicalPullbackState:'near_20ma',
+    setupLocationState:'off_level',
+    stabilisationState:'none',
+    bounceState:'attempt',
+    planStateKey:'valid',
+    hasPriceablePlanValues:true,
+    hasClearInvalidationLevel:true,
+    hasEntry:true,
+    hasStop:true,
+    hasTarget:true,
+    riskTooWide:false,
+    stopDistanceTooWide:false,
+    hardBlockers:false,
+    tradeStructureClearEnough:true,
+    rr:1.2,
+    priceBelow50MA:false,
+    reclaimAttempt:false,
+    pullbackValid:true
+  });
+  if(carrLikePromotionTrace.gate_pullback_zone_ok_for_near !== true){
+    throw new Error('CARR-like reconciled pullbacks must satisfy the Near Entry pullback gate even when raw pullback_zone is none.');
+  }
+  if(carrLikePromotionTrace.audit_pullback_zone !== 'near_20ma' || carrLikePromotionTrace.audit_pullback_zone_raw !== 'none'){
+    throw new Error('Promotion diagnostics must preserve both canonical and raw pullback states for CARR-like reconciliations.');
+  }
+
+  const offLevelPromotionTrace = sandbox.buildPromotionGateTrace({
+    structureState:'strong',
+    pullbackState:'none',
+    rawPullbackState:'none',
+    canonicalPullbackState:'none',
+    setupLocationState:'off_level',
+    stabilisationState:'none',
+    bounceState:'none',
+    planStateKey:'valid',
+    hasPriceablePlanValues:true,
+    hasClearInvalidationLevel:true,
+    hasEntry:true,
+    hasStop:true,
+    hasTarget:true,
+    riskTooWide:false,
+    stopDistanceTooWide:false,
+    hardBlockers:false,
+    tradeStructureClearEnough:true,
+    rr:2.1,
+    priceBelow50MA:false,
+    reclaimAttempt:false,
+    pullbackValid:false
+  });
+  if(offLevelPromotionTrace.gate_pullback_zone_ok_for_near === true){
+    throw new Error('Genuinely off-level charts without support interaction must still fail the pullback gate.');
+  }
+
+  const recent50maDefenceTrace = sandbox.buildPromotionGateTrace({
+    structureState:'intact',
+    pullbackState:'near_50ma',
+    rawPullbackState:'none',
+    canonicalPullbackState:'near_50ma',
+    setupLocationState:'off_level',
+    stabilisationState:'early',
+    bounceState:'attempt',
+    planStateKey:'valid',
+    hasPriceablePlanValues:true,
+    hasClearInvalidationLevel:true,
+    hasEntry:true,
+    hasStop:true,
+    hasTarget:true,
+    riskTooWide:false,
+    stopDistanceTooWide:false,
+    hardBlockers:false,
+    tradeStructureClearEnough:true,
+    rr:1.9,
+    priceBelow50MA:false,
+    reclaimAttempt:false,
+    pullbackValid:true
+  });
+  if(recent50maDefenceTrace.gate_pullback_zone_ok_for_near !== true || recent50maDefenceTrace.audit_pullback_zone !== 'near_50ma'){
+    throw new Error('Recent 50MA defences must keep canonical pullback authority when the close has moved off the raw zone.');
   }
 
   const confirmedEntryPromotionTrace = sandbox.buildPromotionGateTrace({
@@ -9502,6 +9585,7 @@ function runReviewPullbackBounceDisplayAssertions(){
   };
   vm.createContext(sandbox);
   [
+    'resolveCanonicalPullbackState',
     'pullbackStateLabel',
     'reviewTechnicalPullbackLabel',
     'reviewTechnicalBounceLabel',
@@ -9542,6 +9626,45 @@ function runReviewPullbackBounceDisplayAssertions(){
   if(reconciled.pullbackLabel !== 'Pullback Near 20MA'){
     throw new Error(`Review pullback/bounce reconciliation should prefer Near 20MA for shallow bounce-positive pullbacks. Got: ${reconciled.pullbackLabel}`);
   }
+  if(reconciled.canonicalPullbackState !== 'near_20ma' || reconciled.nearEntryPullbackZoneAccepted !== true){
+    throw new Error('Review pullback/bounce reconciliation must expose Near 20MA as the canonical accepted pullback state.');
+  }
+  const carrLikeCanonical = sandbox.resolveCanonicalPullbackState({
+    record:{
+      ticker:'CARR',
+      marketData:{price:69.34, sma20:71.053, sma50:67.8266}
+    },
+    simplifiedState:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      pullback_detected:false
+    },
+    derivedStates:{
+      pullbackState:'none',
+      pullbackZone:'none',
+      bounceState:'attempt',
+      stabilisationState:'none',
+      setupLocationState:'off_level',
+      structureState:'strong'
+    },
+    reviewEvidence:{
+      terminalAvoid:false,
+      structuralWeakness:false,
+      consolidating:false
+    }
+  });
+  if(carrLikeCanonical.canonicalPullbackState !== 'near_20ma'){
+    throw new Error(`CARR-like recent support responses must reconcile to a canonical Near 20MA pullback. Got: ${carrLikeCanonical.canonicalPullbackState}`);
+  }
+  if(carrLikeCanonical.pullbackValiditySource !== 'reconciled_recent_support_response'){
+    throw new Error('CARR-like reconciled pullbacks must report reconciled_recent_support_response as the validity source.');
+  }
+  if(carrLikeCanonical.currentLocationState !== 'off_level'){
+    throw new Error('CARR-like pullback reconciliation must preserve off-level current location separately from canonical support history.');
+  }
   const genuinelyNoPullback = sandbox.resolveReviewPullbackBounceDisplayContext({
     record:{
       ticker:'MSFT',
@@ -9568,6 +9691,148 @@ function runReviewPullbackBounceDisplayAssertions(){
   if(genuinelyNoPullback.pullbackLabel !== 'Pullback none'){
     throw new Error('Review pullback/bounce reconciliation must keep Pullback none when bounce evidence is absent.');
   }
+  if(genuinelyNoPullback.canonicalPullbackState !== 'none' || genuinelyNoPullback.nearEntryPullbackZoneAccepted === true){
+    throw new Error('Genuinely off-level pullbacks without support interaction or buyer response must remain canonically invalid.');
+  }
+}
+
+function runCanonicalPullbackParityAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const appSandbox = {
+    console,
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    normalizeTickerRecordReadOnly(record){
+      return record && typeof record === 'object' ? record : {};
+    }
+  };
+  vm.createContext(appSandbox);
+  vm.runInContext(extractFunctionSource(appSource, 'resolveCanonicalPullbackState'), appSandbox, {filename:'app.js#resolveCanonicalPullbackState'});
+
+  const fixtures = [
+    {
+      id:'off_level_no_support',
+      record:{ticker:'OFF', marketData:{price:112, sma20:100, sma50:95}},
+      ctx:{
+        pullback_zone:'none',
+        setup_location_state:'off_level',
+        bounce_state:'attempt',
+        stabilisation_state:'none',
+        structure_state:'strong',
+        support_held:false,
+        meaningful_reversal:false,
+        signal_count:0,
+        current_price:112,
+        ma20:100,
+        ma50:95
+      },
+      expected:{
+        rawPullbackState:'none',
+        canonicalPullbackState:'none',
+        recentSupportInteraction:false,
+        reconciliationReason:'',
+        pullbackValid:false
+      }
+    },
+    {
+      id:'extended_no_support',
+      record:{ticker:'EXT', marketData:{price:111, sma20:100, sma50:95}},
+      ctx:{
+        pullback_zone:'none',
+        setup_location_state:'extended',
+        bounce_state:'attempt',
+        stabilisation_state:'early',
+        structure_state:'strong',
+        support_held:false,
+        meaningful_reversal:false,
+        signal_count:0,
+        current_price:111,
+        ma20:100,
+        ma50:95
+      },
+      expected:{
+        rawPullbackState:'none',
+        canonicalPullbackState:'none',
+        recentSupportInteraction:false,
+        reconciliationReason:'',
+        pullbackValid:false
+      }
+    },
+    {
+      id:'carr_like_real_support',
+      record:{ticker:'CARR', marketData:{price:69.34, sma20:71.053, sma50:67.8266}},
+      ctx:{
+        pullback_zone:'none',
+        setup_location_state:'off_level',
+        bounce_state:'attempt',
+        stabilisation_state:'none',
+        structure_state:'strong',
+        support_held:true,
+        meaningful_reversal:true,
+        signal_count:6,
+        current_price:69.34,
+        ma20:71.053,
+        ma50:67.8266
+      },
+      expected:{
+        rawPullbackState:'none',
+        canonicalPullbackState:'near_20ma',
+        recentSupportInteraction:true,
+        reconciliationReason:'bounce_positive_near_20ma',
+        pullbackValid:true
+      }
+    }
+  ];
+
+  fixtures.forEach(fixture => {
+    const appResult = appSandbox.resolveCanonicalPullbackState({
+      record:fixture.record,
+      derivedStates:{
+        pullbackZone:fixture.ctx.pullback_zone,
+        bounceState:fixture.ctx.bounce_state,
+        stabilisationState:fixture.ctx.stabilisation_state,
+        setupLocationState:fixture.ctx.setup_location_state,
+        structureState:fixture.ctx.structure_state,
+        supportHeld:fixture.ctx.support_held,
+        meaningfulReversal:fixture.ctx.meaningful_reversal
+      },
+      globalVerdict:{
+        support_held:fixture.ctx.support_held,
+        meaningful_reversal:fixture.ctx.meaningful_reversal
+      },
+      reviewEvidence:{
+        terminalAvoid:false,
+        structuralWeakness:false
+      }
+    });
+    const resolverResult = resolverCore.resolveCanonicalPullbackContext(fixture.ctx);
+
+    const comparableApp = {
+      rawPullbackState:appResult.rawPullbackState,
+      canonicalPullbackState:appResult.canonicalPullbackState,
+      recentSupportInteraction:appResult.recentSupportInteraction,
+      reconciliationReason:appResult.reconciliationReason,
+      pullbackValid:appResult.canonicalPullbackValid
+    };
+    const comparableResolver = {
+      rawPullbackState:resolverResult.rawPullbackState,
+      canonicalPullbackState:resolverResult.canonicalPullbackState,
+      recentSupportInteraction:resolverResult.recentSupportInteraction,
+      reconciliationReason:resolverResult.reconciliationReason,
+      pullbackValid:resolverResult.canonicalPullbackValid
+    };
+
+    if(JSON.stringify(comparableApp) !== JSON.stringify(comparableResolver)){
+      throw new Error(`${fixture.id}: app and resolver-core canonical pullback helpers diverged.\napp=${JSON.stringify(comparableApp)}\nresolver=${JSON.stringify(comparableResolver)}`);
+    }
+    if(JSON.stringify(comparableResolver) !== JSON.stringify(fixture.expected)){
+      throw new Error(`${fixture.id}: canonical pullback result mismatch.\nexpected=${JSON.stringify(fixture.expected)}\nactual=${JSON.stringify(comparableResolver)}`);
+    }
+  });
 }
 
 function runReviewPricedButNotReadyAssertions(){
@@ -10611,6 +10876,7 @@ async function runAllAssertions(){
   runTradeExecutionRoutingAssertions();
   runPlanSemanticsAssertions();
   runReviewPullbackBounceDisplayAssertions();
+  runCanonicalPullbackParityAssertions();
   runReviewPricedButNotReadyAssertions();
   runCumulativePenaltyDisplayAssertions();
   runAccepted50MaSupportThresholdAssertions();
