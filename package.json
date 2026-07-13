@@ -1,6 +1,6 @@
 {
   "name": "pullback-playbook",
-  "version": "4.4.0",
+  "version": "4.5.2",
   "private": true,
   "scripts": {
     "debug:compare-review-snapshots": "node scripts/compare-review-snapshots.js",
@@ -16,6 +16,7 @@
     "test:ui:journeys": "node scripts/run-playwright-fresh-port.js test tests/ui/journeys",
     "test:ui:journeys:multi": "node scripts/run-playwright-fresh-port.js test \"tests/ui/journeys/specified-ticker-journey.spec.js\" --workers 1 --trace on",
     "test:ui:chart-guru:narration": "node scripts/run-chart-guru-narration-journey.js",
+    "audit:chart-guru": "node scripts/run-chart-guru-audit.js",
     "test:ui:journeys:fresh": "node scripts/run-playwright-fresh-port.js",
     "test:ui:rendering": "node scripts/run-playwright-fresh-port.js test tests/ui/rendering",
     "test:unit": "node tests/unit/run-unit-suite.js all",

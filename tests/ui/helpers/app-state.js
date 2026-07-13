@@ -807,6 +807,9 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       },
       review:{
         stateHealth:cloneValue(reviewStateHealth),
+        chartGuruAudit:(record && typeof buildChartGuruAuditSnapshot === 'function')
+          ? cloneValue(buildChartGuruAuditSnapshot(record))
+          : null,
         visible:{
           currentVerdict:String(reviewShell && reviewShell.dataset && reviewShell.dataset.visualState || reviewVisible && reviewVisible.currentVerdict || ''),
           currentTone:String(reviewShell && reviewShell.dataset && reviewShell.dataset.visualTone || reviewVisible && reviewVisible.currentTone || ''),

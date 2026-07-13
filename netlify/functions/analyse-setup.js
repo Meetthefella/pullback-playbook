@@ -10,7 +10,10 @@ const MAX_CHART_DATA_URL_LENGTH = 6 * 1024 * 1024;
 const OPENAI_TIMEOUT_MS = 45000;
 const RETRYABLE_STATUSES = new Set([408, 409, 429, 500, 502, 503, 504]);
 const CHART_GURU_PRIMARY_STORY_ICON = '🧭';
-const CHART_GURU_RENDER_VERSION = 'chart-guru-v1';
+const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
+const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
+const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
+const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
 const INTERPRETATION_REQUIRED_FIELDS = [
   'dominantEvent',
   'dominantEventKey',
@@ -1156,7 +1159,16 @@ function buildEmptyChartCoach(explanationFacts = []){
     summaryText:'',
     source:'',
     renderVersion:CHART_GURU_RENDER_VERSION,
-    explanationFacts:normaliseStringArray(explanationFacts)
+    explanationFacts:normaliseStringArray(explanationFacts),
+    diagnostics:{
+      meta:{
+        deterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
+        interpretationPromptVersion:CHART_GURU_INTERPRETATION_PROMPT_VERSION,
+        finalPromptVersion:CHART_GURU_FINAL_PROMPT_VERSION,
+        renderVersion:CHART_GURU_RENDER_VERSION,
+        narrationSource:'validation_fallback'
+      }
+    }
   };
 }
 
@@ -1230,6 +1242,13 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
     renderVersion:CHART_GURU_RENDER_VERSION,
     explanationFacts:evidenceFactIds.slice(),
     diagnostics:{
+      meta:{
+        deterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
+        interpretationPromptVersion:CHART_GURU_INTERPRETATION_PROMPT_VERSION,
+        finalPromptVersion:CHART_GURU_FINAL_PROMPT_VERSION,
+        renderVersion:CHART_GURU_RENDER_VERSION,
+        narrationSource:'openai_narrator'
+      },
       priorityOrder:sections.map(section => String(section.key || '').trim()),
       sectionConfidence:sections.map(section => ({
         key:String(section.key || '').trim(),
@@ -1596,8 +1615,17 @@ function buildMalformedJsonFallbackAnalysis(payload = {}, rawText = ''){
     sections:[],
     summaryText:'',
     source:'',
-    renderVersion:'chart-guru-v1',
-    explanationFacts:['parse_fallback']
+    renderVersion:CHART_GURU_RENDER_VERSION,
+    explanationFacts:['parse_fallback'],
+    diagnostics:{
+      meta:{
+        deterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
+        interpretationPromptVersion:CHART_GURU_INTERPRETATION_PROMPT_VERSION,
+        finalPromptVersion:CHART_GURU_FINAL_PROMPT_VERSION,
+        renderVersion:CHART_GURU_RENDER_VERSION,
+        narrationSource:'validation_fallback'
+      }
+    }
   };
   return {
     setup_type:'',

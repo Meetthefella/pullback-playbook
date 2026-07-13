@@ -7,10 +7,20 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const reviewSessionKey = 'pullbackPlaybookReviewSessionV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.5.1';
+const APP_VERSION = 'v4.5.2';
+const APP_BUILD_TIMESTAMP = '2026-07-13T13:55:00Z';
+const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
+const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
+const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
+const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.5.1'
+    version:'4.5.2',
+    buildTimestamp:APP_BUILD_TIMESTAMP,
+    assetId:`pullback-playbook-${APP_VERSION}-${APP_BUILD_TIMESTAMP}`,
+    chartGuruDeterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
+    chartGuruInterpretationPromptVersion:CHART_GURU_INTERPRETATION_PROMPT_VERSION,
+    chartGuruFinalPromptVersion:CHART_GURU_FINAL_PROMPT_VERSION
   };
 }
 const defaultAiEndpoint = '/api/analyse-setup';
@@ -3951,6 +3961,33 @@ function currentBuildVersion(){
   return String(meta && meta.getAttribute('content') || 'unknown');
 }
 
+function currentBuildAssetId(){
+  if(typeof window !== 'undefined' && window && window.PP_BUILD && window.PP_BUILD.assetId){
+    return String(window.PP_BUILD.assetId || '').trim();
+  }
+  return `pullback-playbook-${currentBuildVersion()}-${APP_BUILD_TIMESTAMP}`;
+}
+
+function currentChartGuruVersionInfo(){
+  return {
+    deterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
+    interpretationPromptVersion:CHART_GURU_INTERPRETATION_PROMPT_VERSION,
+    finalPromptVersion:CHART_GURU_FINAL_PROMPT_VERSION,
+    renderVersion:CHART_GURU_RENDER_VERSION
+  };
+}
+
+function currentBuildInfo(){
+  return {
+    appVersion:APP_VERSION,
+    buildVersion:currentBuildVersion(),
+    assetId:currentBuildAssetId(),
+    buildTimestamp:APP_BUILD_TIMESTAMP,
+    commitSha:(typeof window !== 'undefined' && window && window.__BUILD_COMMIT__) ? String(window.__BUILD_COMMIT__ || '').trim() : '',
+    chartGuru:currentChartGuruVersionInfo()
+  };
+}
+
 function currentReviewDiagnosticRecord(){
   const ticker = activeReviewTicker();
   if(!ticker) return null;
@@ -5266,10 +5303,12 @@ function buildTesterDiagnosticSnapshot(options = {}){
       timestamp:new Date().toISOString(),
       testerId:currentTesterId(),
       buildVersion:currentBuildVersion(),
+      buildInfo:currentBuildInfo(),
       activeWorkspace:String(activeWorkspaceTab() || ''),
       panelTitle,
       ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
       review:currentVisibleReviewDiagnostics(record),
+      chartGuruAudit:record ? buildChartGuruAuditSnapshot(record) : null,
       stateHealth:currentReviewStateHealthSnapshot(record),
       paperTradeDebug:record ? currentPaperTradeDebugSnapshotForTicker(record.ticker) : null,
       resolverTrace:record ? {
@@ -5309,6 +5348,7 @@ function buildTesterDiagnosticSnapshot(options = {}){
       timestamp:new Date().toISOString(),
       testerId:currentTesterId(),
       buildVersion:currentBuildVersion(),
+      buildInfo:currentBuildInfo(),
       activeWorkspace:String(activeWorkspaceTab() || ''),
       panelTitle,
       ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
@@ -25402,6 +25442,107 @@ function finalDisplayedAnalysisChartRead(record, analysis){
   };
 }
 
+function buildChartGuruAuditSnapshot(record = {}, analysisState = null, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  const safeAnalysisState = analysisState && typeof analysisState === 'object'
+    ? analysisState
+    : getReviewAnalysisState(item);
+  const normalizedAnalysis = safeAnalysisState && safeAnalysisState.normalizedAnalysis && typeof safeAnalysisState.normalizedAnalysis === 'object'
+    ? safeAnalysisState.normalizedAnalysis
+    : {};
+  const derivedStates = analysisDerivedStatesFromRecord(item);
+  const globalVerdict = resolveGlobalVerdict(item);
+  const deterministicCoach = buildDeterministicChartCoach(item, normalizedAnalysis, {derivedStates, globalVerdict});
+  const selectedSummary = selectReviewAiSummary(item, normalizedAnalysis, {derivedStates, globalVerdict});
+  const finalDisplay = finalDisplayedAnalysisChartRead(item, normalizedAnalysis);
+  const chartCoach = finalDisplay.chartCoach && typeof finalDisplay.chartCoach === 'object'
+    ? finalDisplay.chartCoach
+    : deterministicCoach;
+  const diagnostics = chartCoach && chartCoach.diagnostics && typeof chartCoach.diagnostics === 'object'
+    ? chartCoach.diagnostics
+    : {};
+  const chartContext = diagnostics.chartContext && typeof diagnostics.chartContext === 'object'
+    ? diagnostics.chartContext
+    : {};
+  const eventEvidence = diagnostics.eventEvidence && typeof diagnostics.eventEvidence === 'object'
+    ? diagnostics.eventEvidence
+    : {};
+  const chartCoachFreshness = chartGuruChartCoachFreshness(normalizedAnalysis.chartCoach || null);
+  const restored = options.restored === true || (!!safeAnalysisState.hasSavedAnalysis && !item.review.chartAnalysisPipeline);
+  const narratorSource = chartGuruNarrationSourceForAnalysis(normalizedAnalysis, selectedSummary.source, {restored});
+  const fallbackReason = String(normalizedAnalysis.chartGuruOpenAiFallbackReason || '').trim();
+  const visibleSections = Array.isArray(chartCoach.sections)
+    ? chartCoach.sections.map(section => ({
+      key:String(section && section.key || '').trim(),
+      label:String(section && section.label || '').trim(),
+      text:String(section && section.text || '').trim()
+    }))
+    : [];
+  return redactDiagnosticPayload({
+    ticker:item.ticker,
+    inputFingerprint:{
+      chartImageId:String(safeAnalysisState.analysisChartImageId || '').trim(),
+      analysisRequestId:String(safeAnalysisState.analysisRequestId || '').trim(),
+      reviewedAt:String(safeAnalysisState.reviewedAt || '').trim()
+    },
+    buildInfo:currentBuildInfo(),
+    chartContext,
+    detectedEvents:Array.isArray(diagnostics.storyCandidates)
+      ? diagnostics.storyCandidates.map(candidate => String(candidate && candidate.id || '').trim()).filter(Boolean)
+      : [],
+    eventEvidence,
+    storyCandidates:Array.isArray(diagnostics.storyCandidates) ? diagnostics.storyCandidates.slice() : [],
+    selectedStory:diagnostics.selectedStory || null,
+    deterministicContract:{
+      renderVersion:String(chartCoach.renderVersion || '').trim(),
+      deterministicContractVersion:String(diagnostics.meta && diagnostics.meta.deterministicContractVersion || '').trim(),
+      supportSemantic:String(chartCoach.recentStory && chartCoach.recentStory.supportSemantic || diagnostics.storyContract && diagnostics.storyContract.supportSemantic || '').trim(),
+      buyerResponseSemantic:String(chartCoach.recentStory && chartCoach.recentStory.buyerResponseSemantic || diagnostics.storyContract && diagnostics.storyContract.buyerResponseSemantic || '').trim(),
+      confirmationSemantic:String(chartCoach.recentStory && chartCoach.recentStory.confirmationSemantic || diagnostics.storyContract && diagnostics.storyContract.confirmationSemantic || '').trim(),
+      dominantEventKey:String(chartCoach.primaryStory && chartCoach.primaryStory.key || '').trim(),
+      dominantEventLabel:chartGuruDominantEventLabel(chartCoach.primaryStory && chartCoach.primaryStory.key || '')
+    },
+    narrator:{
+      requested:String(normalizedAnalysis.chartCoach && normalizedAnalysis.chartCoach.source || '').trim() === 'openai_two_step_chart_guru',
+      source:narratorSource,
+      promptVersion:{
+        interpretation:String(diagnostics.meta && diagnostics.meta.interpretationPromptVersion || '').trim(),
+        final:String(diagnostics.meta && diagnostics.meta.finalPromptVersion || '').trim()
+      },
+      payloadSummary:{
+        dominantEventKey:String(normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.dominantEventKey || '').trim(),
+        eventSequence:Array.isArray(normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.eventSequence)
+          ? normalizedAnalysis.deterministicEventPacket.eventSequence.slice()
+          : [],
+        traderInterpretation:String(normalizedAnalysis.traderInterpretation && normalizedAnalysis.traderInterpretation.traderInterpretation || '').trim()
+      },
+      rawResponseSummary:{
+        fallbackReason,
+        chartGuruSource:String(normalizedAnalysis.chartCoach && normalizedAnalysis.chartCoach.source || '').trim(),
+        visibleSectionKeys:visibleSections.map(section => section.key)
+      },
+      validationResult:{
+        stalePersistedResult:!chartCoachFreshness.fresh,
+        staleReason:chartCoachFreshness.staleReason,
+        fallbackReason
+      },
+      fallbackReason
+    },
+    persistence:{
+      freshlyGenerated:!restored,
+      restored,
+      storedContractVersion:String(normalizedAnalysis.chartCoach && normalizedAnalysis.chartCoach.diagnostics && normalizedAnalysis.chartCoach.diagnostics.meta && normalizedAnalysis.chartCoach.diagnostics.meta.deterministicContractVersion || '').trim(),
+      staleReason:chartCoachFreshness.staleReason
+    },
+    displayedStory:{
+      source:String(selectedSummary.source || '').trim(),
+      title:'Chart Guru',
+      text:String(finalDisplay.text || '').trim(),
+      sections:visibleSections
+    }
+  });
+}
+
 const CHART_GURU_MOJIBAKE_REPAIRS = Object.freeze({
   'ðŸ§˜':'🧘',
   'ðŸ§­':'🧭',
@@ -25519,6 +25660,53 @@ function sanitizeChartCoachForDisplay(chartCoach = null, setup = {}){
       ? sections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n')
       : repairChartGuruStoredText(sanitizeAliveWatchSemanticCopy(String(safe.summaryText || '').trim(), setup))
   };
+}
+
+function chartGuruNarrationSourceLabel(value = ''){
+  const normalized = String(value || '').trim().toLowerCase();
+  if(normalized === 'openai_two_step_chart_guru' || normalized === 'openai_narrator') return 'openai_narrator';
+  if(normalized === 'deterministic' || normalized === 'deterministic_chart_coach' || normalized === 'deterministic_narrator') return 'deterministic_narrator';
+  if(normalized === 'validation_fallback') return 'validation_fallback';
+  if(normalized === 'persisted_restored_result') return 'persisted_restored_result';
+  return normalized || 'unknown';
+}
+
+function chartGuruChartCoachFreshness(chartCoach = null){
+  const safe = chartCoach && typeof chartCoach === 'object' ? chartCoach : null;
+  const diagnostics = safe && safe.diagnostics && typeof safe.diagnostics === 'object' ? safe.diagnostics : {};
+  const meta = diagnostics.meta && typeof diagnostics.meta === 'object' ? diagnostics.meta : {};
+  const renderVersion = String(safe && safe.renderVersion || '').trim();
+  const contractVersion = String(meta.deterministicContractVersion || '').trim();
+  const interpretationPromptVersion = String(meta.interpretationPromptVersion || '').trim();
+  const finalPromptVersion = String(meta.finalPromptVersion || '').trim();
+  let staleReason = '';
+  if(!renderVersion) staleReason = 'missing_render_version';
+  else if(renderVersion !== CHART_GURU_RENDER_VERSION) staleReason = 'render_version_mismatch';
+  else if(!contractVersion) staleReason = 'missing_deterministic_contract_version';
+  else if(contractVersion !== CHART_GURU_DETERMINISTIC_CONTRACT_VERSION) staleReason = 'deterministic_contract_version_mismatch';
+  else if(meta.narrationSource === 'openai_narrator' && (!interpretationPromptVersion || !finalPromptVersion)) staleReason = 'missing_prompt_version';
+  return {
+    fresh:!staleReason,
+    staleReason,
+    renderVersion,
+    contractVersion,
+    interpretationPromptVersion,
+    finalPromptVersion
+  };
+}
+
+function chartGuruNarrationSourceForAnalysis(analysis = {}, selectedSummarySource = '', options = {}){
+  const safe = analysis && typeof analysis === 'object' ? analysis : {};
+  const fallbackReason = String(safe.chartGuruOpenAiFallbackReason || '').trim();
+  const chartCoach = safe.chartCoach && typeof safe.chartCoach === 'object' ? safe.chartCoach : null;
+  const freshness = chartGuruChartCoachFreshness(chartCoach);
+  if(!freshness.fresh) return 'validation_fallback';
+  if(options.restored === true) return 'persisted_restored_result';
+  if(chartCoach && String(chartCoach.source || '').trim() === 'openai_two_step_chart_guru') return 'openai_narrator';
+  if(fallbackReason) return 'validation_fallback';
+  if(/^openai_/i.test(String(selectedSummarySource || ''))) return 'openai_narrator';
+  if(/^deterministic/i.test(String(selectedSummarySource || ''))) return 'deterministic_narrator';
+  return chartGuruNarrationSourceLabel(chartCoach && chartCoach.source || selectedSummarySource);
 }
 
 function describeCandleBodyDirection(candle = {}){
@@ -25904,6 +26092,13 @@ function finalizeChartCoachSections(sections = []){
 function chartCoachDiagnosticsForSections(sections = [], recentStory = null, primaryStory = null){
   const finalSections = Array.isArray(sections) ? sections : [];
   return {
+    meta:{
+      buildInfo:currentBuildInfo(),
+      deterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
+      interpretationPromptVersion:CHART_GURU_INTERPRETATION_PROMPT_VERSION,
+      finalPromptVersion:CHART_GURU_FINAL_PROMPT_VERSION,
+      renderVersion:CHART_GURU_RENDER_VERSION
+    },
     sectionConfidence:finalSections.map(section => ({
       key:String(section && section.key || '').trim(),
       confidence:Number.isFinite(Number(section && section.confidence)) ? Number(section.confidence) : null,
@@ -26729,12 +26924,36 @@ function chartCoachWhatNextForStory(storyKey = '', context = {}){
     : 'Watch for a controlled pullback that holds above support rather than a rushed move higher.';
 }
 
+function chartGuruControlledPullbackPresent(context = {}){
+  const recentSequence = Array.isArray(context.recentSequence) ? context.recentSequence : [];
+  const redRun = chartCoachRecentColorRun(recentSequence, 'red');
+  return !!(
+    context.candleEvidenceDownsideMomentumSlowing === true
+    || context.candleEvidenceTighterRanges === true
+    || context.candleEvidenceSmallerBodies === true
+    || context.candleEvidenceHigherLowHold === true
+    || (
+      String(context.latestDirection || '').trim() !== 'red'
+      && String(context.bodyDescriptor || '').trim() !== 'strong'
+      && redRun < 2
+      && context.failedBounce !== true
+    )
+  );
+}
+
+function chartGuruVolumeParticipationLabel(context = {}){
+  if(context.activeVolume === true) return 'expanding';
+  if(context.weakVolume === true) return 'weak';
+  return 'constructive';
+}
+
 function chartCoachPrimaryStoryCandidates(context = {}){
   const candidates = [];
   const recentSequence = Array.isArray(context.recentSequence) ? context.recentSequence : [];
   const greenRun = chartCoachRecentColorRun(recentSequence, 'green');
   const redRun = chartCoachRecentColorRun(recentSequence, 'red');
   const largeBodyRun = chartCoachLargeBodyRun(recentSequence);
+  const controlledPullbackPresent = chartGuruControlledPullbackPresent(context);
   const latestDirection = String(context.latestDirection || '').trim();
   const latestWickRejection = String(context.latestWickRejection || '').trim();
   const bodyDescriptor = String(context.bodyDescriptor || '').trim();
@@ -26768,7 +26987,14 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:118
     });
   }
-  if(latestDirection === 'red' && bodyDescriptor === 'strong' && redRun >= 2 && largeBodyRun >= 2){
+  if(
+    latestDirection === 'red'
+    && bodyDescriptor === 'strong'
+    && (
+      (redRun >= 2 && largeBodyRun >= 2)
+      || (context.lowerClose === true && (structureWeakening || maRelation.above20 === false))
+    )
+  ){
     candidates.push({
       key:'sharp_selloff',
       label:'Biggest clue',
@@ -26799,10 +27025,10 @@ function chartCoachPrimaryStoryCandidates(context = {}){
   }
   if(
     structureIntact
-    && (
-      (pullbackNear20 && buyerResponsePresent)
-      || (recentSupportType === '20ma' && recentSupportResponsePresent)
-    )
+    && pullbackNear20
+    && buyerResponsePresent
+    && !recentlyLeftSupportZone
+    && !extendedAfterRun
     && !followThroughConfirmed
     && !actionable
     && !failedBounce
@@ -26826,7 +27052,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:116
     });
   }
-  if(structureIntact && pullbackNear20 && !followThroughConfirmed && !actionable){
+  if(structureIntact && pullbackNear20 && controlledPullbackPresent && !followThroughConfirmed && !actionable){
     const evidenceFactIds = ['trend_context', 'support_short_term_average'];
     if(bounceAttempt) evidenceFactIds.push('bounce_attempt');
     const supportText = bounceAttempt
@@ -26847,7 +27073,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:114
     });
   }
-  if(structureIntact && pullbackNear50 && !followThroughConfirmed && !actionable){
+  if(structureIntact && pullbackNear50 && controlledPullbackPresent && !followThroughConfirmed && !actionable){
     const evidenceFactIds = ['trend_context', 'support_medium_term_average'];
     if(bounceAttempt) evidenceFactIds.push('bounce_attempt');
     const supportText = bounceAttempt
@@ -26909,7 +27135,7 @@ function chartCoachPrimaryStoryCandidates(context = {}){
       score:106
     });
   }
-  if(structureIntact && extendedAfterRun && !pullbackNear20 && !pullbackNear50 && !recentSupportResponsePresent){
+  if(structureIntact && extendedAfterRun && !pullbackNear20 && !pullbackNear50){
     candidates.push({
       key:'extended_after_run',
       label:'Biggest clue',
@@ -27304,6 +27530,9 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     ),
     candleEvidenceUpClosesAfterLow:derivedStates.candleEvidenceUpClosesAfterLow,
     candleEvidenceReclaimedPriorDayHigh:derivedStates.candleEvidenceReclaimedPriorDayHigh === true,
+    candleEvidenceDownsideMomentumSlowing:derivedStates.candleEvidenceDownsideMomentumSlowing === true,
+    candleEvidenceTighterRanges:derivedStates.candleEvidenceTighterRanges === true,
+    candleEvidenceSmallerBodies:derivedStates.candleEvidenceSmallerBodies === true,
     candleEvidenceHigherLowHold:derivedStates.candleEvidenceHigherLowHold === true,
     candleEvidenceReclaimRangeMeaningful:derivedStates.candleEvidenceReclaimRangeMeaningful === true,
     structureIntact,
@@ -27315,13 +27544,20 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     offLevelWithoutStructureDamage,
     weakVolume,
     activeVolume,
+    volumeParticipation:chartGuruVolumeParticipationLabel({weakVolume, activeVolume}),
     actionable,
     extendedAfterRun,
     marketSupportive
   };
+  const greenRun = chartCoachRecentColorRun(recentSequence, 'green');
+  const redRun = chartCoachRecentColorRun(recentSequence, 'red');
+  const largeBodyRun = chartCoachLargeBodyRun(recentSequence);
   storyContext.recentSupportType = chartGuruRecentSupportType(storyContext);
   storyContext.recentSupportResponsePresent = chartGuruRecentSupportResponsePresent(storyContext);
-  const primaryStory = chartCoachPrimaryStoryCandidates(storyContext)[0] || null;
+  const controlledPullbackPresent = chartGuruControlledPullbackPresent(storyContext);
+  const buyerResponsePresent = chartGuruBuyerResponsePresent(storyContext);
+  const storyCandidates = chartCoachPrimaryStoryCandidates(storyContext);
+  const primaryStory = storyCandidates[0] || null;
   const chartNarrator = primaryStory ? buildChartNarrator(primaryStory, storyContext) : null;
   const recentStory = chartNarrator && chartNarrator.recentStory ? chartNarrator.recentStory : null;
   const supportSections = recentStory
@@ -27382,6 +27618,69 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   ].filter(Boolean));
   const summaryText = guruSections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n');
   const renderedEvidenceFactIds = guruSections.flatMap(section => Array.isArray(section && section.evidenceFactIds) ? section.evidenceFactIds : []);
+  const diagnostics = chartCoachDiagnosticsForSections(guruSections, recentStory, primaryStory);
+  diagnostics.meta = {
+    ...(diagnostics.meta || {}),
+    narrationSource:'deterministic_narrator'
+  };
+  diagnostics.chartContext = {
+    candleOrderReceived:Array.isArray(facts.recent) ? facts.recent.map(candle => String(candle && (candle.datetime || candle.timestamp || candle.date) || '').trim()) : [],
+    candleOrderNormalized:Array.isArray(recentSequence) ? recentSequence.map(candle => String(candle && (candle.datetime || candle.timestamp || candle.date) || '').trim()) : [],
+    recentCandlesUsed:Array.isArray(recentSequence) ? recentSequence.slice(0, 6).map(candle => ({
+      date:String(candle && (candle.datetime || candle.timestamp || candle.date) || '').trim(),
+      open:numericOrNull(candle && candle.open),
+      high:numericOrNull(candle && candle.high),
+      low:numericOrNull(candle && candle.low),
+      close:numericOrNull(candle && candle.close)
+    })) : [],
+    movingAverageDistances:{
+      price:numericOrNull(facts.currentPrice),
+      ma20:numericOrNull(facts.ma20),
+      ma50:numericOrNull(facts.ma50),
+      ma200:numericOrNull(facts.ma200),
+      near20,
+      near50
+    },
+    supportClassification:{
+      supportType:String(storyContext.recentSupportType || '').trim(),
+      supportResponsePresent:storyContext.recentSupportResponsePresent === true,
+      pullbackNear20,
+      pullbackNear50,
+      recentlyLeftSupportZone,
+      setupLocationState:resolvedSetupLocationState
+    }
+  };
+  diagnostics.eventEvidence = {
+    greenRun,
+    redRun,
+    largeBodyRun,
+    weakVolume:storyContext.weakVolume === true,
+    activeVolume:storyContext.activeVolume === true,
+    volumeParticipation:storyContext.volumeParticipation,
+    controlledPullbackPresent,
+    bounceAttempt:storyContext.bounceAttempt === true,
+    followThroughConfirmed:storyContext.followThroughConfirmed === true,
+    failedBounce:storyContext.failedBounce === true,
+    buyerResponsePresent,
+    reclaimConfirmed:storyContext.reclaimConfirmed === true,
+    structureIntact:storyContext.structureIntact === true,
+    structureWeakening:storyContext.structureWeakening === true,
+    structureBroken:storyContext.structureBroken === true,
+    extendedAfterRun:storyContext.extendedAfterRun === true
+  };
+  diagnostics.storyCandidates = storyCandidates.map(candidate => ({
+    id:String(candidate && candidate.key || '').trim(),
+    eligible:true,
+    scoreOrPriority:Number.isFinite(Number(candidate && candidate.score)) ? Number(candidate.score) : null,
+    reasons:[String(candidate && candidate.rankReason || '').trim()].filter(Boolean),
+    rejectionReasons:[]
+  }));
+  diagnostics.selectedStory = primaryStory ? {
+    id:String(primaryStory.key || '').trim(),
+    dominantEvent:chartGuruDominantEventLabel(primaryStory.key),
+    currentPhase:String(recentStory && recentStory.confidenceMode || '').trim(),
+    reasons:[String(primaryStory.rankReason || '').trim()].filter(Boolean)
+  } : null;
   return {
     primaryStory:primaryStory ? {
       key:String(primaryStory.key || '').trim(),
@@ -27442,7 +27741,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     sections:guruSections,
     summaryText,
     source:'deterministic',
-    renderVersion:'chart-guru-v2',
+    renderVersion:CHART_GURU_RENDER_VERSION,
     explanationFacts:[...new Set([
       ...explanationFacts,
       ...(Array.isArray(recentStory && recentStory.evidenceFactIds) ? recentStory.evidenceFactIds : []),
@@ -27450,7 +27749,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     ].map(id => String(id || '').trim()).filter(Boolean))],
     confidence:0.8,
     facts,
-    diagnostics:chartCoachDiagnosticsForSections(guruSections, recentStory, primaryStory)
+    diagnostics
   };
 }
 
@@ -27473,8 +27772,10 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
   const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(item);
   const deterministicCoach = buildDeterministicChartCoach(item, state, {derivedStates, globalVerdict});
   const chartCoach = state.chartCoach && typeof state.chartCoach === 'object' ? state.chartCoach : null;
+  const chartCoachFreshness = chartGuruChartCoachFreshness(chartCoach);
   if(
     chartCoachModelIsUsable(chartCoach)
+    && chartCoachFreshness.fresh
     && String(chartCoach.source || '').trim() === 'openai_two_step_chart_guru'
   ){
     const mergedSections = finalizeChartCoachSections(Array.isArray(chartCoach.sections) ? chartCoach.sections.slice() : []);
@@ -27492,7 +27793,14 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
       chartNarrator:chartCoach.chartNarrator || deterministicCoach.chartNarrator,
       sections:mergedSections,
       summaryText:mergedSections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n'),
-      diagnostics:chartCoachDiagnosticsForSections(mergedSections, mergedRecentStory, mergedPrimaryStory)
+      diagnostics:{
+        ...chartCoachDiagnosticsForSections(mergedSections, mergedRecentStory, mergedPrimaryStory),
+        meta:{
+          ...((chartCoach.diagnostics && chartCoach.diagnostics.meta) || {}),
+          ...((chartCoachDiagnosticsForSections(mergedSections, mergedRecentStory, mergedPrimaryStory).meta) || {}),
+          narrationSource:'openai_narrator'
+        }
+      }
     };
     return {
       text:String(mergedChartCoach.summaryText || '').trim(),
@@ -27503,6 +27811,7 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
   }
   if(
     chartCoachModelIsUsable(chartCoach)
+    && chartCoachFreshness.fresh
     && String(chartCoach.primaryStory && chartCoach.primaryStory.key || '').trim() === String(deterministicCoach.primaryStory && deterministicCoach.primaryStory.key || '').trim()
   ){
     const mergedSections = finalizeChartCoachSections(mergeChartCoachSections(
@@ -27517,7 +27826,14 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
       chartNarrator:deterministicCoach.chartNarrator,
       sections:mergedSections,
       summaryText:mergedSections.map(section => `${section.icon} ${section.label}: ${section.text}`).join('\n'),
-      diagnostics:chartCoachDiagnosticsForSections(mergedSections, mergedChartCoach.recentStory, mergedChartCoach.primaryStory)
+      diagnostics:{
+        ...chartCoachDiagnosticsForSections(mergedSections, deterministicCoach.recentStory, deterministicCoach.primaryStory),
+        meta:{
+          ...((chartCoach.diagnostics && chartCoach.diagnostics.meta) || {}),
+          ...((chartCoachDiagnosticsForSections(mergedSections, deterministicCoach.recentStory, deterministicCoach.primaryStory).meta) || {}),
+          narrationSource:chartGuruNarrationSourceLabel(String(chartCoach.source || ''))
+        }
+      }
     };
     return {
       text:String(mergedChartCoach.summaryText || '').trim(),
@@ -27528,7 +27844,9 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
   }
   return {
     text:String(deterministicCoach.summaryText || '').trim(),
-    source:'deterministic_chart_coach',
+    source:chartCoachModelIsUsable(chartCoach) && !chartCoachFreshness.fresh
+      ? `deterministic_chart_coach:${chartCoachFreshness.staleReason}`
+      : 'deterministic_chart_coach',
     chartCoach:deterministicCoach,
     fallback:deterministicCoach
   };
@@ -36325,7 +36643,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     canonicalValues:{},
     candleStructureAnalysis:{},
     tradePlanCommentary:{},
-    chartCoach:{primaryStory:null, sections:[], summaryText:'', source:'', renderVersion:'v1', explanationFacts:[]},
+    chartCoach:{primaryStory:null, sections:[], summaryText:'', source:'', renderVersion:CHART_GURU_RENDER_VERSION, explanationFacts:[]},
     confidenceWarnings:[],
     final_verdict:''
   };
@@ -36380,7 +36698,7 @@ function normalizeAnalysisResult(rawAnalysis, existingTickerState){
     : {};
   const chartCoach = parsed.chartCoach && typeof parsed.chartCoach === 'object'
     ? cloneData(parsed.chartCoach, {})
-    : {primaryStory:null, sections:[], summaryText:'', source:'', renderVersion:'v1', explanationFacts:[]};
+    : {primaryStory:null, sections:[], summaryText:'', source:'', renderVersion:CHART_GURU_RENDER_VERSION, explanationFacts:[]};
   const deterministicEventPacket = parsed.deterministicEventPacket && typeof parsed.deterministicEventPacket === 'object'
     ? cloneData(parsed.deterministicEventPacket, {})
     : null;

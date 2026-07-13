@@ -169,6 +169,8 @@ function buildStage15SelectorSandbox(){
     extractFunction('chartCoachRecentColorRun'),
     extractFunction('chartCoachLargeBodyRun'),
     extractFunction('chartGuruBuyerResponsePresent'),
+    extractFunction('chartGuruControlledPullbackPresent'),
+    extractFunction('chartGuruVolumeParticipationLabel'),
     extractFunction('chartGuruRecentSupportType'),
     extractFunction('chartGuruRecentSupportResponsePresent'),
     extractFunction('chartCoachPrimaryStoryCandidates')
@@ -791,7 +793,7 @@ function verifyStage15PostSupportReboundSelection(){
     candleEvidenceReclaimedPriorDayHigh:true,
     candleEvidenceHigherLowHold:true
   });
-  assert.strictEqual(postSupportRebound && postSupportRebound.key, 'early_rebound_from_20ma', 'A recent buyer response after support interaction must outrank extended_after_run.');
+  assert.strictEqual(postSupportRebound && postSupportRebound.key, 'off_level_wait_for_clearer_support', 'A rebound that has already moved off support must not fall back to the generic first-bounce story.');
 
   const postSupportStabilising = selectPrimaryStory({
     ...baseTrendContext,
@@ -806,7 +808,7 @@ function verifyStage15PostSupportReboundSelection(){
     candleEvidenceUpClosesAfterLow:1,
     candleEvidenceHigherLowHold:true
   });
-  assert.strictEqual(postSupportStabilising && postSupportStabilising.key, 'early_rebound_from_20ma', 'A stabilising move higher after support interaction must classify as the rebound story.');
+  assert.strictEqual(postSupportStabilising && postSupportStabilising.key, 'off_level_wait_for_clearer_support', 'A stabilising move that has already left support should stay off-level rather than reuse the first-bounce story.');
 
   const reclaimAfterSupportResponse = selectPrimaryStory({
     ...baseTrendContext,
@@ -821,7 +823,7 @@ function verifyStage15PostSupportReboundSelection(){
     candleEvidenceReclaimedPriorDayHigh:true,
     candleEvidenceReclaimRangeMeaningful:true
   });
-  assert.strictEqual(reclaimAfterSupportResponse && reclaimAfterSupportResponse.key, 'early_rebound_from_20ma', 'A reclaim after support response must classify as the rebound story.');
+  assert.strictEqual(reclaimAfterSupportResponse && reclaimAfterSupportResponse.key, 'off_level_wait_for_clearer_support', 'A reclaim after support response must not silently collapse into the generic first-bounce story once price is off-level.');
 
   const failedBounce = selectPrimaryStory({
     ...baseTrendContext,

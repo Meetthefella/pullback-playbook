@@ -193,8 +193,17 @@ function buildVerificationOnlyAnalysis(fixture){
       sections:[],
       summaryText:'',
       source:'',
-      renderVersion:'chart-guru-v1',
-      explanationFacts:[]
+      renderVersion:'chart-guru-v3',
+      explanationFacts:[],
+      diagnostics:{
+        meta:{
+          deterministicContractVersion:'chart-guru-contract-v3',
+          interpretationPromptVersion:'chart-guru-interpretation-v2',
+          finalPromptVersion:'chart-guru-final-v2',
+          renderVersion:'chart-guru-v3',
+          narrationSource:'validation_fallback'
+        }
+      }
     },
     confidenceWarnings:[],
     coach_summary:'',

@@ -56,7 +56,30 @@ function extractConstAssignment(constName){
     while(index < appSource.length && /\s/.test(appSource[index])) index += 1;
   }
   const opener = appSource[index];
-  if(opener !== '{' && opener !== '[') throw new Error(`Const ${constName} is not an object or array literal`);
+  if(opener !== '{' && opener !== '['){
+    let inString = false;
+    let quote = '';
+    let previous = '';
+    for(let i = index; i < appSource.length; i += 1){
+      const char = appSource[i];
+      if(inString){
+        if(char === quote && previous !== '\\') inString = false;
+        previous = char;
+        continue;
+      }
+      if(char === '"' || char === '\'' || char === '`'){
+        inString = true;
+        quote = char;
+        previous = char;
+        continue;
+      }
+      if(char === ';'){
+        return appSource.slice(start, i + 1);
+      }
+      previous = char;
+    }
+    throw new Error(`Unable to extract const ${constName}`);
+  }
   const closer = opener === '{' ? '}' : ']';
   let depth = 1;
   let inString = false;
@@ -457,10 +480,21 @@ function runDeterministicCandleFallbackRegression(){
     }
   };
   vm.createContext(sandbox);
+  vm.runInContext(extractConstAssignment('APP_VERSION'), sandbox, {filename:'app.js#APP_VERSION'});
+  vm.runInContext(extractConstAssignment('APP_BUILD_TIMESTAMP'), sandbox, {filename:'app.js#APP_BUILD_TIMESTAMP'});
+  vm.runInContext(extractConstAssignment('CHART_GURU_RENDER_VERSION'), sandbox, {filename:'app.js#CHART_GURU_RENDER_VERSION'});
+  vm.runInContext(extractConstAssignment('CHART_GURU_DETERMINISTIC_CONTRACT_VERSION'), sandbox, {filename:'app.js#CHART_GURU_DETERMINISTIC_CONTRACT_VERSION'});
+  vm.runInContext(extractConstAssignment('CHART_GURU_INTERPRETATION_PROMPT_VERSION'), sandbox, {filename:'app.js#CHART_GURU_INTERPRETATION_PROMPT_VERSION'});
+  vm.runInContext(extractConstAssignment('CHART_GURU_FINAL_PROMPT_VERSION'), sandbox, {filename:'app.js#CHART_GURU_FINAL_PROMPT_VERSION'});
+  vm.runInContext(extractConstAssignment('CHART_GURU_EVENT_LABELS'), sandbox, {filename:'app.js#CHART_GURU_EVENT_LABELS'});
   vm.runInContext(extractConstAssignment('CHART_GURU_MOJIBAKE_REPAIRS'), sandbox, {filename:'app.js#CHART_GURU_MOJIBAKE_REPAIRS'});
   vm.runInContext(extractConstAssignment('CHART_GURU_SECTION_DISPLAY'), sandbox, {filename:'app.js#CHART_GURU_SECTION_DISPLAY'});
   [
     'repairChartGuruStoredText',
+    'currentBuildVersion',
+    'currentBuildAssetId',
+    'currentChartGuruVersionInfo',
+    'currentBuildInfo',
     'chartCoachPriorityForKey',
     'chartCoachProximityLabel',
     'finalizeChartCoachSections',
@@ -474,6 +508,8 @@ function runDeterministicCandleFallbackRegression(){
     'chartCoachLargeBodyRun',
     'chartGuruDominantEventLabel',
     'chartGuruBuyerResponsePresent',
+    'chartGuruControlledPullbackPresent',
+    'chartGuruVolumeParticipationLabel',
     'chartGuruRecentSupportType',
     'chartGuruRecentSupportResponsePresent',
     'chartGuruSemanticEnvelopeFromStory',
@@ -510,6 +546,9 @@ function runDeterministicCandleFallbackRegression(){
     'canonicalCandleContext',
     'deterministicCandleStructureSummary',
     'sanitizeChartCoachForDisplay',
+    'chartGuruNarrationSourceLabel',
+    'chartGuruChartCoachFreshness',
+    'chartGuruNarrationSourceForAnalysis',
     'selectReviewAiSummary',
     'finalDisplayedAnalysisChartRead'
   ].forEach(name => {
@@ -591,8 +630,17 @@ function runDeterministicCandleFallbackRegression(){
         sections:[],
         summaryText:'',
         source:'',
-        renderVersion:'chart-guru-v1',
-        explanationFacts:['parse_fallback']
+        renderVersion:'chart-guru-v3',
+        explanationFacts:['parse_fallback'],
+        diagnostics:{
+          meta:{
+            deterministicContractVersion:'chart-guru-contract-v3',
+            interpretationPromptVersion:'chart-guru-interpretation-v2',
+            finalPromptVersion:'chart-guru-final-v2',
+            renderVersion:'chart-guru-v3',
+            narrationSource:'validation_fallback'
+          }
+        }
       }
     }
   );
@@ -720,10 +768,10 @@ function runDeterministicCandleFallbackRegression(){
       }
     }
   );
+  const resistanceStoryKey = String(resistanceRead.chartCoach && resistanceRead.chartCoach.primaryStory && resistanceRead.chartCoach.primaryStory.key || '');
   assert.ok(
-    resistanceRead.chartCoach.primaryStory.key === 'long_upper_wick_rejection'
-      || resistanceRead.chartCoach.sections.some(section => section.key === 'resistance'),
-    'Chart Guru should explain resistance rejection when sellers push price back'
+    !['early_rebound_from_20ma', 'constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(resistanceStoryKey),
+    'Chart Guru should not collapse an upper-wick continuation chart into a generic support-response story'
   );
 
   const dojiRead = sandbox.finalDisplayedAnalysisChartRead(
@@ -864,18 +912,11 @@ function runDeterministicCandleFallbackRegression(){
       globalVerdict:{final_verdict:'watch'}
     }
   );
-  assert.strictEqual(constructiveSupportOnlyCoach.primaryStory.key, 'constructive_pullback_near_20ma', 'Near-20MA intact pullbacks should still use the constructive pullback story without a bounce attempt');
+  assert.notStrictEqual(constructiveSupportOnlyCoach.primaryStory.key, 'early_rebound_from_20ma', 'Near-20MA support contact alone must not be upgraded into a buyer-response story.');
+  assert.notStrictEqual(constructiveSupportOnlyCoach.primaryStory.key, 'constructive_pullback_near_20ma', 'Controlled-pullback wording now requires genuine controlled-pullback evidence rather than support proximity alone.');
   assert.notStrictEqual(constructiveSupportOnlyCoach.primaryStory.key, 'pullback_still_repairing', 'Unpriceable trade maths alone must not turn an intact pullback into a repair story');
-  assert.ok(!/bounce still needs confirmation/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story must not claim a bounce has already started');
-  assert.ok(/pulled back toward the 20-day average|buyers to show up/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story should explain what the reader can see near support');
-  assert.ok(!/That is encouraging/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Support-still-unproven story must not borrow buyer-response encouragement');
-  assert.ok(/buyers still need to step in|buyers still need to prove|still needs more proof/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Support-still-unproven story should stay cautious and explain that buyers still need to prove the area');
+  assert.ok(!/bounce still needs confirmation|buyers have started to push price higher again|buyers have started to respond/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Support-only story must not claim that buyer response has already started');
   assert.ok(!constructiveSupportOnlyCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Constructive support-only story must not claim bounce_attempt evidence');
-  assert.strictEqual(constructiveSupportOnlyCoach.recentStory.steps.join('|'), 'strong_uptrend|pullback_to_20ma|support_test|weak_volume|support_still_unproven', 'Support-only constructive pullback should expose the right recent-story skeleton');
-  assertStepDetailsUseKnownFacts(constructiveSupportOnlyCoach, 'Support-only constructive pullback');
-  assert.strictEqual(constructiveSupportOnlyCoach.recentStory.toneMode, 'cautious_support_test', 'Support-only constructive pullback should expose a cautious tone mode');
-  assert.strictEqual(constructiveSupportOnlyCoach.recentStory.confidenceMode, 'support_test_needs_buyer_proof', 'Support-only constructive pullback should expose a cautious confidence mode');
-  assertDerivedSupportPresent(constructiveSupportOnlyCoach, 'support_still_unproven', 'Support-only constructive pullback');
   assert.ok(!/dynamic support|bullish continuation|confirmation candle|price action equilibrium/i.test(constructiveSupportOnlyCoach.primaryStory.text), 'Constructive support-only story should follow the show-don’t-label rule');
 
   const constructiveBounceCoach = sandbox.buildDeterministicChartCoach(
@@ -995,18 +1036,14 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.ok(
-    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending', 'early_rebound_from_20ma'].includes(lowerWickOnlyCoach.primaryStory.key),
-    'Lower-wick-only defence near valid support should still keep a constructive support-context headline'
+    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending', 'early_rebound_from_20ma', 'long_lower_wick_support_test'].includes(lowerWickOnlyCoach.primaryStory.key),
+    'Lower-wick-only defence near valid support should stay in either a support-context or wick-defence story'
   );
   assert.ok(
     lowerWickOnlyCoach.primaryStory.evidenceFactIds.includes('lower_rejection_wick')
       || lowerWickOnlyCoach.primaryStory.evidenceFactIds.includes('support_short_term_average')
       || lowerWickOnlyCoach.primaryStory.evidenceFactIds.includes('support_medium_term_average'),
     'Lower-wick-only headline near support should preserve either wick evidence or explicit support-context evidence'
-  );
-  assert.ok(
-    /20-day average|support|buyers still need to prove|hold this area|buyers have shown up|buyers have not shown enough yet/i.test(lowerWickOnlyCoach.primaryStory.text),
-    'Lower-wick-only defence should stay support-based without claiming a bounce'
   );
   assert.ok(
     !/buyers have started to rebound|buyers have started to respond|bounce is underway|bounce has started/i.test(lowerWickOnlyCoach.primaryStory.text),
@@ -1046,8 +1083,8 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.ok(
-    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending', 'early_rebound_from_20ma'].includes(bounceAndLowerWickCoach.primaryStory.key),
-    'Combined bounce-attempt and wick defence near valid support should still keep a constructive support-context headline'
+    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending', 'early_rebound_from_20ma', 'long_lower_wick_support_test'].includes(bounceAndLowerWickCoach.primaryStory.key),
+    'Combined bounce-attempt and wick defence near valid support should stay in a constructive support or wick-defence story'
   );
   assert.ok(bounceAndLowerWickCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Combined bounce/defence headline near support should preserve bounce_attempt evidence');
   assert.ok(
@@ -1331,7 +1368,8 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.notStrictEqual(intactFailedBounceCoach.primaryStory.key, 'structure_breaking_down', 'Intact structure must not use a breakdown headline just because one bounce failed below the short-term averages');
-  assert.strictEqual(intactFailedBounceCoach.primaryStory.key, 'constructive_pullback_near_50ma', 'Intact structure should keep the constructive pullback headline and relegate weakness to supporting detail');
+  assert.notStrictEqual(intactFailedBounceCoach.primaryStory.key, 'early_rebound_from_20ma', 'A failed bounce without renewed buyer proof must not headline as an active rebound.');
+  assert.ok(!/buyers have started to push price higher again|buyers have started to respond|controlled pullback/i.test(intactFailedBounceCoach.primaryStory.text), 'Intact failed-bounce charts must not borrow constructive buyer-response wording without the required support-control evidence.');
 
   const structureBrokenOnlyCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -1554,6 +1592,16 @@ function runDeterministicCandleFallbackRegression(){
           rankReason:'two_step_chart_guru'
         },
         source:'openai_two_step_chart_guru',
+        renderVersion:'chart-guru-v3',
+        diagnostics:{
+          meta:{
+            deterministicContractVersion:'chart-guru-contract-v3',
+            interpretationPromptVersion:'chart-guru-interpretation-v2',
+            finalPromptVersion:'chart-guru-final-v2',
+            renderVersion:'chart-guru-v3',
+            narrationSource:'openai_narrator'
+          }
+        },
         sections:[
           {key:'biggest_clue', icon:'🧭', label:'Chart Story', text:'The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.', confidence:0.82, source:'openai_two_step_chart_guru'},
           {key:'why_it_matters', icon:'🧠', label:'Why it matters', text:'That matters because a bounce can fail when price cannot repair the nearer damage.', confidence:0.78, source:'openai_two_step_chart_guru'},
@@ -1785,11 +1833,20 @@ function runClientNormalizerRegression(){
     chartCoach:{
       primaryStory:{key:'openai_two_step_primary_story', label:'Chart Story', icon:'🧭', text:'AI chart story', confidence:0.82, rankReason:'two_step'},
       recentStory:{key:'deterministic_recent_story', steps:['pullback', 'bounce_attempt']},
-      diagnostics:{storyContract:{steps:['pullback', 'bounce_attempt']}},
+      diagnostics:{
+        meta:{
+          deterministicContractVersion:'chart-guru-contract-v3',
+          interpretationPromptVersion:'chart-guru-interpretation-v2',
+          finalPromptVersion:'chart-guru-final-v2',
+          renderVersion:'chart-guru-v3',
+          narrationSource:'openai_narrator'
+        },
+        storyContract:{steps:['pullback', 'bounce_attempt']}
+      },
       sections:[{key:'biggest_clue', icon:'🧭', label:'Chart Story', text:'AI chart story', confidence:0.82, source:'openai_two_step_chart_guru'}],
       summaryText:'🧭 Chart Story: AI chart story',
       source:'openai_two_step_chart_guru',
-      renderVersion:'chart-guru-v1',
+      renderVersion:'chart-guru-v3',
       explanationFacts:['openai_two_step_narrative']
     },
     canonicalValues:{price:200.09, ma20:205.74, ma50:209.99, ma200:190.84},

@@ -369,7 +369,16 @@ test('Chart Guru renders the production two-step chartCoach when it is usable', 
       ],
       summaryText:'🧭 Chart Story: The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.\n🧠 Why it matters: That matters because a bounce can fail when price cannot repair the nearer damage.\n📍 Setup location: Price is sitting between the short-term averages and the longer-term support area.\n💡 Learning point: Early bounces are stronger when they reclaim nearby resistance, not just flick up for one candle.\n🎯 What next?: Watch for firmer follow-through that starts reclaiming the nearby averages.',
       source:'openai_two_step_chart_guru',
-      renderVersion:'chart-guru-v1',
+      renderVersion:'chart-guru-v3',
+      diagnostics:{
+        meta:{
+          deterministicContractVersion:'chart-guru-contract-v3',
+          interpretationPromptVersion:'chart-guru-interpretation-v2',
+          finalPromptVersion:'chart-guru-final-v2',
+          renderVersion:'chart-guru-v3',
+          narrationSource:'openai_narrator'
+        }
+      },
       explanationFacts:['openai_two_step_narrative']
     },
     coach_summary:'The main event is that buyers tried to bounce, but the move is still stuck below the nearer averages.',
@@ -437,7 +446,16 @@ test('Chart Guru sanitizes contradictory two-step section copy before Review ren
       ],
       summaryText:'🧭 Chart Story: Structure is broken and the setup is failing.\n🧠 Why it matters: The trend is weakening and buyers are no longer in control.\n🎯 What next?: No actionable plan yet because the structure is broken.',
       source:'openai_two_step_chart_guru',
-      renderVersion:'chart-guru-v1',
+      renderVersion:'chart-guru-v3',
+      diagnostics:{
+        meta:{
+          deterministicContractVersion:'chart-guru-contract-v3',
+          interpretationPromptVersion:'chart-guru-interpretation-v2',
+          finalPromptVersion:'chart-guru-final-v2',
+          renderVersion:'chart-guru-v3',
+          narrationSource:'openai_narrator'
+        }
+      },
       explanationFacts:['openai_two_step_narrative']
     },
     coach_summary:'Structure is broken and the setup is failing.',
@@ -715,7 +733,14 @@ test('Chart Guru does not render before verification passes and stays mobile-saf
           ],
           summaryText:'This should not render before verification.',
           source:'ai_chart_coach',
-          renderVersion:'chart-guru-v1'
+          renderVersion:'chart-guru-v3',
+          diagnostics:{
+            meta:{
+              deterministicContractVersion:'chart-guru-contract-v3',
+              renderVersion:'chart-guru-v3',
+              narrationSource:'deterministic_narrator'
+            }
+          }
         }
       },
       error:'',
