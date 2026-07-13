@@ -1366,6 +1366,7 @@ if(!window.ReviewPresentation) throw new Error('ReviewPresentation failed to loa
 if(!window.AppPersistDomain) throw new Error('AppPersistDomain failed to load.');
 if(!window.DiarySchema) throw new Error('DiarySchema failed to load.');
 if(!window.PaperTradeEligibility) throw new Error('PaperTradeEligibility failed to load.');
+if(!window.WorkspaceTabs) throw new Error('WorkspaceTabs failed to load.');
 if(!window.AppShell) throw new Error('AppShell failed to load.');
 if(!window.AnalysisService) throw new Error('AnalysisService failed to load.');
 if(!window.TrackedStateService) throw new Error('TrackedStateService failed to load.');
@@ -1545,6 +1546,10 @@ const {
 const {
   createPaperTradeEligibility
 } = window.PaperTradeEligibility;
+const {
+  normalizeWorkspaceTab,
+  isWorkspaceTab
+} = window.WorkspaceTabs;
 const {
   createAppShell
 } = window.AppShell;
@@ -1792,9 +1797,7 @@ uiState.riskRecalcStatusRuntime = uiState.riskRecalcStatusRuntime && typeof uiSt
     tickerCount:0,
     activeToken:0
   };
-uiState.activeWorkspaceTab = ['scan', 'review', 'track', 'diary'].includes(String(uiState.activeWorkspaceTab || '').toLowerCase())
-  ? String(uiState.activeWorkspaceTab).toLowerCase()
-  : 'scan';
+uiState.activeWorkspaceTab = normalizeWorkspaceTab(uiState.activeWorkspaceTab);
 if(typeof window !== 'undefined'){
   window.DEBUG_RENDER = window.DEBUG_RENDER === true;
   window.DEBUG_ANALYSIS = window.DEBUG_ANALYSIS === true;
@@ -1822,30 +1825,27 @@ if(typeof window !== 'undefined'){
 }
 const appShell = createAppShell({
   uiState,
-  onTabChange:handleWorkspaceTabChange
+  onTabChange:handleWorkspaceTabChange,
+  anchorTabMap:{
+    '#resultsSection':'scan',
+    '#reviewSection':'review',
+    '#watchlistSection':'track',
+    '#diarySection':'diary',
+    '#tradeDiarySection':'diary'
+  }
 });
-const workspaceAnchorTabMap = {
-  '#resultsSection':'scan',
-  '#reviewSection':'review',
-  '#watchlistSection':'track',
-  '#tradeDiarySection':'diary'
-};
-let workspaceAnchorBridgeBound = false;
 
 function setActiveWorkspaceTab(tab, options = {}){
   const previousTab = activeWorkspaceTab();
   if(appShell && appShell.isEnabled && appShell.isEnabled()){
     const nextWorkspace = appShell.setActiveWorkspace(tab, options);
-    const normalizedNextWorkspace = ['scan', 'review', 'track', 'diary'].includes(String(nextWorkspace || '').trim().toLowerCase())
-      ? String(nextWorkspace || '').trim().toLowerCase()
-      : 'scan';
+    const normalizedNextWorkspace = normalizeWorkspaceTab(nextWorkspace);
     if(previousTab !== normalizedNextWorkspace && typeof persistReviewSessionState === 'function'){
       persistReviewSessionState();
     }
     return nextWorkspace;
   }
-  const nextTab = String(tab || '').trim().toLowerCase();
-  uiState.activeWorkspaceTab = ['scan', 'review', 'track', 'diary'].includes(nextTab) ? nextTab : 'scan';
+  uiState.activeWorkspaceTab = normalizeWorkspaceTab(tab);
   if(previousTab !== uiState.activeWorkspaceTab && typeof persistReviewSessionState === 'function'){
     persistReviewSessionState();
   }
@@ -1856,23 +1856,16 @@ function activeWorkspaceTab(){
   if(appShell && appShell.isEnabled && appShell.isEnabled() && typeof appShell.getActiveWorkspace === 'function'){
     return appShell.getActiveWorkspace();
   }
-  return ['scan', 'review', 'track', 'diary'].includes(String(uiState.activeWorkspaceTab || '').toLowerCase())
-    ? String(uiState.activeWorkspaceTab).toLowerCase()
-    : 'scan';
+  return normalizeWorkspaceTab(uiState.activeWorkspaceTab);
 }
 
 function ensureOnboardingDisplayBridge(){
   if(typeof window === 'undefined') return null;
-  const allowedTabs = new Set(['scan', 'review', 'track', 'diary']);
   const demoIds = {
     scan:'onboardingTourDemoScanCard',
     review:'onboardingTourDemoReviewCard',
     track:'onboardingTourDemoTrackCard'
   };
-  function normalizeWorkspaceTab(value){
-    const next = String(value || '').trim().toLowerCase();
-    return allowedTabs.has(next) ? next : 'scan';
-  }
   function workspaceTabButtons(){
     return Array.from(document.querySelectorAll('[data-workspace-tab]'));
   }
@@ -1881,10 +1874,10 @@ function ensureOnboardingDisplayBridge(){
   }
   function currentVisibleWorkspaceTabDisplayOnly(){
     const fromBody = document.body ? String(document.body.getAttribute('data-visible-workspace') || document.body.getAttribute('data-active-workspace') || '').trim().toLowerCase() : '';
-    if(allowedTabs.has(fromBody)) return fromBody;
+    if(isWorkspaceTab(fromBody)) return fromBody;
     const selectedButton = workspaceTabButtons().find(button => String(button.getAttribute('aria-selected') || '').toLowerCase() === 'true');
     const selectedTab = selectedButton ? normalizeWorkspaceTab(selectedButton.getAttribute('data-workspace-tab')) : '';
-    if(allowedTabs.has(selectedTab)) return selectedTab;
+    if(isWorkspaceTab(selectedTab)) return selectedTab;
     const visibleCard = workspaceCards().find(card => card.hidden !== true && String(card.getAttribute('aria-hidden') || '').toLowerCase() !== 'true');
     return visibleCard ? normalizeWorkspaceTab(visibleCard.getAttribute('data-workspace-card')) : 'scan';
   }
@@ -2090,22 +2083,6 @@ function ensureOnboardingDisplayBridge(){
   return bridge;
 }
 ensureOnboardingDisplayBridge();
-
-function bindWorkspaceAnchorBridge(){
-  if(workspaceAnchorBridgeBound || typeof document === 'undefined') return;
-  workspaceAnchorBridgeBound = true;
-  document.addEventListener('click', event => {
-    const anchor = event.target && typeof event.target.closest === 'function'
-      ? event.target.closest('a[href^="#"]')
-      : null;
-    if(!anchor) return;
-    const href = String(anchor.getAttribute('href') || '').trim();
-    const tab = workspaceAnchorTabMap[href];
-    if(!tab) return;
-    event.preventDefault();
-    setActiveWorkspaceTab(tab);
-  });
-}
 const marketDataCache = new Map();
 const inFlightBatchRequests = new Map();
 const fxRateCache = new Map();
@@ -11389,9 +11366,7 @@ function renderStats(){
 }
 
 function renderWorkspaceSurface(tab, options = {}){
-  const targetTab = ['scan', 'review', 'track', 'diary'].includes(String(tab || '').toLowerCase())
-    ? String(tab).toLowerCase()
-    : 'scan';
+  const targetTab = normalizeWorkspaceTab(tab);
   if(targetTab === 'scan'){
     const reason = String(options.reason || 'workspace_surface');
     const records = rankedTickerRecords();
@@ -11641,7 +11616,7 @@ function consumeTrackScoreTransportForRender(){
 
 function handleWorkspaceTabChange(tab){
   if(!startupCoordinator.localStateLoaded) return;
-  const nextTab = String(tab || '').toLowerCase();
+  const nextTab = normalizeWorkspaceTab(tab);
   if(nextTab === 'track'){
     const trackScoreTransportByTicker = consumeTrackScoreTransportForRender();
     const lifecycleRefresh = maybeRunTrackFocusLifecycleRefresh({source:'track_focus'});
@@ -11957,7 +11932,6 @@ function scheduleDeferredStartupHydration(){
 function startApplication(){
   perfMark('pp_shell_render_start');
   appShell.init();
-  bindWorkspaceAnchorBridge();
   bindReviewAdvancedDebugGesture();
   perfMark('pp_shell_render_end');
   perfMeasure('pp_shell_render', 'pp_shell_render_start', 'pp_shell_render_end');
@@ -40668,7 +40642,7 @@ async function refreshTrackOnly(options = {}){
     || source.startsWith('risk_settings_change')
     || source.includes('_risk_recalc');
   const isPullGestureRefresh = source === 'track_pull_refresh';
-  const requestedWorkspace = activeWorkspaceTab?.() || uiState.activeWorkspaceTab || 'scan';
+  const requestedWorkspace = normalizeWorkspaceTab(activeWorkspaceTab?.() || uiState.activeWorkspaceTab || 'scan');
   const wasTrackActive = requestedWorkspace === 'track';
   if(isPullGestureRefresh && startupCoordinator.trackedStateHydrationResolved !== true){
     return {ok:false, source, skipped:true, reason:'hydration_incomplete'};

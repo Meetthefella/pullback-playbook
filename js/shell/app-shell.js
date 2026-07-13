@@ -2,7 +2,17 @@
   function createAppShell(options = {}){
     const uiState = options.uiState && typeof options.uiState === 'object' ? options.uiState : {};
     const onTabChange = typeof options.onTabChange === 'function' ? options.onTabChange : null;
-    const allowedTabs = new Set(['scan','review','track','diary']);
+    const anchorTabMap = options.anchorTabMap && typeof options.anchorTabMap === 'object'
+      ? options.anchorTabMap
+      : {};
+    const workspaceTabsBridge = global.WorkspaceTabs && typeof global.WorkspaceTabs === 'object'
+      ? global.WorkspaceTabs
+      : null;
+    const allowedTabs = new Set(
+      workspaceTabsBridge && Array.isArray(workspaceTabsBridge.WORKSPACE_TABS)
+        ? workspaceTabsBridge.WORKSPACE_TABS
+        : ['scan','review','track','diary']
+    );
     const tabButtons = Array.from(document.querySelectorAll('[data-workspace-tab]'));
     const workspaceCards = Array.from(document.querySelectorAll('[data-workspace-card]'));
     const trackTopButton = document.getElementById('trackScrollTopBtn');
@@ -20,10 +30,16 @@
     let pendingSuppressedTrackScrollSave = null;
     let lastTrackScrollTraceAt = 0;
     let lastSuppressedTrackScrollTraceAt = 0;
+    let anchorRoutingBound = false;
 
-    function normalizeTab(value){
+    function normalizeTab(value, fallback = 'scan'){
+      if(workspaceTabsBridge && typeof workspaceTabsBridge.normalizeWorkspaceTab === 'function'){
+        return workspaceTabsBridge.normalizeWorkspaceTab(value, fallback);
+      }
       const tab = String(value || '').trim().toLowerCase();
-      return allowedTabs.has(tab) ? tab : 'scan';
+      if(allowedTabs.has(tab)) return tab;
+      const normalizedFallback = String(fallback || '').trim().toLowerCase();
+      return allowedTabs.has(normalizedFallback) ? normalizedFallback : 'scan';
     }
 
     function workspaceForElement(element){
@@ -1086,9 +1102,26 @@
       return normalizeTab(uiState.activeWorkspaceTab || 'scan');
     }
 
+    function bindHashAnchorRouting(){
+      if(anchorRoutingBound || typeof document === 'undefined') return;
+      anchorRoutingBound = true;
+      document.addEventListener('click', event => {
+        const anchor = event.target && typeof event.target.closest === 'function'
+          ? event.target.closest('a[href^="#"]')
+          : null;
+        if(!anchor) return;
+        const href = String(anchor.getAttribute('href') || '').trim();
+        const tab = normalizeTab(anchorTabMap[href] || '', '');
+        if(!tab) return;
+        event.preventDefault();
+        switchWorkspace(tab);
+      });
+    }
+
     function init(){
       if(!enabled) return;
       installTrackRestoreScrollDriverGuard();
+      bindHashAnchorRouting();
       if(typeof history !== 'undefined' && 'scrollRestoration' in history){
         try{
           history.scrollRestoration = 'manual';
@@ -1194,6 +1227,7 @@
 
     return {
       init,
+      bindHashAnchorRouting,
       setActiveWorkspace,
       getActiveWorkspace,
       isEnabled:() => enabled

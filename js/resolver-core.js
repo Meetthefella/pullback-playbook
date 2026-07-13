@@ -2134,6 +2134,7 @@
       );
     const nonTrackedCanonicalAlignmentApplied = !!(
       canonicalSoftReadinessOverrideAllowed
+      && preserveScanAuthorityCanonicalPath !== true
       && nonTrackedCanonicalDiagnostics
       && nonTrackedCanonicalDiagnostics.softReadinessOnlyDemotion === true
       && nonTrackedCanonicalDiagnostics.structuredBlockersPresent !== true
@@ -3387,6 +3388,7 @@
             && result.final_verdict === 'watch'
             && result.canonical_final_verdict === 'watch'
             && result.canonical_visual_bucket === 'diminishing'
+            && result.canonical_soft_readiness_alignment_applied === false
             && result.contractDiagnostics
             && result.contractDiagnostics.authorityContract === 'pre_lifecycle'
             && result.contractDiagnostics.blockerSource === 'setup_location'
@@ -3474,6 +3476,7 @@
             && result.final_verdict === 'watch'
             && result.canonical_final_verdict === 'watch'
             && result.canonical_visual_bucket === 'diminishing'
+            && result.canonical_soft_readiness_alignment_applied === false
             && result.contractDiagnostics
             && result.contractDiagnostics.authorityContract === 'pre_lifecycle'
             && result.contractDiagnostics.blockerSource === 'setup_location'
