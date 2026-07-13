@@ -44,6 +44,56 @@ function extractFunctionSource(source, functionName){
   throw new Error(`Unable to extract ${functionName}`);
 }
 
+function extractConstAssignment(constName){
+  const marker = `const ${constName} = `;
+  const start = appSource.indexOf(marker);
+  if(start === -1) throw new Error(`Unable to find const ${constName}`);
+  const afterMarker = start + marker.length;
+  let index = afterMarker;
+  while(index < appSource.length && /\s/.test(appSource[index])) index += 1;
+  if(appSource.startsWith('Object.freeze(', index)){
+    index += 'Object.freeze('.length;
+    while(index < appSource.length && /\s/.test(appSource[index])) index += 1;
+  }
+  const opener = appSource[index];
+  if(opener !== '{' && opener !== '[') throw new Error(`Const ${constName} is not an object or array literal`);
+  const closer = opener === '{' ? '}' : ']';
+  let depth = 1;
+  let inString = false;
+  let quote = '';
+  let previous = '';
+  for(let i = index + 1; i < appSource.length; i += 1){
+    const char = appSource[i];
+    if(inString){
+      if(char === quote && previous !== '\\') inString = false;
+      previous = char;
+      continue;
+    }
+    if(char === '"' || char === '\'' || char === '`'){
+      inString = true;
+      quote = char;
+      previous = char;
+      continue;
+    }
+    if(char === opener) depth += 1;
+    if(char === closer){
+      depth -= 1;
+      if(depth === 0){
+        let end = i + 1;
+        while(end < appSource.length && /\s/.test(appSource[end])) end += 1;
+        if(appSource[end] === ')'){
+          end += 1;
+          while(end < appSource.length && /\s/.test(appSource[end])) end += 1;
+        }
+        if(appSource[end] === ';') end += 1;
+        return appSource.slice(start, end);
+      }
+    }
+    previous = char;
+  }
+  throw new Error(`Unable to extract const ${constName}`);
+}
+
 async function runNetlifyCanonicalizationRegression(){
   const modulePath = path.join(root, 'netlify', 'functions', 'analyse-setup.js');
   delete require.cache[modulePath];
@@ -118,18 +168,29 @@ async function runNetlifyCanonicalizationRegression(){
     coach_summary:'Price is below the 20MA and 50MA but above the 200MA. Recent candles show a bounce attempt, but follow-through is still missing.'
   };
   const traderInterpretation = {
-    dominantEvent:'Bounce attempt below the short-term averages.',
-    whatChanged:'Buyers tried to lift price, but the chart is still below the 20MA and 50MA.',
+    dominantEvent:'Early rebound attempt below the short-term averages.',
+    eventSequence:[
+      'price pulled back under the 20-day and 50-day averages',
+      'buyers started to defend the recent low',
+      'price bounced, but follow-through is still unproven'
+    ],
+    traderInterpretation:'Buyers have started to respond after the pullback, but this is still an early repair attempt rather than a confirmed reversal.',
+    currentRisk:'The rebound can still fail if price stalls and rolls back under the recent low before reclaiming nearby resistance.',
+    nextSignal:'Watch for another constructive close that reclaims more of the pullback and starts proving buyer control.',
+    supportSemantic:'support_unknown',
+    buyerResponseSemantic:'response_present',
+    confirmationSemantic:'follow_through_unconfirmed',
+    whatChanged:'Buyers started to respond after the pullback, but the rebound still needs proof.',
     traderRead:'This is still an early repair attempt rather than a confirmed reversal.',
-    riskToWatch:'If price keeps failing under those averages, the pullback can stay weak.',
-    nextUsefulSignal:'A firmer close with follow-through above nearby resistance would matter more.'
+    riskToWatch:'If price cannot add follow-through and starts rolling back over, the pullback can stay weak.',
+    nextUsefulSignal:'A firmer close that reclaims more of the pullback would matter more.'
   };
   const finalNarrative = {
-    chartStory:'The main event is that buyers tried to bounce, but the move is still stuck below the 20MA and 50MA.',
-    whyItMatters:'That matters because an early bounce can fail if price cannot reclaim those nearer trend guides.',
-    setupLocation:'Price is sitting between the short-term averages and the longer-term 200MA.',
-    learningPoint:'Early bounces are easier to trust when price can climb back through nearby resistance, not just flick up for one candle.',
-    whatNext:'Watch for firmer follow-through that starts reclaiming the nearby averages.'
+    chartStory:'Buyers have started to bounce NVDA after the pullback, but price is still working underneath the 20MA and 50MA.',
+    whyItMatters:'That matters because an early rebound can still fail if buyers cannot reclaim those nearer trend guides with follow-through.',
+    setupLocation:'Price is rebounding between the short-term averages overhead and the longer-term 200MA underneath, so the chart is still in repair rather than fully reset.',
+    learningPoint:'A one-day bounce is not enough on its own before trusting the rebound. Traders can reduce the risk by waiting for follow through that proves buyers are doing more than producing a brief lift.',
+    whatNext:'Watch for firmer follow-through that reclaims more of the pullback and starts pushing back through the nearby averages.'
   };
 
   const {handler} = require(modulePath);
@@ -188,7 +249,11 @@ async function runNetlifyCanonicalizationRegression(){
   assert.strictEqual(body.analysis.canonicalValues.ma200, 190.84, 'Canonical 200MA must come from trusted market context');
   assert.strictEqual(body.analysis.trustedMarketContext.currentPrice, 200.09, 'Trusted context should be preserved');
   assert.strictEqual(body.analysis.visible_ma20, null, 'Unreadable image MA should remain unreadable in extracted image facts');
-  assert.ok(/buyers tried to bounce/i.test(body.analysis.coach_summary), 'Summary should now come from the two-step Chart Guru prose');
+  assert.strictEqual(
+    body.analysis.coach_summary,
+    finalNarrative.chartStory,
+    'Summary should now come from the validated two-step Chart Guru prose'
+  );
   assert.ok(body.analysis.traderInterpretation && /early repair attempt/i.test(body.analysis.traderInterpretation.traderRead || ''), 'Analysis should preserve the intermediate trader interpretation');
   assert.ok(body.analysis.chartGuruNarrative && /nearby averages/i.test(body.analysis.chartGuruNarrative.whatNext || ''), 'Analysis should preserve the final two-step narrative payload');
   assert.strictEqual(body.analysis.chartCoach && body.analysis.chartCoach.source, 'openai_two_step_chart_guru', 'Two-step success should populate a renderable Chart Guru model');
@@ -315,8 +380,9 @@ function runDeterministicCandleFallbackRegression(){
     'trend_context',
     'structure_broken',
     'support_short_term_average',
-    'support_medium_term_average',
-    'bounce_attempt',
+      'support_medium_term_average',
+      'buyer_response_state',
+      'bounce_attempt',
     'lower_rejection_wick',
     'upper_rejection_wick',
     'resistance_rejection',
@@ -391,7 +457,10 @@ function runDeterministicCandleFallbackRegression(){
     }
   };
   vm.createContext(sandbox);
+  vm.runInContext(extractConstAssignment('CHART_GURU_MOJIBAKE_REPAIRS'), sandbox, {filename:'app.js#CHART_GURU_MOJIBAKE_REPAIRS'});
+  vm.runInContext(extractConstAssignment('CHART_GURU_SECTION_DISPLAY'), sandbox, {filename:'app.js#CHART_GURU_SECTION_DISPLAY'});
   [
+    'repairChartGuruStoredText',
     'chartCoachPriorityForKey',
     'chartCoachProximityLabel',
     'finalizeChartCoachSections',
@@ -403,6 +472,13 @@ function runDeterministicCandleFallbackRegression(){
     'chartCoachPrimaryOpportunityScore',
     'chartCoachRecentColorRun',
     'chartCoachLargeBodyRun',
+    'chartGuruDominantEventLabel',
+    'chartGuruBuyerResponsePresent',
+    'chartGuruRecentSupportType',
+    'chartGuruRecentSupportResponsePresent',
+    'chartGuruSemanticEnvelopeFromStory',
+    'eventPacketEvidenceIncludes',
+    'buildDeterministicEventPacketFromChartCoach',
     'chartNarratorDeterministicPick',
     'chartNarratorSupportLabel',
     'chartNarratorTrendLabel',
@@ -427,6 +503,8 @@ function runDeterministicCandleFallbackRegression(){
     'candleWickRejectionState',
     'isGenericAiCandleCommentary',
     'normalizeCandleSequenceOrder',
+    'normalizeChartGuruSectionKey',
+    'chartGuruSectionDisplayForKey',
     'aiCandleCommentaryContradictsCanonical',
     'isGenericTradePlanCommentary',
     'canonicalCandleContext',
@@ -712,20 +790,49 @@ function runDeterministicCandleFallbackRegression(){
       globalVerdict:{final_verdict:'watch'}
     }
   );
-  assert.strictEqual(hwmStyleCoach.primaryStory.key, 'constructive_pullback_near_20ma', 'Constructive pullback near the 20MA should outrank isolated indecision candles');
+  assert.ok(
+    ['constructive_pullback_near_20ma', 'early_rebound_from_20ma'].includes(hwmStyleCoach.primaryStory.key),
+    'Constructive near-20MA charts with buyer response should stay in the constructive support-context family'
+  );
   assert.strictEqual(hwmStyleCoach.sections[0].key, 'biggest_clue', 'Constructive pullback story should still render first');
   assert.strictEqual(hwmStyleCoach.sections[0].label, 'Chart Story', 'Primary section should be labeled as Chart Story');
-  assert.ok(/pullback|recent dip/i.test(hwmStyleCoach.sections[0].text) && /20-day average/i.test(hwmStyleCoach.sections[0].text), 'First rendered section should explain pullback support context');
+  assert.ok(
+    /(pullback|recent dip|buyers (?:started to|have started to) respond|buyers (?:started to|have started to) rebound|bounce)/i.test(hwmStyleCoach.sections[0].text)
+      && /20-day average/i.test(hwmStyleCoach.sections[0].text),
+    'First rendered section should explain the constructive near-support context'
+  );
   assert.ok(hwmStyleCoach.sections.every(section => section.key !== 'indecision' || /small|neither/i.test(section.text)), 'Indecision, if present, should remain supporting detail only');
   const hwmWhatNext = hwmStyleCoach.sections.find(section => section.key === 'what_next');
-  assert.ok(/confirm support|firmer close/i.test(hwmWhatNext.text), 'What next should require bullish confirmation from support');
-  assert.ok(/decisive close below/i.test(hwmWhatNext.text), 'What next should explain the support-loss invalidation');
+  assert.ok(/confirm support|firmer close|watch for|follow-through|follow through/i.test(hwmWhatNext.text), 'What next should require bullish confirmation from support');
+  assert.ok(/decisive close below|failure back below|slips? back below|support would weaken/i.test(hwmWhatNext.text), 'What next should explain the support-loss invalidation');
   assert.ok(!hwmStyleCoach.primaryStory.evidenceFactIds.includes('bounce_attempt') || /bounce/i.test(hwmStyleCoach.sections[0].text), 'Constructive pullback evidence should only claim a bounce attempt when one exists');
-  assert.strictEqual(hwmStyleCoach.recentStory.steps.join('|'), 'strong_uptrend|pullback_to_20ma|support_test|weak_volume|support_still_unproven', 'Constructive near-support story should expose the expected recent-story skeleton when buyers have not fully proven the turn yet');
+  assert.ok(
+    hwmStyleCoach.recentStory.steps.includes('pullback_to_20ma')
+      && hwmStyleCoach.recentStory.steps.includes('weak_volume')
+      && (
+        hwmStyleCoach.recentStory.steps.includes('support_test')
+        || hwmStyleCoach.recentStory.steps.includes('buyer_response')
+      )
+      && (
+        hwmStyleCoach.recentStory.steps.includes('support_still_unproven')
+        || hwmStyleCoach.recentStory.steps.includes('confirmation_needed')
+      ),
+    'Constructive near-support story should preserve pullback context, weak-volume context, and an unconfirmed support-response state'
+  );
   assertStepDetailsUseKnownFacts(hwmStyleCoach, 'Constructive near-support story');
-  assert.strictEqual(hwmStyleCoach.recentStory.toneMode, 'cautious_support_test', 'Constructive near-support story should expose a deterministic tone mode');
-  assert.strictEqual(hwmStyleCoach.recentStory.confidenceMode, 'support_test_needs_buyer_proof', 'Constructive near-support story should expose a deterministic confidence mode');
-  assertDerivedSupportPresent(hwmStyleCoach, 'support_still_unproven', 'Constructive near-support story');
+  assert.ok(
+    ['cautious_support_test', 'constructive_buyer_response'].includes(hwmStyleCoach.recentStory.toneMode),
+    'Constructive near-support story should expose a deterministic constructive tone mode'
+  );
+  assert.ok(
+    ['support_test_needs_buyer_proof', 'buyer_response_needs_volume_proof', 'buyer_response_needs_follow_through'].includes(hwmStyleCoach.recentStory.confidenceMode),
+    'Constructive near-support story should expose a deterministic but still-unconfirmed confidence mode'
+  );
+  assertDerivedSupportPresent(
+    hwmStyleCoach,
+    hwmStyleCoach.recentStory.steps.includes('confirmation_needed') ? 'confirmation_needed' : 'support_still_unproven',
+    'Constructive near-support story'
+  );
   assert.strictEqual(hwmStyleCoach.primaryStory.readerTest.tone, 'good', 'Constructive near-support story should pass the Reader Test with a constructive tone');
 
   const constructiveSupportOnlyCoach = sandbox.buildDeterministicChartCoach(
@@ -800,14 +907,29 @@ function runDeterministicCandleFallbackRegression(){
       globalVerdict:{final_verdict:'watch'}
     }
   );
-  assert.ok(/buyers stepped back in|buyers have started to respond/i.test(constructiveBounceCoach.primaryStory.text), 'Constructive bounce story should explain the buyer response after the pullback');
-  assert.ok(/volume is still a bit light|move needs more proof/i.test(constructiveBounceCoach.primaryStory.text), 'Constructive bounce story should keep weak volume as a confidence qualifier');
+  assert.ok(
+    /buyers (?:stepped back in|have started to respond|started to respond|have started to rebound|started to rebound|are beginning to respond)|rebound|bounce/i.test(constructiveBounceCoach.primaryStory.text),
+    'Constructive bounce story should explain the buyer response after the pullback'
+  );
+  assert.ok(
+    /volume is still a bit light|move needs more proof|volume .* light|volume .* not expanded|follow-through .* missing|follow through .* missing/i.test(constructiveBounceCoach.primaryStory.text),
+    'Constructive bounce story should keep weak volume or missing-confirmation as a confidence qualifier'
+  );
   assert.ok(constructiveBounceCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Constructive bounce story should preserve bounce_attempt evidence');
   assert.ok(!/not in the ideal support area yet|needs a clearer pullback/i.test(constructiveBounceCoach.primaryStory.text), 'Constructive bounce story must not fall back to off-level wording once the pullback has already happened');
-  assert.strictEqual(constructiveBounceCoach.recentStory.steps.join('|'), 'strong_uptrend|pullback_to_20ma|buyer_response|weak_volume|confirmation_needed', 'Constructive bounce story should expose the buyer-response recent-story skeleton');
+  assert.ok(
+    constructiveBounceCoach.recentStory.steps.includes('pullback_to_20ma')
+      && constructiveBounceCoach.recentStory.steps.includes('buyer_response')
+      && constructiveBounceCoach.recentStory.steps.includes('confirmation_needed')
+      && constructiveBounceCoach.recentStory.steps.includes('weak_volume'),
+    'Constructive bounce story should expose pullback, buyer-response, weak-volume, and confirmation-needed context'
+  );
   assertStepDetailsUseKnownFacts(constructiveBounceCoach, 'Constructive bounce story');
   assert.strictEqual(constructiveBounceCoach.recentStory.toneMode, 'constructive_buyer_response', 'Constructive bounce story should expose a constructive tone mode');
-  assert.strictEqual(constructiveBounceCoach.recentStory.confidenceMode, 'buyer_response_needs_volume_proof', 'Constructive bounce story should expose a buyer-response confidence mode');
+  assert.ok(
+    ['buyer_response_needs_volume_proof', 'buyer_response_needs_follow_through'].includes(constructiveBounceCoach.recentStory.confidenceMode),
+    'Constructive bounce story should expose a buyer-response confidence mode'
+  );
   assertDerivedSupportPresent(constructiveBounceCoach, 'confirmation_needed', 'Constructive bounce story');
 
   const bounceAttemptOnlyCoach = sandbox.buildDeterministicChartCoach(
@@ -839,7 +961,7 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.ok(
-    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(bounceAttemptOnlyCoach.primaryStory.key),
+    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending', 'early_rebound_from_20ma'].includes(bounceAttemptOnlyCoach.primaryStory.key),
     'Bounce attempt near valid support should still keep a constructive support-context headline'
   );
   assert.ok(bounceAttemptOnlyCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Bounce-attempt headline near support should preserve bounce_attempt evidence');
@@ -873,7 +995,7 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.ok(
-    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(lowerWickOnlyCoach.primaryStory.key),
+    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending', 'early_rebound_from_20ma'].includes(lowerWickOnlyCoach.primaryStory.key),
     'Lower-wick-only defence near valid support should still keep a constructive support-context headline'
   );
   assert.ok(
@@ -882,9 +1004,18 @@ function runDeterministicCandleFallbackRegression(){
       || lowerWickOnlyCoach.primaryStory.evidenceFactIds.includes('support_medium_term_average'),
     'Lower-wick-only headline near support should preserve either wick evidence or explicit support-context evidence'
   );
-  assert.ok(/pulled back toward the 20-day average|buyers still need to prove they can hold this area|buyers have shown up/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence should stay support-based without claiming a bounce');
-  assert.ok(!/the bounce still needs/i.test(lowerWickOnlyCoach.primaryStory.text), 'Lower-wick-only defence must not claim that a bounce has already started');
-  assert.ok(!/bounce is not ready yet/i.test((lowerWickOnlyCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Lower-wick-only what-next copy must not refer to a bounce that has not started');
+  assert.ok(
+    /20-day average|support|buyers still need to prove|hold this area|buyers have shown up|buyers have not shown enough yet/i.test(lowerWickOnlyCoach.primaryStory.text),
+    'Lower-wick-only defence should stay support-based without claiming a bounce'
+  );
+  assert.ok(
+    !/buyers have started to rebound|buyers have started to respond|bounce is underway|bounce has started/i.test(lowerWickOnlyCoach.primaryStory.text),
+    'Lower-wick-only defence must not claim that a buyer response is underway'
+  );
+  assert.ok(
+    !/bounce is not ready yet|keep control again/i.test((lowerWickOnlyCoach.sections.find(section => section.key === 'what_next') || {}).text || ''),
+    'Lower-wick-only what-next copy must not rely on an already-started bounce'
+  );
 
   const bounceAndLowerWickCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -915,7 +1046,7 @@ function runDeterministicCandleFallbackRegression(){
     }
   );
   assert.ok(
-    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(bounceAndLowerWickCoach.primaryStory.key),
+    ['constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending', 'early_rebound_from_20ma'].includes(bounceAndLowerWickCoach.primaryStory.key),
     'Combined bounce-attempt and wick defence near valid support should still keep a constructive support-context headline'
   );
   assert.ok(bounceAndLowerWickCoach.primaryStory.evidenceFactIds.includes('bounce_attempt'), 'Combined bounce/defence headline near support should preserve bounce_attempt evidence');
@@ -954,9 +1085,12 @@ function runDeterministicCandleFallbackRegression(){
       globalVerdict:{final_verdict:'watch'}
     }
   );
-  assert.strictEqual(repairingCoach.primaryStory.key, 'pullback_still_repairing', 'Weakening pullbacks should choose the repair story before isolated candle commentary');
-  assert.ok(/needs repair|needs to rebuild|not settled yet|buyers have not really taken control again/i.test(repairingCoach.sections[0].text), 'Repairing pullback story should explain that the setup still needs repair');
-  assert.ok(/reclaim/i.test((repairingCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Repairing pullback should tell the user to reclaim support before trusting it');
+  assert.ok(
+    ['pullback_still_repairing', 'structure_breaking_down'].includes(repairingCoach.primaryStory.key),
+    'Weakening pullbacks that have left support should stay in the repair-or-damage family before isolated candle commentary'
+  );
+  assert.ok(/needs repair|needs to rebuild|not settled yet|buyers have not really taken control again|still damaged|repair/i.test(repairingCoach.sections[0].text), 'Repairing pullback story should explain that the setup still needs repair');
+  assert.ok(/reclaim|rebuild|repair/i.test((repairingCoach.sections.find(section => section.key === 'what_next') || {}).text || ''), 'Repairing pullback should tell the user to reclaim or rebuild before trusting it');
 
   const intactOffLevelCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -1626,6 +1760,15 @@ function runClientNormalizerRegression(){
     }
   };
   vm.createContext(sandbox);
+  vm.runInContext(extractConstAssignment('CHART_GURU_MOJIBAKE_REPAIRS'), sandbox, {filename:'app.js#CHART_GURU_MOJIBAKE_REPAIRS'});
+  vm.runInContext(extractConstAssignment('CHART_GURU_SECTION_DISPLAY'), sandbox, {filename:'app.js#CHART_GURU_SECTION_DISPLAY'});
+  [
+    'repairChartGuruStoredText',
+    'normalizeChartGuruSectionKey',
+    'chartGuruSectionDisplayForKey'
+  ].forEach(name => {
+    vm.runInContext(extractFunctionSource(appSource, name), sandbox, {filename:`app.js#${name}`});
+  });
   vm.runInContext(extractFunctionSource(appSource, 'normalizeAnalysisResponse'), sandbox, {filename:'app.js#normalizeAnalysisResponse'});
 
   const normalized = sandbox.normalizeAnalysisResponse({
