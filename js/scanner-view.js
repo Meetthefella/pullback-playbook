@@ -4,6 +4,39 @@
     return 1.5;
   }
 
+  function resolveBuyerControlState(derivedStates = {}){
+    const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+    const modernState = String(
+      derived.buyerControlState
+      || derived.buyer_control_state
+      || ''
+    ).trim().toLowerCase();
+    if(['confirmed', 'emerging'].includes(modernState)) return modernState;
+    const legacyBounceState = String(
+      derived.bounceState
+      || derived.bounce_state
+      || ''
+    ).trim().toLowerCase();
+    if(legacyBounceState === 'confirmed') return 'confirmed';
+    if(legacyBounceState === 'attempt') return 'emerging';
+    return 'none';
+  }
+
+  function buyerControlLabelForDerivedStates(derivedStates = {}, options = {}){
+    const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+    const labels = options && typeof options === 'object' ? options : {};
+    const supportTestState = String(
+      derived.supportTestState
+      || derived.support_test_state
+      || ''
+    ).trim().toLowerCase();
+    const buyerControlState = resolveBuyerControlState(derived);
+    if(buyerControlState === 'confirmed') return labels.confirmedLabel || 'Buyers confirmed';
+    if(supportTestState === 'testing') return labels.testingLabel || 'Support testing';
+    if(buyerControlState === 'emerging') return labels.emergingLabel || 'Buyers emerging';
+    return labels.noneLabel || 'No buyer control';
+  }
+
   function getRankedDisplayBucket(record, deps = {}){
     return buildFinalSetupView(record, {}, deps).bucket;
   }
@@ -508,11 +541,7 @@
         : '',
       structureLabel:deps.structureLabelForRecord(view.item, derivedStates, {displayStage:view.displayStage}),
       pullbackLabel:derivedStates.pullbackZone === 'near_20ma' ? 'Near 20MA' : (derivedStates.pullbackZone === 'near_50ma' ? 'Near 50MA' : ''),
-      bounceLabel:derivedStates.buyerControlState === 'confirmed' || derivedStates.bounceState === 'confirmed'
-        ? 'Buyers confirmed'
-        : ((derivedStates.supportTestState === 'testing' || derivedStates.buyerControlState === 'emerging' || derivedStates.bounceState === 'attempt')
-          ? 'Buyers emerging'
-          : (derivedStates.bounceState === 'none' ? 'No buyer control' : '')),
+      bounceLabel:buyerControlLabelForDerivedStates(derivedStates),
       canOpenReview:true,
       canAddToWatchlist:true
     };
@@ -715,6 +744,8 @@
 
   global.ScannerView = {
     currentRrThreshold,
+    resolveBuyerControlState,
+    buyerControlLabelForDerivedStates,
     getRankedDisplayBucket,
     getFinalBucketFromView,
     rrCategoryForView,

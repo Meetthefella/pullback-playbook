@@ -79,7 +79,8 @@
   function scanCardSummaryForView(view, deps){
     const {
       analysisDerivedStatesFromRecord,
-      shortlistStructureBadgeForView
+      shortlistStructureBadgeForView,
+      buyerControlLabelForDerivedStates
     } = deps;
     const item = view.item;
     const derived = view.setupStates || analysisDerivedStatesFromRecord(item);
@@ -97,15 +98,8 @@
     }
     if(item.setup.marketCaution){
       secondary = 'Weak market';
-    }else if(String(derived.buyerControlState || derived.bounceState || '').toLowerCase() === 'confirmed'){
-      secondary = 'Buyers confirmed';
-    }else if(
-      String(derived.supportTestState || '').toLowerCase() === 'testing'
-      || ['emerging','attempt','early','developing'].includes(String(derived.buyerControlState || derived.bounceState || '').toLowerCase())
-    ){
-      secondary = 'Buyers emerging';
-    }else if(String(derived.bounceState || '').toLowerCase() === 'none'){
-      secondary = 'No buyer control yet';
+    }else if(typeof buyerControlLabelForDerivedStates === 'function'){
+      secondary = buyerControlLabelForDerivedStates(derived, {noneLabel:'No buyer control yet'});
     }
     return {
       primary,

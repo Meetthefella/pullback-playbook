@@ -1496,7 +1496,9 @@ const {
   resultSupportLineForView: resultSupportLineForViewImpl,
   isFilteredResultRecord: isFilteredResultRecordImpl,
   shortlistStructureBadgeForView: shortlistStructureBadgeForViewImpl,
-  readinessLabelForView: readinessLabelForViewImpl
+  readinessLabelForView: readinessLabelForViewImpl,
+  resolveBuyerControlState: resolveBuyerControlStateImpl,
+  buyerControlLabelForDerivedStates: buyerControlLabelForDerivedStatesImpl
 } = window.ScannerView;
 const {
   resolveScannerStateWithTrace: resolveScannerStateWithTraceImpl,
@@ -18094,7 +18096,9 @@ function scannerViewBridgeDeps(){
     primaryShortlistStatusChip,
     normalizeAnalysisVerdict,
     getActions,
-    scanPresentationForView
+    scanPresentationForView,
+    resolveBuyerControlState,
+    buyerControlLabelForDerivedStates
   };
 }
 
@@ -18150,6 +18154,7 @@ function scannerCardShellBridgeDeps(){
     renderScanCardSecondaryUi,
     analysisDerivedStatesFromRecord,
     shortlistStructureBadgeForView,
+    buyerControlLabelForDerivedStates,
     getActions,
     escapeHtml,
     scoreClass
@@ -19070,6 +19075,18 @@ function scanCardPrimaryActionLabel(view){
   return scanCardPrimaryActionLabelImpl(view, scannerCardShellBridgeDeps());
 }
 
+function resolveBuyerControlState(derivedStates = {}){
+  return typeof resolveBuyerControlStateImpl === 'function'
+    ? resolveBuyerControlStateImpl(derivedStates)
+    : 'none';
+}
+
+function buyerControlLabelForDerivedStates(derivedStates = {}, options = {}){
+  return typeof buyerControlLabelForDerivedStatesImpl === 'function'
+    ? buyerControlLabelForDerivedStatesImpl(derivedStates, options)
+    : String((options && options.noneLabel) || 'No buyer control');
+}
+
 function scanDecisionLineForView(view){
   const item = view && view.item ? view.item : view;
   return getActions(resolveGlobalVerdict(item).final_verdict).detail;
@@ -19093,10 +19110,7 @@ function compactReasonLineForView(view, maxParts = 3){
   else if(derived.trendState === 'strong') pushPart('Strong trend');
   else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
   if(derived.pullbackState && derived.pullbackState !== 'none') pushPart(pullbackStateLabel(derived.pullbackState));
-  if(derived.buyerControlState === 'confirmed' || derived.bounceState === 'confirmed') pushPart('Buyers confirmed');
-  else if(derived.supportTestState === 'testing') pushPart('Support testing');
-  else if(['emerging','attempt','early','developing'].includes(String(derived.buyerControlState || derived.bounceState || '').toLowerCase())) pushPart('Buyers emerging');
-  else if(derived.bounceState === 'none') pushPart('No buyer control');
+  pushPart(buyerControlLabelForDerivedStates(derived));
   if(!item.plan.hasValidPlan && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) pushPart('Low est reward');
   if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
   if(derived.volumeState === 'weak') pushPart('Weak volume');
@@ -19137,13 +19151,8 @@ function scanCardTechnicalSummaryForView(view){
     pullbackState:String(derived && derived.pullbackState || '').toLowerCase(),
     setupLocationState:String(derived && derived.setupLocationState || '').toLowerCase()
   });
-  const supportTestState = String(derived && derived.supportTestState || '').toLowerCase();
-  const buyerControlState = String(derived && derived.buyerControlState || '').toLowerCase();
-  let responseLabel = 'No buyer control';
+  let responseLabel = buyerControlLabelForDerivedStates(derived);
   if(reviewEvidence.consolidating) responseLabel = reviewConsolidationPresentationCopy().technicalLabel;
-  else if(buyerControlState === 'confirmed' || bounceState === 'confirmed') responseLabel = 'Buyers confirmed';
-  else if(supportTestState === 'testing') responseLabel = 'Support testing';
-  else if(buyerControlState === 'emerging' || bounceState === 'attempt') responseLabel = 'Buyers emerging';
   else if(bounceState === 'early') responseLabel = 'Early stabilisation';
   else if(stabilisationState === 'clear' || stabilisationState === 'present' || stabilisationState === 'early') responseLabel = 'Stabilising';
   return [structureLabel, pullbackLabel, responseLabel].filter(Boolean).join(' | ');
@@ -31302,10 +31311,7 @@ function compactReasonLineForRecord(record, maxParts = 3){
   else if(derived.trendState === 'strong') pushPart('Strong trend');
   else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
   if(derived.pullbackState && derived.pullbackState !== 'none') pushPart(pullbackStateLabel(derived.pullbackState));
-  if(derived.buyerControlState === 'confirmed' || derived.bounceState === 'confirmed') pushPart('Buyers confirmed');
-  else if(derived.supportTestState === 'testing') pushPart('Support testing');
-  else if(['emerging','attempt','early','developing'].includes(String(derived.buyerControlState || derived.bounceState || '').toLowerCase())) pushPart('Buyers emerging');
-  else if(derived.bounceState === 'none') pushPart('No buyer control');
+  pushPart(buyerControlLabelForDerivedStates(derived));
   if(!item.plan.hasValidPlan && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) pushPart('Low est reward');
   if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
   if(derived.volumeState === 'weak') pushPart('Weak volume');

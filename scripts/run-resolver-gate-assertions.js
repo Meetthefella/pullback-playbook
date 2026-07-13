@@ -36,6 +36,7 @@ runBrowserModule('js/domain/simplified-plan-state.js');
 runBrowserModule('js/presentation/simplified-presentation-model.js');
 runBrowserModule('js/domain/simplified-trade-state.js');
 runBrowserModule('js/scanner-view.js');
+runBrowserModule('js/scanner-card-shell.js');
 runBrowserModule('js/scanner-results-support.js');
 runBrowserModule('js/scanner-debug.js');
 runBrowserModule('js/services/tracked-state-service.js');
@@ -10769,6 +10770,243 @@ function runAccepted50MaSupportThresholdAssertions(){
   }
 }
 
+function runBuyerControlLegacyFallbackAssertions(){
+  const scannerView = sandbox.window.ScannerView;
+  const scannerCardShell = sandbox.window.ScannerCardShell;
+  if(!scannerView || typeof scannerView.resolveBuyerControlState !== 'function' || typeof scannerView.buyerControlLabelForDerivedStates !== 'function'){
+    throw new Error('ScannerView buyer-control compatibility helpers are unavailable.');
+  }
+  if(!scannerCardShell || typeof scannerCardShell.scanCardSummaryForView !== 'function'){
+    throw new Error('ScannerCardShell summary helper is unavailable.');
+  }
+
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const compactSandbox = {
+    console,
+    numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    },
+    pullbackStateLabel(state){
+      const safe = String(state || '').trim().toLowerCase();
+      if(safe === 'near_20ma') return 'Near 20MA';
+      if(safe === 'near_50ma') return 'Near 50MA';
+      return safe || 'none';
+    },
+    normalizeTickerRecord(record){
+      return record && typeof record === 'object' ? record : {};
+    },
+    currentRrThreshold(){ return 2; },
+    shortlistStructureBadgeForView(){ return {label:'Strong'}; },
+    structureLabelForRecord(){ return 'Strong structure'; },
+    displayStageForRecord(){ return 'Watch'; },
+    warningStateFromInputs(){ return {reasons:[]}; },
+    resultReasonForRecord(){ return 'Fallback'; },
+    resolveBuyerControlStateImpl:scannerView.resolveBuyerControlState,
+    buyerControlLabelForDerivedStatesImpl:scannerView.buyerControlLabelForDerivedStates
+  };
+  vm.createContext(compactSandbox);
+  [
+    'resolveBuyerControlState',
+    'buyerControlLabelForDerivedStates',
+    'compactReasonLineForView',
+    'compactReasonLineForRecord'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), compactSandbox, {filename:`app.js#${functionName}`});
+  });
+
+  function scannerViewDepsForDerived(derived){
+    return {
+      projectTickerForCard(record){
+        return {
+          item:record,
+          displayedPlan:{},
+          effectivePlan:{},
+          planUiState:{state:'valid', label:'Valid'},
+          setupUiState:{state:'watch'},
+          setupScore:8,
+          setupScoreDisplay:'8',
+          rrValue:null,
+          actionableRrValue:null,
+          displayStage:'Watch'
+        };
+      },
+      analysisDerivedStatesFromRecord(){ return {...derived}; },
+      numericOrNull(value){
+        const numeric = Number(value);
+        return Number.isFinite(numeric) ? numeric : null;
+      },
+      normalizeTicker(value){ return String(value || '').trim().toUpperCase(); },
+      normalizeTickerRecord(record){ return record && typeof record === 'object' ? record : {}; },
+      resolveSimplifiedStateForSurface(){ return {}; },
+      targetReviewQueueLabel(){ return ''; },
+      currentSetupType(){ return 'pullback'; },
+      resolveEmojiPresentation(){ return {primaryState:'monitor'}; },
+      evaluatePlanRealism(){ return {}; },
+      fmtPrice(value){ return String(value || ''); },
+      normalizeScanType(){ return 'pullback'; },
+      globalVerdictLabel(value){
+        const safe = String(value || '').trim().toLowerCase();
+        if(safe === 'entry') return 'Entry';
+        if(safe === 'near_entry') return 'Near Entry';
+        if(safe === 'avoid') return 'Avoid';
+        return 'Watch';
+      },
+      getBucket(value){ return value === 'entry' ? 'tradeable_entry' : 'monitor_watch'; },
+      getBadge(){ return {text:'Watch', className:'watch'}; },
+      resolveGlobalVerdict(){ return {final_verdict:'watch'}; },
+      resolveVisualState(){
+        return {
+          finalVerdict:'watch',
+          final_verdict:'watch',
+          badge:{text:'Watch', className:'watch'},
+          bucket:'monitor_watch'
+        };
+      },
+      normalizeGlobalVerdictKey(value){
+        const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+        return ['entry','near_entry','avoid'].includes(safe) ? safe : 'watch';
+      },
+      normalizeVerdict(value){
+        const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+        return ['entry','near_entry','avoid'].includes(safe) ? safe : 'watch';
+      },
+      primaryVerdictBadge(){ return {label:'Watch', className:'watch'}; },
+      setupUiLabel(){ return 'Watch'; },
+      setupUiClass(){ return 'watch'; },
+      shouldShowActionableRR(){ return false; },
+      structureLabelForRecord(){ return 'Strong'; },
+      resultSortScoreFromRecord(){ return 0; },
+      resolveScannerStateWithTrace(){ return {setupState:'watch', reason_codes:[], trace:[], warnings:[]}; },
+      escapeHtml(value){ return String(value || ''); },
+      primaryShortlistStatusChip(){ return {label:'Watch', className:'watch'}; },
+      normalizeAnalysisVerdict(){ return 'watch'; },
+      getActions(){ return {label:'WATCH'}; },
+      scanPresentationForView(){ return {}; },
+      resolveBuyerControlState:scannerView.resolveBuyerControlState,
+      buyerControlLabelForDerivedStates:scannerView.buyerControlLabelForDerivedStates
+    };
+  }
+
+  function assertCase(id, derived, expectations){
+    const record = {
+      ticker:'LEG',
+      meta:{companyName:'Legacy', exchange:'NYSE'},
+      setup:{marketCaution:false},
+      plan:{hasValidPlan:true, plannedRR:2},
+      scan:{estimatedRR:2},
+      marketData:{}
+    };
+    const view = {
+      item:record,
+      ticker:'LEG',
+      setupStates:{...derived}
+    };
+    const scannerResolved = scannerView.buildFinalSetupView(record, {}, scannerViewDepsForDerived(derived));
+    const shellSummary = scannerCardShell.scanCardSummaryForView(view, {
+      analysisDerivedStatesFromRecord(){ return {...derived}; },
+      shortlistStructureBadgeForView(){ return {label:'Strong'}; },
+      buyerControlLabelForDerivedStates:scannerView.buyerControlLabelForDerivedStates
+    });
+    compactSandbox.analysisDerivedStatesFromRecord = () => ({...derived});
+    const compactViewText = compactSandbox.compactReasonLineForView({
+      item:record,
+      setupStates:{...derived}
+    }, 3);
+    const compactRecordText = compactSandbox.compactReasonLineForRecord(record, 3);
+
+    if(scannerResolved.bounceLabel !== expectations.scannerView){
+      throw new Error(`${id}: scanner view expected "${expectations.scannerView}" but got "${scannerResolved.bounceLabel}".`);
+    }
+    if(String(shellSummary.secondary || '') !== expectations.scannerCard){
+      throw new Error(`${id}: scanner card shell expected "${expectations.scannerCard}" but got "${shellSummary.secondary}".`);
+    }
+    if(!String(compactViewText || '').includes(expectations.compact)){
+      throw new Error(`${id}: compactReasonLineForView expected to include "${expectations.compact}" but got "${compactViewText}".`);
+    }
+    if(!String(compactRecordText || '').includes(expectations.compact)){
+      throw new Error(`${id}: compactReasonLineForRecord expected to include "${expectations.compact}" but got "${compactRecordText}".`);
+    }
+  }
+
+  assertCase('legacy_confirmed_fallback', {
+    buyerControlState:'none',
+    bounceState:'confirmed',
+    supportTestState:'held',
+    pullbackState:'near_20ma',
+    trendState:'strong',
+    stabilisationState:'clear'
+  }, {
+    scannerView:'Buyers confirmed',
+    scannerCard:'Buyers confirmed',
+    compact:'Buyers confirmed'
+  });
+
+  assertCase('legacy_attempt_fallback', {
+    buyerControlState:'none',
+    bounceState:'attempt',
+    supportTestState:'held',
+    pullbackState:'near_20ma',
+    trendState:'strong',
+    stabilisationState:'early'
+  }, {
+    scannerView:'Buyers emerging',
+    scannerCard:'Buyers emerging',
+    compact:'Buyers emerging'
+  });
+
+  assertCase('missing_modern_fallback', {
+    bounceState:'confirmed',
+    supportTestState:'held',
+    pullbackState:'near_20ma',
+    trendState:'strong',
+    stabilisationState:'clear'
+  }, {
+    scannerView:'Buyers confirmed',
+    scannerCard:'Buyers confirmed',
+    compact:'Buyers confirmed'
+  });
+
+  assertCase('modern_emerging_wins', {
+    buyerControlState:'emerging',
+    bounceState:'confirmed',
+    supportTestState:'held',
+    pullbackState:'near_20ma',
+    trendState:'strong',
+    stabilisationState:'early'
+  }, {
+    scannerView:'Buyers emerging',
+    scannerCard:'Buyers emerging',
+    compact:'Buyers emerging'
+  });
+
+  assertCase('modern_confirmed_wins', {
+    buyerControlState:'confirmed',
+    bounceState:'attempt',
+    supportTestState:'held',
+    pullbackState:'near_20ma',
+    trendState:'strong',
+    stabilisationState:'clear'
+  }, {
+    scannerView:'Buyers confirmed',
+    scannerCard:'Buyers confirmed',
+    compact:'Buyers confirmed'
+  });
+
+  assertCase('no_evidence', {
+    buyerControlState:'none',
+    bounceState:'none',
+    supportTestState:'not_tested',
+    trendState:'strong'
+  }, {
+    scannerView:'No buyer control',
+    scannerCard:'No buyer control yet',
+    compact:'No buyer control'
+  });
+}
+
 function runScannerProjectionAuthorityAssertions(){
   const scannerViewSource = fs.readFileSync(path.join(root, 'js/scanner-view.js'), 'utf8');
   const scannerProjectionSandbox = {
@@ -10879,6 +11117,7 @@ async function runAllAssertions(){
   runTradeExecutionRoutingAssertions();
   runPlanSemanticsAssertions();
   runReviewPullbackBounceDisplayAssertions();
+  runBuyerControlLegacyFallbackAssertions();
   runCanonicalPullbackParityAssertions();
   runReviewPricedButNotReadyAssertions();
   runCumulativePenaltyDisplayAssertions();
