@@ -2674,7 +2674,7 @@ function runEntryConditionsSummaryAssertions(){
         latest:{
           failedEntryChecks:[
             {id:'entry_trigger_hit', label:'Entry trigger hit', classification:'trigger'},
-            {id:'bounce_ok', label:'Bounce confirmed and priceable', classification:'temporary'}
+            {id:'bounce_ok', label:'Buyer control confirmed and priceable', classification:'temporary'}
           ],
           nextRequiredAction:'Entry trigger hit'
         }

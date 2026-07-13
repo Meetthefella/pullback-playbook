@@ -329,7 +329,7 @@
       && (setupScore === null || setupScore >= 5)
       && !['invalid','rebuild_required','too_wide'].includes(planStatus);
     if(setupLocationState === 'none' && constructiveWaiting) return 'Watch - waiting for confirmation.';
-    if(latePullbackState === 'late') return 'Watch - trend is healthy, but the bounce is already too far from support to chase.';
+    if(latePullbackState === 'late') return 'Watch - trend is healthy, but the buyer response is already too far from support to chase.';
     if(setupLocationState === 'extended') return 'Watch - strong trend, but no clean pullback entry yet.';
     if(setupLocationState === 'volatile') return 'Watch - setup is too volatile to price reliably.';
     if((setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear') && (viability === 'low_priority' || viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5) || priceabilityState === 'unpriceable')) return 'Watch - strong trend, but no usable pullback setup yet.';

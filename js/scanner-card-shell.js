@@ -97,12 +97,15 @@
     }
     if(item.setup.marketCaution){
       secondary = 'Weak market';
-    }else if(String(derived.bounceState || '').toLowerCase() === 'confirmed'){
-      secondary = 'Bounce confirmed';
-    }else if(String(derived.bounceState || '').toLowerCase() === 'attempt'){
-      secondary = 'Bounce tentative';
+    }else if(String(derived.buyerControlState || derived.bounceState || '').toLowerCase() === 'confirmed'){
+      secondary = 'Buyers confirmed';
+    }else if(
+      String(derived.supportTestState || '').toLowerCase() === 'testing'
+      || ['emerging','attempt','early','developing'].includes(String(derived.buyerControlState || derived.bounceState || '').toLowerCase())
+    ){
+      secondary = 'Buyers emerging';
     }else if(String(derived.bounceState || '').toLowerCase() === 'none'){
-      secondary = 'Buyers have not taken control yet';
+      secondary = 'No buyer control yet';
     }
     return {
       primary,

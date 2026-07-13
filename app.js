@@ -1600,8 +1600,8 @@ const checklistLabels = {
   near20:'Near 20 MA',
   near50:'Near 50 MA',
   stabilising:'Stabilising',
-  bounce:'Bounce candle',
-  volume:'Volume supportive',
+  bounce:'Buyer response',
+  volume:'Volume constructive',
   entryDefined:'Entry defined',
   stopDefined:'Stop defined',
   targetDefined:'Target defined'
@@ -19804,7 +19804,7 @@ function buildSummary(checks, status, context = {}){
   }
   let text = 'Strong uptrend.';
   text += checks.near20 ? ' Pullback is near the 20 MA.' : ' Pullback is near the 50 MA.';
-  if(stabilising && bounce && status === 'Entry') return `${text} Price is stabilising and a bounce is forming. Setup is close to actionable if risk stays controlled.`;
+  if(stabilising && bounce && status === 'Entry') return `${text} Price is stabilising and buyers are starting to take control. Setup is close to actionable if risk stays controlled.`;
   if(reviewEvidence.consolidating){
     const copy = reviewConsolidationPresentationCopy();
     return `${copy.summary} ${copy.blocker} ${copy.nextAction}`;
@@ -23382,7 +23382,7 @@ function evaluateEntryTrigger(record, options = {}){
 function entryPromotionAuditCheckDefinitions(){
   return [
     {id:'structure_ok', label:'Structure intact/strong', classification:'structural', temporary:false, mode:'positive'},
-    {id:'bounce_ok', label:'Bounce confirmed and priceable', classification:'temporary', temporary:true, mode:'positive'},
+    {id:'bounce_ok', label:'Buyer control confirmed and priceable', classification:'temporary', temporary:true, mode:'positive'},
     {id:'pullback_ok', label:'Pullback near 20MA/50MA', classification:'structural', temporary:false, mode:'positive'},
     {id:'market_ok', label:'Market supportive', classification:'market', temporary:true, mode:'positive'},
     {id:'volume_ok', label:'Volume at least normal', classification:'volume', temporary:true, mode:'positive'},
