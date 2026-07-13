@@ -149,6 +149,18 @@
       || item.setup && (item.setup.bounceState || item.setup.bounce_state)
       || ''
     ).trim().toLowerCase();
+    const supportTestState = String(
+      visual.supportTestState
+      || visual.support_test_state
+      || resolved.support_test_state
+      || ''
+    ).trim().toLowerCase();
+    const buyerControlState = String(
+      visual.buyerControlState
+      || visual.buyer_control_state
+      || resolved.buyer_control_state
+      || ''
+    ).trim().toLowerCase();
     const pullbackAccepted = resolved.nearEntryPullbackZoneAccepted === true
       || resolved.near_entry_pullback_zone_accepted === true
       || resolved.pullback_ok === true
@@ -195,10 +207,13 @@
       || ['broken','failed','dead','invalid'].includes(structureState)
       || structureEligibility === 'broken'
       || hasExplicitInvalidation;
-    const bounceUnconfirmed = ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState);
+    const bounceUnconfirmed = supportTestState
+      ? supportTestState === 'testing'
+      : ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState);
     return pullbackAccepted
       && pullbackState === 'near_50ma'
       && bounceUnconfirmed
+      && buyerControlState !== 'confirmed'
       && positiveAliveSignal
       && !lost50MaSupport
       && !terminalAvoid

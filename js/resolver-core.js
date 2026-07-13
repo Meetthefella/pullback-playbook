@@ -206,6 +206,148 @@
     return normalizeMarketSeverity(ctx.market_regime);
   }
 
+  function normalizeVolumeState(value){
+    const safe = String(value || '').trim().toLowerCase();
+    if(['expanding', 'supportive', 'strong', 'active', 'above_average'].includes(safe)) return 'expanding';
+    if(['constructive', 'normal', 'neutral', 'average', 'steady'].includes(safe)) return 'constructive';
+    if(['weak', 'light', 'low', 'below_average'].includes(safe)) return 'weak';
+    return safe || 'constructive';
+  }
+
+  function resolveSupportAuthority(ctx = {}){
+    const rawPullbackState = String(ctx.pullback_zone || ctx.pullback_state || '').trim().toLowerCase();
+    const setupLocationState = String(ctx.setup_location_state || '').trim().toLowerCase();
+    const supportInteractionState = String(ctx.support_interaction_state || ctx.supportInteractionState || '').trim().toLowerCase();
+    const bounceState = String(ctx.bounce_state || '').trim().toLowerCase();
+    const stabilisationState = String(ctx.stabilisation_state || '').trim().toLowerCase();
+    const structureState = String(ctx.structure_state || '').trim().toLowerCase();
+    const volumeState = normalizeVolumeState(ctx.volume_state);
+    const upClosesAfterLow = Number.isFinite(Number(ctx.candle_evidence_up_closes_after_low))
+      ? Number(ctx.candle_evidence_up_closes_after_low)
+      : 0;
+    const signals = {
+      strong_bullish_reversal:ctx.strong_bullish_reversal === true || ctx.strongBullishReversal === true,
+      bullish_engulfing:ctx.bullish_engulfing === true || ctx.bullishEngulfing === true,
+      hammer_rejection:ctx.hammer_rejection === true || ctx.hammerRejection === true || ctx.pin_bar_rejection === true || ctx.pinBarRejection === true,
+      bullish_outside_day:ctx.bullish_outside_day === true || ctx.bullishOutsideDay === true,
+      strong_green_close_near_high:ctx.strong_green_close_near_high === true || ctx.strongGreenCloseNearHigh === true,
+      gap_up_continuation_from_support:ctx.gap_up_continuation_from_support === true || ctx.gapUpContinuationFromSupport === true,
+      reclaimed_prior_day_high:flagTextIsTrue(ctx.candle_evidence_reclaimed_prior_day_high) || ctx.reclaimed_prior_day_high === true,
+      reclaim_range_meaningful:flagTextIsTrue(ctx.candle_evidence_reclaim_range_meaningful) || ctx.reclaim_range_meaningful === true,
+      downside_momentum_slowing:flagTextIsTrue(ctx.candle_evidence_downside_momentum_slowing) || ctx.downside_momentum_slowing === true,
+      tighter_ranges:flagTextIsTrue(ctx.candle_evidence_tighter_ranges) || ctx.tighter_ranges === true,
+      smaller_bodies:flagTextIsTrue(ctx.candle_evidence_smaller_bodies) || ctx.smaller_bodies === true,
+      higher_low_hold:flagTextIsTrue(ctx.candle_evidence_higher_low_hold) || ctx.higher_low_hold === true || ctx.higher_low_respected === true || ctx.swing_low_respected === true,
+      reclaims_level:ctx.reclaims_level === true || ctx.reclaimsLevel === true,
+      reclaim_attempt:ctx.reclaim_attempt === true,
+      positive_session:ctx.positive_session === true || ctx.positiveSession === true,
+      expanding_volume:volumeState === 'expanding',
+      constructive_volume:volumeState === 'constructive',
+      weak_volume:volumeState === 'weak',
+      up_closes_after_low:upClosesAfterLow >= 1,
+      multiple_up_closes_after_low:upClosesAfterLow >= 2,
+      reclaim_confirmed_independent:ctx.reclaim_confirmed_independent === true || ctx.reclaimConfirmedIndependent === true,
+      entry_trigger_hit:ctx.entry_trigger_hit === true || ctx.entryTriggerHit === true || ctx.breaks_local_high === true || ctx.breaksLocalHigh === true,
+      stabilising:['clear', 'present', 'early'].includes(stabilisationState),
+      bounce_developing:['attempt', 'early', 'developing', 'improving', 'confirmed', 'rebound'].includes(bounceState)
+    };
+    const supportContext = (() => {
+      if(
+        supportInteractionState.includes('20ma')
+        || ['near_20ma', 'at_20ma', 'left_20ma', 'recently_left_20ma'].includes(rawPullbackState)
+        || ['near_20ma', 'at_20ma'].includes(setupLocationState)
+      ) return '20ma_support';
+      if(
+        supportInteractionState.includes('50ma')
+        || ['near_50ma', 'at_50ma', 'left_50ma', 'recently_left_50ma'].includes(rawPullbackState)
+        || ['near_50ma', 'at_50ma'].includes(setupLocationState)
+      ) return '50ma_support';
+      if(
+        supportInteractionState !== 'none'
+        || ['supportive', 'support_band', 'pullback_zone', 'usable_pullback', 'between_20_50ma'].includes(setupLocationState)
+        || ['reclaim', 'reclaim_zone', 'between_20_50', 'shallow'].includes(rawPullbackState)
+      ) return 'other_support';
+      return 'none';
+    })();
+    const supportContextRecognized = supportContext !== 'none';
+    const explicitSupportFailure = !!(
+      ctx.support_failed === true
+      || ctx.supportTestState === 'failed'
+      || ctx.support_test_state === 'failed'
+      || ctx.structurally_broken === true
+      || ['broken', 'failed', 'dead', 'invalid'].includes(structureState)
+      || ctx.price_below_50ma === true
+      || /support failed|failed support|lost[_\s-]?(20|50)ma|below support|structure is broken/i.test(String(ctx.main_blocker || ctx.reason || '').trim())
+    );
+    const supportHeldSignals = [
+      signals.higher_low_hold,
+      signals.reclaim_attempt,
+      signals.reclaim_range_meaningful,
+      signals.downside_momentum_slowing,
+      signals.tighter_ranges,
+      signals.smaller_bodies,
+      signals.reclaims_level,
+      signals.reclaim_confirmed_independent,
+      signals.up_closes_after_low
+    ].filter(Boolean);
+    const supportHeld = supportContextRecognized && !explicitSupportFailure && (
+      signals.higher_low_hold
+      || signals.reclaims_level
+      || signals.reclaim_confirmed_independent
+      || signals.reclaim_range_meaningful
+      || (signals.up_closes_after_low && (signals.downside_momentum_slowing || signals.tighter_ranges || signals.smaller_bodies))
+      || (signals.reclaim_attempt && signals.stabilising)
+    );
+    const buyerEmerging = supportContextRecognized && !explicitSupportFailure && (
+      supportHeld
+      || signals.positive_session
+      || signals.stabilising
+      || signals.bounce_developing
+      || signals.reclaim_attempt
+      || signals.up_closes_after_low
+      || signals.downside_momentum_slowing
+      || signals.tighter_ranges
+      || signals.smaller_bodies
+    );
+    const buyerConfirmed = supportHeld && (
+      signals.strong_bullish_reversal
+      || signals.bullish_engulfing
+      || signals.hammer_rejection
+      || signals.bullish_outside_day
+      || signals.strong_green_close_near_high
+      || signals.gap_up_continuation_from_support
+      || signals.reclaim_confirmed_independent
+      || signals.entry_trigger_hit
+      || (signals.reclaims_level && (signals.higher_low_hold || signals.reclaim_range_meaningful || signals.reclaimed_prior_day_high))
+      || (signals.reclaimed_prior_day_high && signals.reclaim_range_meaningful)
+      || (signals.multiple_up_closes_after_low && (signals.higher_low_hold || signals.reclaimed_prior_day_high || signals.reclaim_range_meaningful))
+      || (signals.positive_session && signals.higher_low_hold && !signals.weak_volume)
+    );
+    const supportTestState = explicitSupportFailure
+      ? 'failed'
+      : (!supportContextRecognized
+        ? 'not_tested'
+        : (supportHeld ? 'held' : 'testing'));
+    const buyerControlState = buyerConfirmed
+      ? 'confirmed'
+      : (buyerEmerging ? 'emerging' : 'none');
+    const meaningfulReversal = buyerControlState === 'confirmed';
+    const signalList = Object.keys(signals).filter(key => signals[key] === true);
+    return {
+      supportContext,
+      supportTestState,
+      buyerControlState,
+      supportHeld,
+      meaningfulReversal,
+      supportContextRecognized,
+      signalCount:signalList.length,
+      signals:signalList,
+      volumeState,
+      explicitSupportFailure,
+      supportHeldSignalCount:supportHeldSignals.length
+    };
+  }
+
   function resolveTrendGate(ctx = {}){
     const structureState = String(ctx.structure_state || '').trim().toLowerCase();
     const structureHealthy = ['strong', 'intact', 'developing_clean'].includes(structureState);
@@ -243,67 +385,31 @@
   }
 
   function resolveBuyerControlGate(ctx = {}){
-    const upClosesAfterLow = Number.isFinite(Number(ctx.candle_evidence_up_closes_after_low))
-      ? Number(ctx.candle_evidence_up_closes_after_low)
-      : 0;
-    const signals = {
-      strong_bullish_reversal:ctx.strong_bullish_reversal === true || ctx.strongBullishReversal === true,
-      bullish_engulfing:ctx.bullish_engulfing === true || ctx.bullishEngulfing === true,
-      hammer_rejection:ctx.hammer_rejection === true || ctx.hammerRejection === true || ctx.pin_bar_rejection === true || ctx.pinBarRejection === true,
-      bullish_outside_day:ctx.bullish_outside_day === true || ctx.bullishOutsideDay === true,
-      strong_green_close_near_high:ctx.strong_green_close_near_high === true || ctx.strongGreenCloseNearHigh === true,
-      gap_up_continuation_from_support:ctx.gap_up_continuation_from_support === true || ctx.gapUpContinuationFromSupport === true,
-      reclaimed_prior_day_high:flagTextIsTrue(ctx.candle_evidence_reclaimed_prior_day_high) || ctx.reclaimed_prior_day_high === true,
-      reclaim_range_meaningful:flagTextIsTrue(ctx.candle_evidence_reclaim_range_meaningful) || ctx.reclaim_range_meaningful === true,
-      downside_momentum_slowing:flagTextIsTrue(ctx.candle_evidence_downside_momentum_slowing) || ctx.downside_momentum_slowing === true,
-      tighter_ranges:flagTextIsTrue(ctx.candle_evidence_tighter_ranges) || ctx.tighter_ranges === true,
-      smaller_bodies:flagTextIsTrue(ctx.candle_evidence_smaller_bodies) || ctx.smaller_bodies === true,
-      higher_low_hold:flagTextIsTrue(ctx.candle_evidence_higher_low_hold) || ctx.higher_low_hold === true || ctx.higher_low_respected === true || ctx.swing_low_respected === true,
-      reclaims_level:ctx.reclaims_level === true || ctx.reclaimsLevel === true,
-      reclaim_attempt:ctx.reclaim_attempt === true,
-      positive_session:ctx.positive_session === true || ctx.positiveSession === true,
-      supportive_volume:['supportive', 'strong'].includes(String(ctx.volume_state || '').trim().toLowerCase()),
-      up_closes_after_low:upClosesAfterLow >= 1
-    };
-    const meaningfulReversal = !!(
-      signals.strong_bullish_reversal
-      || signals.bullish_engulfing
-      || signals.hammer_rejection
-      || signals.bullish_outside_day
-      || signals.strong_green_close_near_high
-      || signals.gap_up_continuation_from_support
-      || ((String(ctx.bounce_state || '').trim().toLowerCase() === 'confirmed' || String(ctx.stabilisation_state || '').trim().toLowerCase() === 'clear') && signals.reclaims_level)
-      || (signals.reclaimed_prior_day_high && signals.reclaim_range_meaningful)
-      || (signals.up_closes_after_low && (signals.downside_momentum_slowing || signals.higher_low_hold))
-      || (signals.positive_session && signals.higher_low_hold)
-    );
-    const supportHeld = !!(
-      signals.higher_low_hold
-      || signals.reclaims_level
-      || signals.reclaim_attempt
-      || signals.reclaim_range_meaningful
-      || ['near_20ma','near_50ma','at_20ma','at_50ma','reclaim','reclaim_zone','left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(String(ctx.pullback_zone || '').trim().toLowerCase())
-    );
-    const constructiveSignals = Object.keys(signals).filter(key => signals[key] === true);
-    const pass = supportHeld && meaningfulReversal;
+    const supportAuthority = resolveSupportAuthority(ctx);
+    const pass = supportAuthority.supportTestState === 'held' && supportAuthority.buyerControlState === 'confirmed';
     const reasons = [];
-    if(!supportHeld) reasons.push('Support has not clearly held yet.');
-    if(!meaningfulReversal) reasons.push('Buyers have not shown meaningful reversal evidence yet.');
+    if(supportAuthority.supportTestState === 'failed') reasons.push('The support test has failed.');
+    else if(supportAuthority.supportTestState !== 'held') reasons.push('Support has not clearly held yet.');
+    if(supportAuthority.buyerControlState === 'none') reasons.push('Buyers have not shown meaningful reversal evidence yet.');
+    else if(supportAuthority.buyerControlState === 'emerging') reasons.push('Buyer control is improving but not confirmed yet.');
     return {
       pass,
       reasons,
       checks:{
-        support_held:supportHeld,
-        meaningful_reversal:meaningfulReversal,
-        signal_count:constructiveSignals.length,
-        signals:constructiveSignals
+        support_context:supportAuthority.supportContext,
+        support_test_state:supportAuthority.supportTestState,
+        buyer_control_state:supportAuthority.buyerControlState,
+        support_held:supportAuthority.supportHeld,
+        meaningful_reversal:supportAuthority.meaningfulReversal,
+        signal_count:supportAuthority.signalCount,
+        signals:supportAuthority.signals
       }
     };
   }
 
   function resolveConfirmationGate(ctx = {}){
     const marketSeverity = canonicalMarketSeverity(ctx);
-    const volumeState = String(ctx.volume_state || '').trim().toLowerCase();
+    const volumeState = normalizeVolumeState(ctx.volume_state);
     const tradeability = String(ctx.tradeability || '').trim().toLowerCase();
     const planStatus = String(ctx.plan_status || '').trim().toLowerCase();
     const credibleRrValue = numericValueOrNull(ctx.credible_rr);
@@ -514,9 +620,15 @@
     const structureEligibility = String(ctx.structure_eligibility || ctx.structureEligibility || '').trim().toLowerCase();
     const supportInteractionHint = String(ctx.support_interaction_state || ctx.supportInteractionState || '').trim().toLowerCase();
     const explicitSupportInteraction = !!(supportInteractionHint && supportInteractionHint !== 'none');
-    const supportHeld = ctx.support_held === true || ctx.supportHeld === true;
-    const meaningfulReversal = ctx.meaningful_reversal === true || ctx.meaningfulReversal === true;
-    const signalCount = Number(ctx.signal_count ?? ctx.signalCount ?? 0);
+    const supportAuthority = resolveSupportAuthority({
+      ...ctx,
+      support_context:ctx.support_context,
+      support_test_state:ctx.support_test_state,
+      buyer_control_state:ctx.buyer_control_state
+    });
+    const supportHeld = supportAuthority.supportHeld === true || ctx.support_held === true || ctx.supportHeld === true;
+    const meaningfulReversal = supportAuthority.meaningfulReversal === true || ctx.meaningful_reversal === true || ctx.meaningfulReversal === true;
+    const signalCount = Number(ctx.signal_count ?? ctx.signalCount ?? supportAuthority.signalCount ?? 0);
     const reclaimConfirmedIndependent = ctx.reclaim_confirmed_independent === true || ctx.reclaimConfirmedIndependent === true;
     const reclaimsLevel = ctx.reclaims_level === true || ctx.reclaimsLevel === true;
     const entryTriggerHit = ctx.entry_trigger_hit === true || ctx.entryTriggerHit === true;
@@ -587,6 +699,9 @@
       rawPullbackState:rawPullbackState || 'none',
       canonicalPullbackState:canonicalPullbackState || 'none',
       canonicalPullbackValid,
+      supportContext:supportAuthority.supportContext,
+      supportTestState:supportAuthority.supportTestState,
+      buyerControlState:supportAuthority.buyerControlState,
       explicitBuyerResponsePresent,
       buyerResponsePresent,
       aliveStructure,
@@ -847,8 +962,9 @@
     const rrPriceable = credibleRrValue !== null
       ? credibleRrValue >= MIN_NEAR_ENTRY_RR
       : ((rrValue !== null && rrValue >= MIN_NEAR_ENTRY_RR) || (provisionalRrValue !== null && provisionalRrValue >= MIN_NEAR_ENTRY_RR));
-    const confirmedBounceOk = buyerControlGate.pass;
-    const provisionalBounceOk = provisionalPlan.nearEntryProvisionalBounceApplied === true && buyerControlGate.pass;
+    const supportAuthority = resolveSupportAuthority(ctx);
+    const confirmedBounceOk = supportAuthority.supportTestState === 'held' && supportAuthority.buyerControlState === 'confirmed';
+    const provisionalBounceOk = false;
     const recentlyLeftValidPullbackZone = provisionalPlan.recentlyLeftValidPullbackZone === true
       || inferRecentlyLeftValidPullbackZone({
         ...ctx,
@@ -860,6 +976,9 @@
       structure_hard_blocked:trendGate.checks.structure_damaged === true,
       bounce_ok:confirmedBounceOk || provisionalBounceOk || reclaimConfirmedAfterLeavingZone,
       bounce_hard_blocked:!(confirmedBounceOk || provisionalBounceOk || reclaimConfirmedAfterLeavingZone),
+      support_context:supportAuthority.supportContext,
+      support_test_state:supportAuthority.supportTestState,
+      buyer_control_state:supportAuthority.buyerControlState,
       pullback_ok:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone,
       pullback_valid:trendGate.checks.pullback_valid === true || provisionalPlan.pullbackOk === true || canonicalPullback.canonicalPullbackValid === true,
       near_entry_pullback_zone_accepted:nearEntryPullbackZoneOk(pullbackZone) || recentlyLeftValidPullbackZone || canonicalPullback.canonicalPullbackValid === true,
@@ -925,7 +1044,7 @@
       && !hasProvisionalPlan
       && !(provisionalPlan.hasClearInvalidationLevel && /invalidation level/i.test(bouncePriceability.unpriceableBlockReason))
     ) reasons.push(bouncePriceability.unpriceableBlockReason);
-    if(!checks.pullback_ok) reasons.push('Pullback must be near the 20MA or 50MA.');
+    if(!checks.pullback_ok) reasons.push('Pullback must be near a recognised support area.');
     if(!checks.pullback_valid) reasons.push('Pullback context is invalid.');
     if(!checks.plan_visible) reasons.push('No actionable plan yet.');
     if(!checks.has_entry) reasons.push('Entry is missing from the plan.');
@@ -1929,6 +2048,13 @@
     const buyerControlGateChecks = guardedVerdict.buyer_control_gate_checks || {};
     const confirmationGateChecks = guardedVerdict.confirmation_gate_checks || {};
     const latePullbackGateChecks = guardedVerdict.late_pullback_gate_checks || {};
+    const supportAuthority = resolveSupportAuthority({
+      ...(item && typeof item === 'object' ? item : {}),
+      ...(guardedVerdict && typeof guardedVerdict === 'object' ? guardedVerdict : {}),
+      current_price:currentPrice,
+      ma20,
+      ma50
+    });
     const below50WithoutReclaim = priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true));
     const hasClearInvalidationLevel = nearEntryGateChecks.has_clear_invalidation_level === true
       || entryGateChecks.has_clear_invalidation_level === true;
@@ -2289,9 +2415,9 @@
       canonical_soft_readiness_alignment_source:canonicalAuthoritySource,
       setup_location_state:setupLocationState,
       market_severity:trendGateChecks.market_severity || marketSeverity,
-      buyer_control_state:buyerControlGateChecks.meaningful_reversal === true
-        ? 'buyers_regaining_control'
-        : 'buyers_not_in_control',
+      support_context:supportAuthority.supportContext,
+      support_test_state:supportAuthority.supportTestState,
+      buyer_control_state:supportAuthority.buyerControlState,
       confirmation_state:confirmationGateChecks.confirmation_signal_present === true
         ? 'confirmed'
         : 'pending',
@@ -2346,7 +2472,7 @@
       currentLocationState:guardedVerdict.current_location_state || '',
       pullback_validity_source:guardedVerdict.pullback_validity_source || '',
       pullbackValiditySource:guardedVerdict.pullback_validity_source || '',
-      volume_state:volumeState || '',
+      volume_state:normalizeVolumeState(volumeState || ''),
       market_regime:marketSeverity,
       planPriceabilitySource:'resolver-core:effectivePlan+marketData',
       resolvedPlanEntry:planEntry,
@@ -3690,6 +3816,8 @@
     getBucket,
     getBadge,
     getActions,
+    normalizeVolumeState,
+    resolveSupportAuthority,
     resolveCanonicalPullbackContext,
     canPromoteToEntry,
     canPromoteToNearEntry,

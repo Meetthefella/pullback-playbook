@@ -153,6 +153,9 @@ function buildCanonicalContractSnapshot(record, runtimeContext = {}){
       setupLocationState:String(setup.setupLocationState || '').trim().toLowerCase(),
       priceabilityState:String(setup.priceabilityState || '').trim().toLowerCase(),
       bounceState:String(setup.bounceState || '').trim().toLowerCase(),
+      supportContext:String(setup.supportContext || setup.support_context || '').trim().toLowerCase(),
+      supportTestState:String(setup.supportTestState || setup.support_test_state || '').trim().toLowerCase(),
+      buyerControlState:String(setup.buyerControlState || setup.buyer_control_state || '').trim().toLowerCase(),
       lifecycleState:String(lifecycle.state || canonicalVerdict).trim().toLowerCase()
     },
     planAuthority:{

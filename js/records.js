@@ -19,6 +19,8 @@
   ]);
 
   const VALID_SCORE_VOLUME_STATES = new Set([
+    'expanding',
+    'constructive',
     'supportive',
     'strong',
     'normal',

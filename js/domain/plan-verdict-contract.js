@@ -56,6 +56,8 @@
     'setup.stabilisationState':CATEGORY.DERIVED_AUTHORITY,
     'setup.trendState':CATEGORY.DERIVED_AUTHORITY,
     'setup.marketSeverity':CATEGORY.DERIVED_AUTHORITY,
+    'setup.supportContext':CATEGORY.DERIVED_AUTHORITY,
+    'setup.supportTestState':CATEGORY.DERIVED_AUTHORITY,
     'setup.buyerControlState':CATEGORY.DERIVED_AUTHORITY,
     'setup.confirmationState':CATEGORY.DERIVED_AUTHORITY,
     'setup.latePullbackState':CATEGORY.DERIVED_AUTHORITY,
@@ -328,6 +330,8 @@
       bounceState:String(derivedStates.bounceState || setup.bounceState || '').trim().toLowerCase(),
       lifecycleState:String(lifecycleAuthority.state || '').trim().toLowerCase(),
       marketSeverity:String(derivedStates.marketSeverity || resolvedContract.market_severity || globalVerdict.market_severity || '').trim().toLowerCase(),
+      supportContext:String(derivedStates.supportContext || resolvedContract.support_context || globalVerdict.support_context || '').trim().toLowerCase(),
+      supportTestState:String(derivedStates.supportTestState || resolvedContract.support_test_state || globalVerdict.support_test_state || '').trim().toLowerCase(),
       buyerControlState:String(derivedStates.buyerControlState || resolvedContract.buyer_control_state || globalVerdict.buyer_control_state || '').trim().toLowerCase(),
       confirmationState:String(derivedStates.confirmationState || resolvedContract.confirmation_state || globalVerdict.confirmation_state || '').trim().toLowerCase(),
       latePullbackState:String(derivedStates.latePullbackState || resolvedContract.late_pullback_state || globalVerdict.late_pullback_state || '').trim().toLowerCase()

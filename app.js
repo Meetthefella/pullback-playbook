@@ -24943,6 +24943,18 @@ function isAccepted50MaSupportTestDisplayState({
     || global.bounce_state
     || ''
   ).trim().toLowerCase();
+  const supportTestState = String(
+    derived.supportTestState
+    || derived.support_test_state
+    || global.support_test_state
+    || ''
+  ).trim().toLowerCase();
+  const buyerControlState = String(
+    derived.buyerControlState
+    || derived.buyer_control_state
+    || global.buyer_control_state
+    || ''
+  ).trim().toLowerCase();
   const explicitInvalidationReason = String(global.explicit_invalidation_reason || '').trim().toLowerCase();
   const hasExplicitInvalidation = !!(
     explicitInvalidationReason
@@ -24982,7 +24994,9 @@ function isAccepted50MaSupportTestDisplayState({
   const currentPrice = readNumber(item.marketData && item.marketData.price);
   const sma50 = readNumber(item.marketData && item.marketData.sma50);
   const lost50MaSupport = Number.isFinite(currentPrice) && Number.isFinite(sma50) && sma50 > 0 && currentPrice < sma50 * 0.99;
-  const bounceUnconfirmed = ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState);
+  const bounceUnconfirmed = supportTestState
+    ? supportTestState === 'testing'
+    : ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState);
   const positiveAliveSignal = structurallyAliveAtRefresh
     || ['alive','messy'].includes(structureEligibility)
     || ['strong','intact','developing_clean'].includes(structureState);
@@ -24993,6 +25007,7 @@ function isAccepted50MaSupportTestDisplayState({
   return pullbackAccepted
     && pullbackState === 'near_50ma'
     && bounceUnconfirmed
+    && buyerControlState !== 'confirmed'
     && positiveAliveSignal
     && !lost50MaSupport
     && !terminalAvoid
@@ -29477,6 +29492,13 @@ function resolveCanonicalPullbackState({
     || global.structure_eligibility
     || ''
   ).trim().toLowerCase();
+  const normalizeVolumeState = value => {
+    const safe = String(value || '').trim().toLowerCase();
+    if(['expanding', 'supportive', 'strong', 'active', 'above_average'].includes(safe)) return 'expanding';
+    if(['constructive', 'normal', 'neutral', 'average', 'steady'].includes(safe)) return 'constructive';
+    if(['weak', 'light', 'low', 'below_average'].includes(safe)) return 'weak';
+    return safe || 'constructive';
+  };
   const rawPullbackDetected = global.pullback_detected;
   const price = numericOrNull(item.marketData && (item.marketData.price ?? item.marketData.currentPrice ?? item.marketData.close));
   const sma20 = numericOrNull(item.marketData && (item.marketData.sma20 ?? item.marketData.ma20));
@@ -29508,13 +29530,140 @@ function resolveCanonicalPullbackState({
     || derived.entry_trigger_hit === true
     || global.entry_trigger_hit === true
     || global.entryTriggerHit === true;
+  const supportInteractionHint = String(
+    derived.supportInteractionState
+    || global.support_interaction_state
+    || global.supportInteractionState
+    || ''
+  ).trim().toLowerCase();
+  const supportContextHint = String(
+    derived.supportContext
+    || derived.support_context
+    || global.support_context
+    || ''
+  ).trim().toLowerCase();
+  const supportTestStateHint = String(
+    derived.supportTestState
+    || derived.support_test_state
+    || global.support_test_state
+    || ''
+  ).trim().toLowerCase();
+  const buyerControlStateHint = String(
+    derived.buyerControlState
+    || derived.buyer_control_state
+    || global.buyer_control_state
+    || ''
+  ).trim().toLowerCase();
+  const volumeState = normalizeVolumeState(
+    derived.volumeState
+    || derived.volume_state
+    || global.volume_state
+    || ''
+  );
+  const explicitSupportInteraction = !!(supportInteractionHint && supportInteractionHint !== 'none');
+  const recentlyLeftSupportZone = derived.recentlyLeftValidPullbackZone === true
+    || global.recently_left_valid_pullback_zone === true
+    || ['left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(rawPullbackState);
+  const recognizedSupportSetupLocation = ['near_20ma','at_20ma','near_50ma','at_50ma','supportive','support_band','pullback_zone','usable_pullback'].includes(setupLocationState);
+  const recognizedRawSupportHistory = ['near_20ma','at_20ma','near_50ma','at_50ma','left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(rawPullbackState);
+  const supportContext = (() => {
+    if(supportContextHint) return supportContextHint;
+    if(
+      supportInteractionHint.includes('20ma')
+      || ['near_20ma','at_20ma','left_20ma','recently_left_20ma'].includes(rawPullbackState)
+      || ['near_20ma','at_20ma'].includes(setupLocationState)
+      || near20
+    ) return '20ma_support';
+    if(
+      supportInteractionHint.includes('50ma')
+      || ['near_50ma','at_50ma','left_50ma','recently_left_50ma'].includes(rawPullbackState)
+      || ['near_50ma','at_50ma'].includes(setupLocationState)
+      || near50
+    ) return '50ma_support';
+    if(
+      explicitSupportInteraction
+      || ['supportive','support_band','pullback_zone','usable_pullback','between_20_50ma'].includes(setupLocationState)
+      || ['reclaim','reclaim_zone','between_20_50','shallow'].includes(rawPullbackState)
+    ) return 'other_support';
+    return 'none';
+  })();
+  const upClosesAfterLowValue = derived.candleEvidenceUpClosesAfterLow
+    ?? derived.candle_evidence_up_closes_after_low
+    ?? global.candle_evidence_up_closes_after_low;
+  const upClosesAfterLow = Number.isFinite(Number(upClosesAfterLowValue)) ? Number(upClosesAfterLowValue) : 0;
+  const supportSignals = {
+    higher_low_hold:derived.higherLowHold === true || derived.higher_low_hold === true || global.higher_low_hold === true || global.candle_evidence_higher_low_hold === 'yes',
+    reclaim_attempt:derived.reclaimAttempt === true || derived.reclaim_attempt === true || global.reclaim_attempt === true,
+    reclaim_range_meaningful:derived.reclaimRangeMeaningful === true || derived.reclaim_range_meaningful === true || global.reclaim_range_meaningful === true || global.candle_evidence_reclaim_range_meaningful === 'yes',
+    downside_momentum_slowing:derived.downsideMomentumSlowing === true || derived.downside_momentum_slowing === true || global.downside_momentum_slowing === true || global.candle_evidence_downside_momentum_slowing === 'yes',
+    tighter_ranges:derived.tighterRanges === true || derived.tighter_ranges === true || global.tighter_ranges === true || global.candle_evidence_tighter_ranges === 'yes',
+    smaller_bodies:derived.smallerBodies === true || derived.smaller_bodies === true || global.smaller_bodies === true || global.candle_evidence_smaller_bodies === 'yes',
+    reclaims_level:reclaimsLevel,
+    reclaimed_prior_day_high:derived.reclaimedPriorDayHigh === true || derived.reclaimed_prior_day_high === true || global.reclaimed_prior_day_high === true || global.candle_evidence_reclaimed_prior_day_high === 'yes',
+    strong_reversal:derived.strongBullishReversal === true || global.strong_bullish_reversal === true || global.strongBullishReversal === true,
+    bullish_engulfing:derived.bullishEngulfing === true || global.bullish_engulfing === true || global.bullishEngulfing === true,
+    hammer_rejection:derived.hammerRejection === true || global.hammer_rejection === true || global.hammerRejection === true || global.pin_bar_rejection === true || global.pinBarRejection === true,
+    strong_green_close_near_high:derived.strongGreenCloseNearHigh === true || global.strong_green_close_near_high === true || global.strongGreenCloseNearHigh === true,
+    positive_session:derived.positiveSession === true || global.positive_session === true || global.positiveSession === true,
+    reclaim_confirmed_independent:reclaimConfirmedIndependent,
+    entry_trigger_hit:entryTriggerHit,
+    up_closes_after_low:upClosesAfterLow >= 1,
+    multiple_up_closes_after_low:upClosesAfterLow >= 2,
+    stabilising:['clear','present','early'].includes(rawStabilisationState),
+    weak_volume:volumeState === 'weak'
+  };
+  const supportHeldBySignals = supportContext !== 'none' && (
+    supportSignals.higher_low_hold
+    || supportSignals.reclaims_level
+    || supportSignals.reclaim_confirmed_independent
+    || supportSignals.reclaim_range_meaningful
+    || (supportSignals.up_closes_after_low && (supportSignals.downside_momentum_slowing || supportSignals.tighter_ranges || supportSignals.smaller_bodies))
+    || (supportSignals.reclaim_attempt && supportSignals.stabilising)
+  );
+  const buyerControlConfirmedBySignals = supportHeldBySignals && (
+    supportSignals.strong_reversal
+    || supportSignals.bullish_engulfing
+    || supportSignals.hammer_rejection
+    || supportSignals.strong_green_close_near_high
+    || supportSignals.entry_trigger_hit
+    || supportSignals.reclaim_confirmed_independent
+    || (supportSignals.reclaims_level && (supportSignals.higher_low_hold || supportSignals.reclaim_range_meaningful || supportSignals.reclaimed_prior_day_high))
+    || (supportSignals.reclaimed_prior_day_high && supportSignals.reclaim_range_meaningful)
+    || (supportSignals.multiple_up_closes_after_low && (supportSignals.higher_low_hold || supportSignals.reclaim_range_meaningful || supportSignals.reclaimed_prior_day_high))
+    || (supportSignals.positive_session && supportSignals.higher_low_hold && !supportSignals.weak_volume)
+  );
+  const supportTestState = (() => {
+    if(supportTestStateHint) return supportTestStateHint;
+    if(supportContext === 'none') return 'not_tested';
+    if(global.support_failed === true || global.structurally_broken === true || ['broken','failed','dead','invalid'].includes(structureState)) return 'failed';
+    if(supportHeld || supportHeldBySignals) return 'held';
+    return 'testing';
+  })();
+  const buyerControlState = (() => {
+    if(buyerControlStateHint) return buyerControlStateHint;
+    if(buyerControlConfirmedBySignals || meaningfulReversal) return 'confirmed';
+    if(
+      supportContext !== 'none'
+      && (
+        supportHeld
+        || supportHeldBySignals
+        || supportSignals.positive_session
+        || supportSignals.stabilising
+        || supportSignals.reclaim_attempt
+        || supportSignals.up_closes_after_low
+        || ['attempt','early','developing','improving','confirmed','rebound'].includes(rawBounceState)
+      )
+    ) return 'emerging';
+    return 'none';
+  })();
   const explicitBuyerResponsePresent = derived.buyerResponsePresent === true || global.buyer_response_present === true;
-  const buyerResponsePresent = derived.buyerResponsePresent === true
-    || global.buyer_response_present === true
+  const buyerResponsePresent = explicitBuyerResponsePresent
     || ['attempt','early','developing','confirmed','improving','rebound'].includes(rawBounceState)
     || ['clear','present','early'].includes(rawStabilisationState)
     || supportHeld
+    || supportHeldBySignals
     || meaningfulReversal
+    || buyerControlState !== 'none'
     || signalCount > 0
     || reclaimConfirmedIndependent
     || reclaimsLevel
@@ -29522,20 +29671,8 @@ function resolveCanonicalPullbackState({
   const aliveStructure = !evidence.terminalAvoid
     && !evidence.structuralWeakness
     && (['alive','messy'].includes(structureEligibility) || ['strong','intact','developing_clean','developing'].includes(structureState));
-  const supportInteractionHint = String(
-    derived.supportInteractionState
-    || global.support_interaction_state
-    || global.supportInteractionState
-    || ''
-  ).trim().toLowerCase();
-  const recentlyLeftSupportZone = derived.recentlyLeftValidPullbackZone === true
-    || global.recently_left_valid_pullback_zone === true
-    || ['left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(rawPullbackState);
-  const recognizedSupportSetupLocation = ['near_20ma','at_20ma','near_50ma','at_50ma','supportive','support_band','pullback_zone','usable_pullback'].includes(setupLocationState);
-  const recognizedRawSupportHistory = ['near_20ma','at_20ma','near_50ma','at_50ma','left_20ma','left_50ma','recently_left_20ma','recently_left_50ma'].includes(rawPullbackState);
-  const explicitSupportInteraction = !!(supportInteractionHint && supportInteractionHint !== 'none');
-  const supportHeldAtRecognizedZone = supportHeld && (near20 || near50 || recognizedSupportSetupLocation || recognizedRawSupportHistory || explicitSupportInteraction || recentlyLeftSupportZone);
-  const meaningfulReversalAtRecognizedZone = meaningfulReversal && (near20 || near50 || recognizedSupportSetupLocation || recognizedRawSupportHistory || explicitSupportInteraction || recentlyLeftSupportZone);
+  const supportHeldAtRecognizedZone = (supportHeld || supportHeldBySignals) && (near20 || near50 || recognizedSupportSetupLocation || recognizedRawSupportHistory || explicitSupportInteraction || recentlyLeftSupportZone);
+  const meaningfulReversalAtRecognizedZone = (meaningfulReversal || buyerControlState === 'confirmed') && (near20 || near50 || recognizedSupportSetupLocation || recognizedRawSupportHistory || explicitSupportInteraction || recentlyLeftSupportZone);
   const supportInteractionState = (() => {
     if(explicitSupportInteraction) return supportInteractionHint;
     if(near20 || ['near_20ma','at_20ma'].includes(setupLocationState)) return 'active_20ma_support';
@@ -29583,6 +29720,9 @@ function resolveCanonicalPullbackState({
     rawPullbackDetected:rawPullbackDetected === true ? true : (rawPullbackDetected === false ? false : null),
     rawBounceState:rawBounceState || 'none',
     rawStabilisationState:rawStabilisationState || 'none',
+    supportContext,
+    supportTestState,
+    buyerControlState,
     buyerResponsePresent,
     explicitBuyerResponsePresent,
     aliveStructure,
@@ -34925,11 +35065,11 @@ function deriveSetupStates(card, data, checks, tradePlan){
     ? 'priceable'
     : (bouncePriceability.hasClearInvalidationLevel && entryDefined && stopDefined && targetDefined ? 'provisional' : 'unpriceable');
 
-  let volumeState = 'normal';
+  let volumeState = 'constructive';
   if(safeChecks.volume && bounceState !== 'none'){
-    volumeState = 'supportive';
+    volumeState = 'expanding';
   }else if(Number.isFinite(volume) && Number.isFinite(avgVolume30d) && avgVolume30d > 0){
-    if(volume >= avgVolume30d * 1.1 && bounceState !== 'none') volumeState = 'supportive';
+    if(volume >= avgVolume30d * 1.1 && bounceState !== 'none') volumeState = 'expanding';
     else if(volume < avgVolume30d * 0.8) volumeState = 'weak';
   }
 
@@ -35008,6 +35148,9 @@ function buildAnalysisPayload(card){
     canonicalPullbackState:canonicalPullback.canonicalPullbackState,
     reconciliationReason:canonicalPullback.reconciliationReason,
     supportInteractionState:canonicalPullback.supportInteractionState,
+    supportContext:canonicalPullback.supportContext,
+    supportTestState:canonicalPullback.supportTestState,
+    buyerControlState:canonicalPullback.buyerControlState,
     currentLocationState:canonicalPullback.currentLocationState,
     pullbackValiditySource:canonicalPullback.pullbackValiditySource,
     structureState:derivedStates.structure_state,

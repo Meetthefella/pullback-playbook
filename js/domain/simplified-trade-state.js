@@ -296,6 +296,8 @@
     const structureEligibility = String(derivedStates.structureEligibility || resolvedState.structure_eligibility || '').trim().toLowerCase();
     const pullbackState = String(derivedStates.pullbackZone || derivedStates.pullbackState || resolvedState.pullback_zone || resolvedState.pullback_state || '').trim().toLowerCase();
     const bounceState = String(derivedStates.bounceState || resolvedState.bounce_state || '').trim().toLowerCase();
+    const supportTestState = String(derivedStates.supportTestState || resolvedState.support_test_state || '').trim().toLowerCase();
+    const buyerControlState = String(derivedStates.buyerControlState || resolvedState.buyer_control_state || '').trim().toLowerCase();
     const pullbackAccepted = resolvedState.nearEntryPullbackZoneAccepted === true
       || resolvedState.near_entry_pullback_zone_accepted === true
       || resolvedState.pullback_ok === true
@@ -344,7 +346,14 @@
       || hasExplicitInvalidation;
     return pullbackAccepted
       && pullbackState === 'near_50ma'
-      && ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState)
+      && (
+        supportTestState === 'testing'
+        || (
+          !supportTestState
+          && ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState)
+        )
+      )
+      && buyerControlState !== 'confirmed'
       && positiveAliveSignal
       && !lost50MaSupport
       && !terminalAvoid
