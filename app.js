@@ -19093,9 +19093,10 @@ function compactReasonLineForView(view, maxParts = 3){
   else if(derived.trendState === 'strong') pushPart('Strong trend');
   else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
   if(derived.pullbackState && derived.pullbackState !== 'none') pushPart(pullbackStateLabel(derived.pullbackState));
-  if(derived.bounceState === 'confirmed') pushPart('Bounce confirmed');
-  else if(derived.bounceState === 'attempt') pushPart('Bounce tentative');
-  else if(derived.bounceState === 'none') pushPart('No bounce');
+  if(derived.buyerControlState === 'confirmed' || derived.bounceState === 'confirmed') pushPart('Buyers confirmed');
+  else if(derived.supportTestState === 'testing') pushPart('Support testing');
+  else if(['emerging','attempt','early','developing'].includes(String(derived.buyerControlState || derived.bounceState || '').toLowerCase())) pushPart('Buyers emerging');
+  else if(derived.bounceState === 'none') pushPart('No buyer control');
   if(!item.plan.hasValidPlan && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) pushPart('Low est reward');
   if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
   if(derived.volumeState === 'weak') pushPart('Weak volume');
@@ -19136,11 +19137,14 @@ function scanCardTechnicalSummaryForView(view){
     pullbackState:String(derived && derived.pullbackState || '').toLowerCase(),
     setupLocationState:String(derived && derived.setupLocationState || '').toLowerCase()
   });
-  let responseLabel = 'No bounce';
+  const supportTestState = String(derived && derived.supportTestState || '').toLowerCase();
+  const buyerControlState = String(derived && derived.buyerControlState || '').toLowerCase();
+  let responseLabel = 'No buyer control';
   if(reviewEvidence.consolidating) responseLabel = reviewConsolidationPresentationCopy().technicalLabel;
-  else if(bounceState === 'confirmed') responseLabel = 'Bounce confirmed';
-  else if(bounceState === 'attempt') responseLabel = 'Bounce attempt';
-  else if(bounceState === 'early') responseLabel = 'Bounce early';
+  else if(buyerControlState === 'confirmed' || bounceState === 'confirmed') responseLabel = 'Buyers confirmed';
+  else if(supportTestState === 'testing') responseLabel = 'Support testing';
+  else if(buyerControlState === 'emerging' || bounceState === 'attempt') responseLabel = 'Buyers emerging';
+  else if(bounceState === 'early') responseLabel = 'Early stabilisation';
   else if(stabilisationState === 'clear' || stabilisationState === 'present' || stabilisationState === 'early') responseLabel = 'Stabilising';
   return [structureLabel, pullbackLabel, responseLabel].filter(Boolean).join(' | ');
 }
@@ -19788,7 +19792,7 @@ function buildSummary(checks, status, context = {}){
       return `${mainBlocker || 'No actionable plan yet.'} Wait for a valid entry, stop, and first target before treating this as actionable.`;
     }
     if(bounceState === 'none'){
-      return `${mainBlocker || 'No bounce confirmation yet.'} Wait for price to stabilise and form a clear bounce before entry.`;
+      return `${mainBlocker || 'Buyer control is not confirmed yet.'} Wait for price to stabilise, hold support, and show clearer buyer control before entry.`;
     }
   }
   if(!trendStrong || !above50 || !above200 || !nearMA){
@@ -19805,8 +19809,8 @@ function buildSummary(checks, status, context = {}){
     const copy = reviewConsolidationPresentationCopy();
     return `${copy.summary} ${copy.blocker} ${copy.nextAction}`;
   }
-  if(stabilising) return `${text} Price is stabilising, but the bounce still needs confirmation.`;
-  return `${text} There is no clear stabilisation or bounce yet.`;
+  if(stabilising) return `${text} Price is stabilising, but buyer control still needs confirmation.`;
+  return `${text} There is no clear stabilisation or buyer control yet.`;
 }
 
 function reviewChecklistContextForRecord(record, options = {}){
@@ -20407,9 +20411,9 @@ function penaltyReasonLabelFromSource(sourceId, options = {}){
     case 'stop_breach':
       return 'Price below stop';
     case 'no_bounce_confirmation':
-      return 'No bounce';
+      return 'No buyer control';
     case 'bounce_unconfirmed':
-      return 'Bounce unconfirmed';
+      return 'Buyer control unconfirmed';
     case 'early_stabilisation':
       return 'Early stabilisation only';
     case 'weak_volume':
@@ -24705,11 +24709,11 @@ function buildSharedSetupNarrative({
     && !hasProvisionalPlan
   ){
     stateLabel = 'Developing Watch';
-    primaryReason = 'The bounce is still taking shape, so a safe entry point cannot be identified yet.';
+    primaryReason = 'Support is still being tested and buyer control is only starting to emerge, so a safe entry point cannot be identified yet.';
     blocker = 'There is not a clear support level for managing risk yet.';
-    nextAction = 'Wait for a stronger bounce and a clearer area of support before considering an entry.';
+    nextAction = 'Wait for support to hold more clearly and for buyers to take firmer control before considering an entry.';
     pushUnique(evidence, movingAverageEvidence);
-    pushUnique(evidence, 'The rebound is still developing.');
+    pushUnique(evidence, 'The support response is still developing.');
     pushUnique(evidence, 'Setup remains untradable.');
     if(weakVolume) pushUnique(cautions, 'Weak volume reduces confidence in the rebound.');
     [
@@ -24721,7 +24725,7 @@ function buildSharedSetupNarrative({
   }else if(canonicalVerdict === 'near_entry'){
     stateLabel = 'Near Entry';
     if(weakVolume){
-      primaryReason = 'The setup is close, but weak volume reduces confidence in the rebound.';
+      primaryReason = 'The setup is close, but weak volume reduces confidence in the buyer response.';
       blocker = 'Buyers still need to show stronger follow-through.';
       pushUnique(cautions, 'Weak volume reduces confidence in the rebound.');
     }else if(viability === 'low_priority'){
@@ -24804,20 +24808,20 @@ function buildSharedSetupNarrative({
         'Stronger follow-through that improves reward-to-risk'
       ].forEach(line => pushUnique(promotionRequirements, line));
     }else if(monitorTone && aliveStructure && strongStructure && bounceAttempt){
-      primaryReason = 'Buyers are starting to step in, but the move is not convincing yet.';
+      primaryReason = 'Support is reacting, but buyer control is not convincing yet.';
       blocker = invalidationExplicitlyMissing
         ? 'There is not a clear support level for managing risk yet.'
-        : 'The bounce still needs stronger confirmation.';
+        : 'Buyer control still needs stronger confirmation.';
       nextAction = invalidationExplicitlyMissing
-        ? 'Wait for a stronger bounce and a clearer area of support before considering an entry.'
+        ? 'Wait for support to hold more clearly and for buyers to take firmer control before considering an entry.'
         : 'Wait for stronger confirmation before considering an entry.';
       pushUnique(evidence, movingAverageEvidence);
-      pushUnique(evidence, 'The rebound is still developing.');
+      pushUnique(evidence, 'The support response is still developing.');
       if(priceabilityState === 'unpriceable' || !planVisible){
         pushUnique(evidence, 'Setup remains untradable.');
       }
       [
-        'Stronger bounce confirmation',
+        'Stronger buyer-control confirmation',
         'A clearer support level beneath price',
         'A reliable stop-loss location'
       ].forEach(line => pushUnique(promotionRequirements, line));
@@ -25016,15 +25020,15 @@ function isAccepted50MaSupportTestDisplayState({
 
 function review50MaSupportTestPresentationCopy(){
   return {
-    tradeStatus:'Setup not ready yet.',
+    tradeStatus:'Support test still in progress.',
     draftTradeStatus:'Draft plan possible, but not actionable yet.',
-    blocker:'Price is testing the 50MA, but buyers have not confirmed support yet.',
+    blocker:'Price is testing the 50MA and buyer control is not confirmed yet.',
     monitoringReason:'Still structurally alive; monitor for a 50MA support defence.',
-    nextAction:'Watch for a bounce or reclaim before considering entry.',
+    nextAction:'Watch for the 50MA to hold and for buyers to reclaim control before considering entry.',
     technicalStructure:'Structure intact',
     technicalPullback:'Pullback near 50MA',
-    technicalBounce:'Bounce not confirmed',
-    trackReason:'Testing 50MA support - waiting for buyers to confirm.'
+    technicalBounce:'Buyer control not confirmed',
+    trackReason:'Testing 50MA support - waiting for buyer control to confirm.'
   };
 }
 
@@ -29083,7 +29087,7 @@ function sanitizeAliveWatchSemanticCopy(text, setup = {}){
   if(evidence.bounceAttempt && saysNoBounce){
     return evidence.unpriceable
       ? 'The broader uptrend is still intact, but the setup is currently untradable because no low-risk entry area has formed yet.'
-      : 'Bounce attempt present, but confirmation is not strong enough yet.';
+      : 'Support is reacting, but buyer control is not strong enough yet.';
   }
   if(saysWeakOrBroken){
     return evidence.unpriceable
@@ -29783,17 +29787,17 @@ function reviewTechnicalBounceLabel({
   const bounce = String(bounceState || '').trim().toLowerCase();
   const stabilisation = String(stabilisationState || '').trim().toLowerCase();
   if(evidence.consolidating) return reviewConsolidationPresentationCopy().technicalLabel;
-  if(bounce === 'confirmed') return 'Bounce confirmed';
-  if(bounce === 'attempt') return 'Bounce attempt';
+  if(bounce === 'confirmed') return 'Buyers confirmed';
+  if(bounce === 'attempt') return 'Buyers emerging';
   if(['early', 'developing'].includes(bounce) || ['clear', 'present', 'early'].includes(stabilisation)) return 'Stabilising';
-  return 'Bounce none';
+  return 'No buyer control';
 }
 
 function reviewTechnicalVolumeLabel(state){
   const safe = String(state || '').trim().toLowerCase();
-  if(['supportive', 'strong'].includes(safe)) return 'Volume supportive';
+  if(['expanding', 'supportive', 'strong'].includes(safe)) return 'Volume expanding';
   if(safe === 'weak') return 'Volume weak';
-  return 'Volume normal';
+  return 'Volume constructive';
 }
 
 function reviewTechnicalMarketLabel(record){
@@ -31298,9 +31302,10 @@ function compactReasonLineForRecord(record, maxParts = 3){
   else if(derived.trendState === 'strong') pushPart('Strong trend');
   else if(derived.trendState === 'acceptable') pushPart('Acceptable trend');
   if(derived.pullbackState && derived.pullbackState !== 'none') pushPart(pullbackStateLabel(derived.pullbackState));
-  if(derived.bounceState === 'confirmed') pushPart('Bounce confirmed');
-  else if(derived.bounceState === 'attempt') pushPart('Bounce tentative');
-  else if(derived.bounceState === 'none') pushPart('No bounce');
+  if(derived.buyerControlState === 'confirmed' || derived.bounceState === 'confirmed') pushPart('Buyers confirmed');
+  else if(derived.supportTestState === 'testing') pushPart('Support testing');
+  else if(['emerging','attempt','early','developing'].includes(String(derived.buyerControlState || derived.bounceState || '').toLowerCase())) pushPart('Buyers emerging');
+  else if(derived.bounceState === 'none') pushPart('No buyer control');
   if(!item.plan.hasValidPlan && Number.isFinite(estimatedRrValue) && estimatedRrValue < currentRrThreshold()) pushPart('Low est reward');
   if(derived.stabilisationState === 'early') pushPart('Early stabilisation');
   if(derived.volumeState === 'weak') pushPart('Weak volume');

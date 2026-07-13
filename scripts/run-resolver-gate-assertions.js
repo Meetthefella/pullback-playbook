@@ -2343,8 +2343,8 @@ function runReviewProjectionAssertions(){
     tgtStyleAliveWatchSemantic.tradeStatus && tgtStyleAliveWatchSemantic.tradeStatus.line2,
     tgtStyleAliveWatchSemantic.rrDisplay
   ].join(' | ');
-  if(!/bounce is still taking shape|buyers are starting to step in/i.test(tgtStyleText) || !/clear support level for managing risk|Trade remains unpriceable|No actionable trade yet/i.test(tgtStyleText)){
-    throw new Error('TGT-style alive Watch copy must frame the setup as a developing bounce with missing support/risk structure and no trade yet.');
+  if(!/support is still being tested|buyer control is only starting to emerge|support is reacting|buyers are starting to step in/i.test(tgtStyleText) || !/clear support level for managing risk|Trade remains unpriceable|No actionable trade yet/i.test(tgtStyleText)){
+    throw new Error('TGT-style alive Watch copy must frame the setup as a developing support response with missing support/risk structure and no trade yet.');
   }
   if(/structure (?:looks )?(?:weak|broken)|no signs of stabilisation|no bounce yet|no signs.*bounce/i.test(tgtStyleText)){
     throw new Error('TGT-style alive Watch copy must not imply weak/broken structure or absent bounce.');
@@ -2875,13 +2875,13 @@ function runSharedNarrativeConsistencyAssertions(){
   if(narrative.stateLabel !== 'Developing Watch'){
     throw new Error('Shared narrative must label the developing-watch state consistently.');
   }
-  if(!/bounce is still taking shape/i.test(String(narrative.primaryReason || ''))){
-    throw new Error('Shared narrative must explain that the bounce is still taking shape.');
+  if(!/support is still being tested|buyer control is only starting to emerge/i.test(String(narrative.primaryReason || ''))){
+    throw new Error('Shared narrative must explain that support is still being tested and buyer control is emerging.');
   }
   if(!/support level for managing risk/i.test(String(narrative.blocker || ''))){
     throw new Error('Shared narrative must explain the missing support/risk level.');
   }
-  if(!/stronger bounce.*clearer area of support/i.test(String(narrative.nextAction || ''))){
+  if(!/support to hold more clearly|buyers to take firmer control/i.test(String(narrative.nextAction || ''))){
     throw new Error('Shared narrative must explain the next step in plain-English chart terms.');
   }
   if((narrative.promotionRequirements || []).join(' ').match(/needs structure repair/i)){
@@ -2900,10 +2900,10 @@ function runSharedNarrativeConsistencyAssertions(){
       derivedStates:sharedInput.derivedStates
     }
   });
-  if(trackModel.headline !== narrative.stateLabel || !/bounce is still taking shape/i.test(String(trackModel.primaryReason || ''))){
+  if(trackModel.headline !== narrative.stateLabel || !/support is still being tested|buyer control is only starting to emerge/i.test(String(trackModel.primaryReason || ''))){
     throw new Error('Track card narrative must align with the shared developing-watch narrative.');
   }
-  if(!/stronger bounce and a clearer area of support/i.test(String(trackModel.planSummary || '')) || /conditions are not strong enough for active focus/i.test(String(trackModel.planSummary || ''))){
+  if(!/support to hold more clearly|buyers to take firmer control/i.test(String(trackModel.planSummary || '')) || /conditions are not strong enough for active focus/i.test(String(trackModel.planSummary || ''))){
     throw new Error('Track More plan summary must prefer the shared next action over legacy generic blocker copy.');
   }
 
@@ -2936,7 +2936,7 @@ function runSharedNarrativeConsistencyAssertions(){
     displayedPlan:{}
   });
   const holdText = [holdModel.primary, holdModel.pattern_explanation, holdModel.triggerLine, holdModel.futureStateLine, (holdModel.secondary || []).join(' ')].join(' ');
-  if(!/bounce is still taking shape/i.test(holdText) || !/support level for managing risk/i.test(holdText) || !/stronger bounce|buyers are defending/i.test(holdText)){
+  if(!/support is still being tested|buyer control is only starting to emerge/i.test(holdText) || !/support level for managing risk/i.test(holdText) || !/support to hold more clearly|buyers to take firmer control|buyers are defending/i.test(holdText)){
     throw new Error('Track long-press narrative must stay consistent with the shared developing-watch narrative while remaining more detailed.');
   }
   if(/\.\./.test(holdText)){
@@ -3054,8 +3054,8 @@ function runSharedNarrativeConsistencyAssertions(){
   if(/Developing Watch/i.test(String(diminishingNarrative.stateLabel || '')) || !/Diminishing/i.test(String(diminishingNarrative.stateLabel || ''))){
     throw new Error('Diminishing watch narrative must not be flattened into Developing Watch.');
   }
-  if(/bounce is still taking shape|buyers are starting to step in/i.test(String(diminishingNarrative.primaryReason || ''))){
-    throw new Error('Diminishing watch narrative must preserve weaker severity instead of using the healthy bounce-forming narrative.');
+  if(/support is still being tested|buyer control is only starting to emerge|support is reacting|buyers are starting to step in/i.test(String(diminishingNarrative.primaryReason || ''))){
+    throw new Error('Diminishing watch narrative must preserve weaker severity instead of using the healthy support-response narrative.');
   }
 
   const reviewSemanticBody = extractFunctionSource(appSource, 'buildReviewSemanticStatus');
@@ -9269,13 +9269,16 @@ function runTrackPresentationAuthorityAssertions(){
   if(!/^Developing Watch$/i.test(String(developingWatchModel.headline || ''))){
     throw new Error('Alive monitor/watch setups with forming bounce and no invalidation must render the Developing Watch headline.');
   }
-  if(!/bounce is still taking shape|buyers are starting to step in/i.test(String(developingWatchModel.primaryReason || ''))){
-    throw new Error('Developing watch model must explain that the bounce is still taking shape.');
+  if(!/support is still being tested|buyer control is only starting to emerge/i.test(String(developingWatchModel.primaryReason || ''))){
+    throw new Error('Developing watch model must explain that support is still being tested and buyer control is emerging.');
   }
-  if(!/clear support level for managing risk/i.test(String(developingWatchModel.planSummary || '')) && !/clearer area of support/i.test(String(developingWatchModel.nextAction || ''))){
+  if(
+    !/clear support level for managing risk/i.test(String(developingWatchModel.planSummary || ''))
+    && !/support to hold more clearly|buyers to take firmer control|clearer area of support/i.test(String(developingWatchModel.nextAction || ''))
+  ){
     throw new Error('Developing watch model must explain the missing support/risk context.');
   }
-  if(!/wait for a stronger bounce and a clearer area of support/i.test(String(developingWatchModel.nextAction || ''))){
+  if(!/support to hold more clearly|buyers to take firmer control/i.test(String(developingWatchModel.nextAction || ''))){
     throw new Error('Developing watch model must provide the clearer-support next action.');
   }
   if(/needs structure repair/i.test(String(developingWatchModel.headline || '')) || /needs structure repair/i.test(String(developingWatchModel.primaryReason || '')) || /volume is weak/i.test(String(developingWatchModel.primaryReason || '')) || /conditions are not strong enough for active focus/i.test(String(developingWatchModel.primaryReason || ''))){
@@ -9305,8 +9308,8 @@ function runTrackPresentationAuthorityAssertions(){
       }
     }
   });
-  if(!/bounce is still taking shape|buyers are starting to step in/i.test(String(weakVolumeWatchModel.primaryReason || ''))){
-    throw new Error('Weak-volume watch model must still keep the developing-bounce narrative as the primary reason.');
+  if(!/support is still being tested|buyer control is only starting to emerge/i.test(String(weakVolumeWatchModel.primaryReason || ''))){
+    throw new Error('Weak-volume watch model must still keep the developing support-test narrative as the primary reason.');
   }
   if(/volume is weak/i.test(String(weakVolumeWatchModel.primaryReason || ''))){
     throw new Error('Weak volume may be secondary caution, but it must not replace the primary blocker when no invalidation level exists.');
@@ -9859,12 +9862,12 @@ function runReviewPricedButNotReadyAssertions(){
     isAccepted50MaSupportTestDisplayState(){ return false; },
     review50MaSupportTestPresentationCopy(){
       return {
-        tradeStatus:'Setup not ready yet.',
+        tradeStatus:'Support test still in progress.',
         draftTradeStatus:'Draft plan possible, but not actionable yet.',
-        blocker:'Testing 50MA support - waiting for buyers to confirm.',
+        blocker:'Testing 50MA support - waiting for buyer control to confirm.',
         technicalStructure:'Structure intact',
         technicalPullback:'Pullback near 50MA',
-        technicalBounce:'Bounce not confirmed'
+        technicalBounce:'Buyer control not confirmed'
       };
     },
     buildSharedSetupNarrative(){
@@ -9898,7 +9901,7 @@ function runReviewPricedButNotReadyAssertions(){
         structureEligibility:'alive',
         resolvedPullbackState:'near_20ma',
         pullbackLabel:'Pullback Near 20MA',
-        bounceLabel:'Bounce attempt',
+        bounceLabel:'Buyers emerging',
         reconciliationApplied:false,
         reconciliationReason:'',
         price:222.82,
@@ -10222,9 +10225,9 @@ function runCumulativePenaltyDisplayAssertions(){
     },
     review50MaSupportTestPresentationCopy(){
       return {
-        tradeStatus:'Setup not ready yet.',
+        tradeStatus:'Support test still in progress.',
         draftTradeStatus:'Draft plan possible, but not actionable yet.',
-        blocker:'Testing 50MA support - waiting for buyers to confirm.',
+        blocker:'Testing 50MA support - waiting for buyer control to confirm.',
         technicalStructure:'Structure intact',
         technicalPullback:'Pullback near 50MA',
         technicalBounce:'Bounce not confirmed'
@@ -10240,7 +10243,7 @@ function runCumulativePenaltyDisplayAssertions(){
         rawStabilisationState:'none',
         resolvedPullbackState:'near_50ma',
         pullbackLabel:'Pullback Near 50MA',
-        bounceLabel:'Bounce none',
+        bounceLabel:'No buyer control',
         setupLocationState:'near_50ma',
         structureState:'weak',
         structureEligibility:'alive',
@@ -10681,7 +10684,7 @@ function runCumulativePenaltyDisplayAssertions(){
     displayedPlan:{status:'missing'},
     planRealism:{}
   });
-  if(String(accepted50Resolved.tradeStatus.line1 || '') !== 'Setup not ready yet.'){
+  if(String(accepted50Resolved.tradeStatus.line1 || '') !== 'Support test still in progress.'){
     throw new Error('Accepted 50MA support-test Review wrapper must keep the protected support-test trade status copy.');
   }
   if(!/Pullback near 50MA/i.test(String(accepted50Resolved.technicalContextLine || ''))){

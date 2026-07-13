@@ -73,7 +73,7 @@
     ){
       if(setupLocationState === 'volatile' || priceabilityState === 'unpriceable'){
         return ['attempt','early','developing'].includes(bounceState)
-          ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
+          ? 'The broader uptrend is still intact, but the pullback has become volatile and buyer control is not yet stable enough to price reliably.'
           : 'Recovery attempt is developing, but price has not stabilised enough yet. Setup is not clean enough to price reliably yet.';
       }
       return 'Setup is not actionable yet. Wait for clearer stabilisation and a reliable entry/stop area.';
@@ -86,8 +86,8 @@
       && /no (?:signs? of )?(?:stabili[sz]ation|bounce)|no bounce(?: yet| confirmation)?|bounce (?:is )?not (?:present|there)/i.test(text)
     ){
       return priceabilityState === 'unpriceable' || setupLocationState === 'volatile'
-        ? 'The broader uptrend is still intact, but the pullback has become volatile and the bounce attempt is not yet stable enough to price reliably.'
-        : 'Bounce attempt present, but confirmation is not strong enough yet.';
+        ? 'The broader uptrend is still intact, but the pullback has become volatile and buyer control is not yet stable enough to price reliably.'
+        : 'Support is reacting, but buyer control is not strong enough yet.';
     }
     const setupScoreValue = state.setup_score ?? state.setupScore;
     const setupScore = Number.isFinite(Number(setupScoreValue)) ? Number(setupScoreValue) : null;
@@ -342,7 +342,7 @@
         ? 'monitor'
         : preferredTone;
     if(accepted50MaSupportTest && /trend is weakening|structure is broken|diminishing/i.test(mainBlocker)){
-      mainBlocker = 'Testing 50MA support - waiting for buyers to confirm.';
+      mainBlocker = 'Testing 50MA support - waiting for buyer control to confirm.';
     }
     const actionLabel = verdict === 'entry'
       ? 'Execute only if the trigger remains valid.'

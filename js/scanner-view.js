@@ -508,7 +508,11 @@
         : '',
       structureLabel:deps.structureLabelForRecord(view.item, derivedStates, {displayStage:view.displayStage}),
       pullbackLabel:derivedStates.pullbackZone === 'near_20ma' ? 'Near 20MA' : (derivedStates.pullbackZone === 'near_50ma' ? 'Near 50MA' : ''),
-      bounceLabel:derivedStates.bounceState === 'confirmed' ? 'Bounce confirmed' : (derivedStates.bounceState === 'attempt' ? 'Bounce tentative' : (derivedStates.bounceState === 'none' ? 'No bounce' : '')),
+      bounceLabel:derivedStates.buyerControlState === 'confirmed' || derivedStates.bounceState === 'confirmed'
+        ? 'Buyers confirmed'
+        : ((derivedStates.supportTestState === 'testing' || derivedStates.buyerControlState === 'emerging' || derivedStates.bounceState === 'attempt')
+          ? 'Buyers emerging'
+          : (derivedStates.bounceState === 'none' ? 'No buyer control' : '')),
       canOpenReview:true,
       canAddToWatchlist:true
     };

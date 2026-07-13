@@ -53,7 +53,7 @@
       ? {line1:'Provisional plan - waiting for confirmation.', line2:''}
       : (hasPriceablePlan || nearEntryGatePass
         ? {line1:'Plan needs confirmation before entry.', line2:'No actionable entry yet.'}
-        : {line1:'Bounce is developing - waiting for confirmation.', line2:'No actionable entry yet.'});
+        : {line1:'Support is being tested - waiting for buyer control.', line2:'No actionable entry yet.'});
     if(verdict === 'entry') return {line1:'Entry - your plan fits.', line2:''};
     if(verdict === 'near_entry') return {line1:'Near Entry - almost ready. Watch for confirmation.', line2:''};
     if(verdict === 'avoid' || verdict === 'dead'){
@@ -77,6 +77,8 @@
       || ['weak','weakening','broken','failed','developing_loose'].includes(structureState);
     const bounceState = String(globalVerdict && globalVerdict.bounce_state || '').toLowerCase();
     const bounceAttempt = ['attempt','early','developing'].includes(bounceState);
+    const supportTestState = String(globalVerdict && globalVerdict.support_test_state || '').toLowerCase();
+    const buyerControlState = String(globalVerdict && globalVerdict.buyer_control_state || '').toLowerCase();
     const pullbackState = String(globalVerdict && (globalVerdict.pullback_state || globalVerdict.pullback_zone) || '').trim().toLowerCase();
     const pullbackAccepted = !!(globalVerdict && (
       globalVerdict.nearEntryPullbackZoneAccepted === true
@@ -109,7 +111,8 @@
     const failedSupportTest = /lost[_\s-]?50ma|support failed|failed support|below support|structure is broken|trend is weakening|structure weakening|diminishing|remove from active focus/i.test(supportFailureReason);
     const accepted50MaSupportTest = pullbackAccepted
       && pullbackState === 'near_50ma'
-      && ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState)
+      && (supportTestState === 'testing' || ['none','unconfirmed','attempt','early','developing','improving',''].includes(bounceState))
+      && buyerControlState !== 'confirmed'
       && !terminalAvoidEvidence
       && !hasExplicitInvalidation
       && !lost50MaSupport
@@ -123,7 +126,7 @@
       && ['none','off_level','unclear','extended'].includes(setupLocationState);
     const aliveUnconfirmedCopy = priceabilityState === 'unpriceable' && bounceAttempt
       ? 'The broader uptrend is still intact, but the setup is currently untradable because no low-risk entry area has formed yet.'
-      : 'Bounce attempt present, but confirmation is not strong enough yet.';
+      : 'Support is reacting, but buyer control is not strong enough yet.';
     const planStatus = String(globalVerdict && (globalVerdict.planStatus || globalVerdict.plan_status || globalVerdict.planStatusKey || globalVerdict.plan_status_key) || '').trim().toLowerCase();
     const planMathValid = planStatus === 'valid' || hasPriceablePlan;
     const nonActionablePlan = verdict === 'watch' && planMathValid && !nearEntryGatePass;
@@ -142,8 +145,8 @@
     }
     if(accepted50MaSupportTest){
       return {
-        line1:'Setup not ready yet.',
-        line2:'Testing 50MA support - waiting for buyers to confirm.'
+        line1:'Support test still in progress.',
+        line2:'Testing 50MA support - waiting for buyer control to confirm.'
       };
     }
     if(aliveStructure && !structuralWeakness && /trend is weakening|structure (?:is )?(?:weakening|deteriorating|broken)|failed/i.test(mainBlocker)){
@@ -189,7 +192,7 @@
     if(structureEligibility === 'messy'){
       return {
         line1:'Structure is still alive, but messy and needs cleaner repair.',
-        line2:'Monitor - wait for a cleaner stabilisation and bounce.'
+        line2:'Monitor - wait for cleaner stabilisation and clearer buyer control.'
       };
     }
     if(mainBlocker){
@@ -203,7 +206,7 @@
     }
     const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
     const bouncePrimary = ['strong','intact','developing_clean','developing'].includes(structureState)
-      ? (consolidating ? 'Price is consolidating near recent highs.' : (bounceAttempt ? 'Bounce attempt present, but confirmation is not strong enough yet.' : 'Bounce is too weak to price cleanly.'))
+      ? (consolidating ? 'Price is consolidating near recent highs.' : (bounceAttempt ? 'Support is reacting, but buyer control is not strong enough yet.' : 'Buyer control is too weak to price cleanly.'))
       : 'No pullback structure to define entry yet.';
     const summary = structuralState === 'developing'
       ? 'Developing - waiting for confirmation.'

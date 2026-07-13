@@ -676,9 +676,9 @@ test('Track long-press fallback uses current Track reason, not stale saved summa
         canonicalVerdict:'watch',
         finalVerdict:'watch',
         visualBucket:'monitor',
-        primaryReason:'Current Track blocker: bounce is still tentative.',
-        mainBlocker:'Current Track blocker: bounce is still tentative.',
-        nextAction:'Wait for buyers to confirm the bounce.'
+        primaryReason:'Current Track blocker: buyer control is still emerging.',
+        mainBlocker:'Current Track blocker: buyer control is still emerging.',
+        nextAction:'Wait for buyer control to confirm.'
       },
       resolvedContract:{
         planStatusKey:'',
@@ -699,7 +699,7 @@ test('Track long-press fallback uses current Track reason, not stale saved summa
 
   const panelText = String(result.markup || '').replace(/\s+/g, ' ');
   expect(result.summary.source, 'fallback source should be current Track presentation, not saved summaries').toBe('current_track_presentation_fallback');
-  expect(panelText, 'long-press panel should show the current Track blocker').toContain('Current Track blocker: bounce is still tentative.');
+  expect(panelText, 'long-press panel should show the current Track blocker').toContain('Current Track blocker: buyer control is still emerging.');
   expect(panelText, 'long-press panel must not show stale saved Review copy').not.toContain('STALE ENTRY SAVED REVIEW SUMMARY DO NOT SHOW');
   expect(panelText, 'long-press panel must not show stale Scan copy').not.toContain('STALE ENTRY SCAN SUMMARY DO NOT SHOW');
 });
