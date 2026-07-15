@@ -438,6 +438,7 @@ function normalizeDeterministicEventPacket(value = {}){
   const source = safeObject(value);
   const dominantEventKey = normaliseString(source.dominantEventKey || source.primaryStoryKey, '');
   const dominantEventLabel = normaliseString(source.dominantEventLabel, '') || chartGuruDominantEventLabel(dominantEventKey);
+  const supportState = safeObject(source.supportState);
   return {
     dominantEventKey,
     dominantEventLabel,
@@ -458,6 +459,21 @@ function normalizeDeterministicEventPacket(value = {}){
     supportSemantic:normaliseString(source.supportSemantic, ''),
     buyerResponseSemantic:normaliseString(source.buyerResponseSemantic, ''),
     confirmationSemantic:normaliseString(source.confirmationSemantic, ''),
+    storyEvents:normalizeStringSequence(source.storyEvents),
+    supportState:supportState && Object.keys(supportState).length ? {
+      level:normaliseString(supportState.level, ''),
+      label:normaliseString(supportState.label, ''),
+      interaction:normaliseString(supportState.interaction, ''),
+      currentlyActive:supportState.currentlyActive === true
+        ? true
+        : (supportState.currentlyActive === false ? false : null),
+      distanceMeasured:supportState.distanceMeasured === true
+        ? true
+        : (supportState.distanceMeasured === false ? false : null),
+      distanceFromSupportPct:normaliseNumber(supportState.distanceFromSupportPct)
+    } : null,
+    buyerControlState:normaliseString(source.buyerControlState, ''),
+    currentPhase:normaliseString(source.currentPhase, ''),
     stepDetails:Array.isArray(source.stepDetails)
       ? source.stepDetails.map(detail => {
         const safe = safeObject(detail);
@@ -503,8 +519,11 @@ function deterministicNearSupportContext(eventPacket = {}, structuredFacts = {})
   const facts = safeObject(structuredFacts);
   const setupStates = safeObject(facts.setupStates);
   const pullbackZone = normaliseString(setupStates.pullbackZone || facts.pullbackZone, '').trim().toLowerCase();
+  const supportState = safeObject(packet.supportState);
   const primaryStoryKey = normaliseString(packet.primaryStoryKey || packet.dominantEventKey, '').trim().toLowerCase();
   const recentStoryKey = normaliseString(packet.recentStoryKey, '').trim().toLowerCase();
+  if(supportState.currentlyActive === true) return true;
+  if(supportState.currentlyActive === false) return false;
   const explicitlyOffSupport = ['off_level_wait_for_clearer_support', 'extended_after_run'].includes(primaryStoryKey)
     || ['off_level_wait_for_clearer_support', 'extended_after_run'].includes(recentStoryKey)
     || ['off_level', 'extended', 'none'].includes(pullbackZone);
@@ -1030,6 +1049,8 @@ function buildProductionChartGuruInterpretationInstructions(){
     'You are an internal trader interpreter for Chart Guru.',
     'Read deterministic chart evidence plus the deterministic event packet and explain what just happened in trader terms before any beginner-friendly narration is written.',
     'Treat the deterministic event packet as the only event-classification authority.',
+    'Use storyEvents as the ordered chronology of what happened first, what happened next, and where price is now.',
+    'Use supportState.currentlyActive, supportState.distanceFromSupportPct, and currentPhase to avoid keeping old support-touch stories active after price has already moved on.',
     'Stay concise, factual, sequence-aware, and trader-focused.',
     'Do not write beginner prose.',
     'Do not invent prices, new indicators, or unsupported chart facts.',
@@ -2231,6 +2252,7 @@ exports.__test = {
   buildTwoStepChartCoach,
   mergeTwoStepNarrativeIntoAnalysis,
   buildEmptyChartCoach,
+  deterministicNearSupportContext,
   classifySupportNarrationSemantic,
   classifyBuyerResponseSemantic,
   classifyRepairNarrationSemantic,

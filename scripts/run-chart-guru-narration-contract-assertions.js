@@ -154,8 +154,17 @@ function buildEventPacketSandbox(){
     extractConstAssignment('CHART_GURU_EVENT_LABELS'),
     extractFunction('chartGuruDominantEventLabel'),
     extractFunction('chartGuruBuyerResponsePresent'),
+    extractFunction('chartGuruRecentSupportType'),
+    extractFunction('chartGuruResolvedSupportType'),
+    extractFunction('chartGuruRecentSupportResponsePresent'),
+    extractFunction('chartGuruSupportReferenceLevel'),
+    extractFunction('chartGuruSupportDistancePct'),
+    extractFunction('chartGuruSemanticEnvelopeFromNarrativeContext'),
+    extractFunction('chartGuruSemanticEnvelopeCompatibilityForStoryKey'),
+    extractFunction('chartGuruNarrativeContext'),
     extractFunction('chartGuruSemanticEnvelopeFromStory'),
     extractFunction('eventPacketEvidenceIncludes'),
+    extractFunction('chartGuruResolveSemanticEnvelopeValue'),
     extractFunction('buildDeterministicEventPacketFromChartCoach'),
     extractFunction('chartCoachModelIsUsable')
   ].join('\n\n'), sandbox, {filename:appPath});
@@ -171,8 +180,15 @@ function buildStage15SelectorSandbox(){
     extractFunction('chartGuruBuyerResponsePresent'),
     extractFunction('chartGuruControlledPullbackPresent'),
     extractFunction('chartGuruVolumeParticipationLabel'),
+    extractFunction('chartNarratorSupportLabel'),
     extractFunction('chartGuruRecentSupportType'),
+    extractFunction('chartGuruResolvedSupportType'),
     extractFunction('chartGuruRecentSupportResponsePresent'),
+    extractFunction('chartGuruSupportReferenceLevel'),
+    extractFunction('chartGuruSupportDistancePct'),
+    extractFunction('chartGuruSemanticEnvelopeFromNarrativeContext'),
+    extractFunction('chartGuruSemanticEnvelopeCompatibilityForStoryKey'),
+    extractFunction('chartGuruNarrativeContext'),
     extractFunction('chartCoachPrimaryStoryCandidates')
   ].join('\n\n'), sandbox, {filename:'chart-guru-stage15-selector.js'});
   return sandbox;
@@ -636,6 +652,10 @@ function verifyEventPacketContract(){
       'recentStoryConfidenceMode',
       'recentStoryTrendLabel',
       'recentStorySupportLabel',
+      'storyEvents',
+      'supportState',
+      'buyerControlState',
+      'currentPhase',
       'stepDetails'
     ].forEach(field => {
       assert.ok(Object.prototype.hasOwnProperty.call(packet, field), `${fixture.id}: deterministicEventPacket must include ${field}.`);
@@ -646,9 +666,367 @@ function verifyEventPacketContract(){
     assert.strictEqual(packet.recentStoryKey, recentStory.key, `${fixture.id}: recentStoryKey must be preserved.`);
     assert.strictEqual(packet.dominantEventLabel, sandbox.chartGuruDominantEventLabel(primaryStory.key), `${fixture.id}: dominantEventLabel must map from existing story keys.`);
     assert.deepStrictEqual(packet.eventSequence, recentStory.steps, `${fixture.id}: eventSequence must preserve recent story steps.`);
+    assert.ok(Array.isArray(packet.storyEvents), `${fixture.id}: storyEvents must be present.`);
     assert.deepStrictEqual(packet.stepDetails, recentStory.stepDetails, `${fixture.id}: stepDetails must preserve recent story trace.`);
     assert.ok(packet.evidenceFactIds.length >= 1, `${fixture.id}: evidenceFactIds must remain populated.`);
   }
+}
+
+function verifyEventPacketNarrativeSemanticAlignment(){
+  const sandbox = buildEventPacketSandbox();
+  const makePacket = narrativeContext => sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'extended_after_run',
+      label:'Chart Story',
+      icon:'📈',
+      text:'Deterministic story',
+      evidenceFactIds:['trend_context'],
+      confidence:0.9,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'extended_after_run',
+      bias:'good',
+      toneMode:'test',
+      confidenceMode:'test',
+      trendLabel:'Test',
+      supportLabel:'20-day average',
+      steps:['story_step'],
+      stepDetails:[{key:'story_step', evidenceFactIds:['trend_context'], derivedFromSteps:['story_step'], derivedFromConditions:[]}],
+      evidenceFactIds:['trend_context']
+    },
+    diagnostics:{
+      narrativeContext
+    }
+  });
+  const stalledNarrative = {
+    support:{level:'20ma_support', label:'20-day average', interaction:'held', currentlyActive:false, distanceMeasured:true, distanceFromSupportPct:0.031, semantic:'support_unknown'},
+    buyerResponse:{state:'present', semantic:'response_present'},
+    buyerControl:{state:'emerging'},
+    confirmation:{semantic:'follow_through_unconfirmed'},
+    currentState:{phase:'stalled_after_response'},
+    storyEvents:['buyers_responded', 'rebound_stalled']
+  };
+  const stalledPacket = makePacket(stalledNarrative);
+  assert.strictEqual(stalledPacket.supportSemantic, 'support_absent', 'Stalled rebound packet should fall through to compatibility support semantics when narrative support remains unresolved.');
+  assert.strictEqual(stalledPacket.buyerResponseSemantic, 'response_present', 'Stalled rebound packet must preserve the initial buyer response.');
+  assert.strictEqual(stalledPacket.confirmationSemantic, 'follow_through_unconfirmed', 'Stalled rebound packet must keep confirmation unconfirmed.');
+  assert.ok(stalledPacket.storyEvents.includes('buyers_responded'), 'Stalled rebound packet should preserve buyers_responded chronology.');
+  assert.notStrictEqual(stalledPacket.buyerResponseSemantic, 'response_absent', 'buyers_responded must not coexist with response_absent.');
+
+  const extendedNarrative = {
+    support:{level:'20ma_support', label:'20-day average', interaction:'held', currentlyActive:false, distanceMeasured:true, distanceFromSupportPct:0.056, semantic:'support_absent'},
+    buyerResponse:{state:'present', semantic:'response_present'},
+    buyerControl:{state:'confirmed'},
+    confirmation:{semantic:'follow_through_confirmed'},
+    currentState:{phase:'extended_from_support'},
+    storyEvents:['buyers_responded', 'buyer_control_confirmed', 'rebound_extended']
+  };
+  const extendedPacket = makePacket(extendedNarrative);
+  assert.strictEqual(extendedPacket.supportSemantic, 'support_absent', 'Extended rebound packet must project supportSemantic from narrative context.');
+  assert.strictEqual(extendedPacket.supportState.currentlyActive, false, 'Extended rebound packet must not keep support active.');
+  assert.strictEqual(extendedPacket.currentPhase, 'extended_from_support', 'Extended rebound packet must preserve the extension phase.');
+  assert.ok(extendedPacket.storyEvents.includes('rebound_extended'), 'Extended rebound packet should preserve rebound_extended chronology.');
+
+  const failedNarrative = {
+    support:{level:'20ma_support', label:'20-day average', interaction:'failed', currentlyActive:false, distanceMeasured:true, distanceFromSupportPct:0.018, semantic:'support_failed'},
+    buyerResponse:{state:'absent', semantic:'response_failed'},
+    buyerControl:{state:'none'},
+    confirmation:{semantic:'follow_through_failed'},
+    currentState:{phase:'support_failed'},
+    storyEvents:['failed_bounce']
+  };
+  const failedPacket = makePacket(failedNarrative);
+  assert.strictEqual(failedPacket.supportSemantic, 'support_failed', 'Failed support packet must project support_failed from narrative context.');
+  assert.strictEqual(failedPacket.buyerResponseSemantic, 'response_failed', 'Failed support packet must project response_failed from narrative context.');
+
+  const unknownDistanceNarrative = {
+    support:{level:'20ma_support', label:'20-day average', interaction:'held', currentlyActive:false, distanceMeasured:false, distanceFromSupportPct:null, semantic:'support_unknown'},
+    buyerResponse:{state:'present', semantic:'response_present'},
+    buyerControl:{state:'emerging'},
+    confirmation:{semantic:'follow_through_unconfirmed'},
+    currentState:{phase:'current_location_unresolved'},
+    storyEvents:['buyers_responded']
+  };
+  const unknownDistancePacket = makePacket(unknownDistanceNarrative);
+  assert.strictEqual(unknownDistancePacket.supportState.distanceMeasured, false, 'Unknown-distance packet must preserve unmeasurable support distance.');
+  assert.notStrictEqual(unknownDistancePacket.currentPhase, 'extended_from_support', 'Unknown-distance packet must not claim an extension phase.');
+  assert.ok(!unknownDistancePacket.storyEvents.includes('rebound_extended'), 'Unknown-distance packet must not emit rebound_extended.');
+
+  const noResponseNarrative = {
+    support:{level:'50ma_support', label:'50-day average', interaction:'testing', currentlyActive:true, distanceMeasured:true, distanceFromSupportPct:0.008, semantic:'support_present'},
+    buyerResponse:{state:'absent', semantic:'response_absent'},
+    buyerControl:{state:'none'},
+    confirmation:{semantic:'follow_through_unknown'},
+    currentState:{phase:'at_support'},
+    storyEvents:['support_testing_at_50ma']
+  };
+  const noResponsePacket = makePacket(noResponseNarrative);
+  assert.strictEqual(noResponsePacket.buyerResponseSemantic, 'response_absent', 'No-response packet must preserve response_absent.');
+
+  const confirmedBuyerNarrative = {
+    support:{level:'50ma_support', label:'50-day average', interaction:'held', currentlyActive:true, distanceMeasured:true, distanceFromSupportPct:0.01, semantic:'support_present'},
+    buyerResponse:{state:'present', semantic:'response_present'},
+    buyerControl:{state:'confirmed'},
+    confirmation:{semantic:'follow_through_confirmed'},
+    currentState:{phase:'responding_from_support'},
+    storyEvents:['buyers_responded', 'buyer_control_confirmed']
+  };
+  const confirmedBuyerPacket = makePacket(confirmedBuyerNarrative);
+  assert.strictEqual(confirmedBuyerPacket.buyerControlState, 'confirmed', 'Confirmed buyer-control packet must preserve buyerControlState.');
+  assert.strictEqual(confirmedBuyerPacket.confirmationSemantic, 'follow_through_confirmed', 'Confirmed buyer-control packet must preserve follow-through confirmation.');
+}
+
+function verifySemanticEnvelopeCompatibilityFallback(){
+  const sandbox = buildEventPacketSandbox();
+
+  const failedBounceEnvelope = sandbox.chartGuruSemanticEnvelopeFromStory('failed_bounce', {});
+  assert.strictEqual(failedBounceEnvelope.supportSemantic, 'support_failed', 'Key-only failed_bounce must preserve support_failed semantics.');
+  assert.strictEqual(failedBounceEnvelope.buyerResponseSemantic, 'response_failed', 'Key-only failed_bounce must preserve response_failed semantics.');
+  assert.notStrictEqual(failedBounceEnvelope.supportSemantic, 'support_unknown', 'Key-only failed_bounce must not degrade to support_unknown.');
+
+  const breakdownEnvelope = sandbox.chartGuruSemanticEnvelopeFromStory('structure_breaking_down', {});
+  assert.strictEqual(breakdownEnvelope.supportSemantic, 'support_failed', 'Key-only structure_breaking_down must preserve support_failed semantics.');
+  assert.strictEqual(breakdownEnvelope.buyerResponseSemantic, 'response_failed', 'Key-only structure_breaking_down must preserve response_failed semantics.');
+  assert.notStrictEqual(breakdownEnvelope.supportSemantic, 'support_unknown', 'Key-only structure_breaking_down must not degrade to support_unknown.');
+
+  const repairingEnvelope = sandbox.chartGuruSemanticEnvelopeFromStory('pullback_still_repairing', {});
+  assert.strictEqual(repairingEnvelope.supportSemantic, 'support_failed', 'Key-only pullback_still_repairing must preserve support_failed semantics.');
+  assert.notStrictEqual(repairingEnvelope.supportSemantic, 'support_unknown', 'Key-only pullback_still_repairing must not degrade to support_unknown.');
+
+  const unknownEnvelope = sandbox.chartGuruSemanticEnvelopeFromStory('unknown_story_key', {});
+  assert.strictEqual(unknownEnvelope.supportSemantic, 'support_unknown', 'Unknown key should keep support semantics unresolved.');
+  assert.strictEqual(unknownEnvelope.buyerResponseSemantic, 'response_unknown', 'Unknown key should keep buyer response semantics unresolved.');
+
+  const richContextEnvelope = sandbox.chartGuruSemanticEnvelopeFromStory('failed_bounce', {
+    supportContext:'20ma',
+    supportTestState:'held',
+    pullbackNear20:true,
+    structureIntact:true,
+    structureBroken:false,
+    buyerControlState:'confirmed',
+    followThroughConfirmed:true,
+    bounceState:'attempt',
+    stabilisationState:'clear',
+    reclaimConfirmed:true,
+    candleEvidenceUpClosesAfterLow:2,
+    candleEvidenceReclaimedPriorDayHigh:true
+  });
+  assert.strictEqual(richContextEnvelope.supportSemantic, 'support_present', 'Rich narrative context must remain authoritative over the key-only failed_bounce fallback.');
+  assert.strictEqual(richContextEnvelope.buyerResponseSemantic, 'response_present', 'Rich narrative context must preserve current buyer-response semantics.');
+  assert.strictEqual(richContextEnvelope.confirmationSemantic, 'follow_through_confirmed', 'Rich narrative context must preserve current confirmation semantics.');
+
+  const reducedFailedBouncePacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'failed_bounce',
+      label:'Chart Story',
+      icon:'📉',
+      text:'Failed bounce',
+      evidenceFactIds:['failed_bounce'],
+      confidence:0.9,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'failed_bounce',
+      bias:'bad',
+      toneMode:'test',
+      confidenceMode:'test',
+      trendLabel:'Failed bounce',
+      supportLabel:'20-day average',
+      steps:['failed_bounce'],
+      stepDetails:[{key:'failed_bounce', evidenceFactIds:['failed_bounce'], derivedFromSteps:['failed_bounce'], derivedFromConditions:['support_failed']}],
+      evidenceFactIds:['failed_bounce']
+    },
+    diagnostics:{}
+  });
+  assert.strictEqual(reducedFailedBouncePacket.supportSemantic, 'support_failed', 'Reduced failed_bounce packet must preserve support_failed semantics through the compatibility envelope.');
+  assert.strictEqual(reducedFailedBouncePacket.buyerResponseSemantic, 'response_failed', 'Reduced failed_bounce packet must preserve response_failed semantics through the compatibility envelope.');
+  assert.strictEqual(reducedFailedBouncePacket.confirmationSemantic, 'follow_through_failed', 'Reduced failed_bounce packet must preserve failed-bounce confirmation semantics through the compatibility envelope.');
+
+  const reducedBreakdownPacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'structure_breaking_down',
+      label:'Chart Story',
+      icon:'📉',
+      text:'Breaking down',
+      evidenceFactIds:['structure_broken'],
+      confidence:0.9,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'structure_breaking_down',
+      bias:'bad',
+      toneMode:'test',
+      confidenceMode:'test',
+      trendLabel:'Breaking down',
+      supportLabel:'20-day average',
+      steps:['broken_structure'],
+      stepDetails:[{key:'broken_structure', evidenceFactIds:['structure_broken'], derivedFromSteps:['broken_structure'], derivedFromConditions:['support_failed']}],
+      evidenceFactIds:['structure_broken']
+    },
+    diagnostics:{}
+  });
+  assert.strictEqual(reducedBreakdownPacket.supportSemantic, 'support_failed', 'Reduced structure_breaking_down packet must preserve support_failed semantics through the compatibility envelope.');
+  assert.strictEqual(reducedBreakdownPacket.buyerResponseSemantic, 'response_failed', 'Reduced structure_breaking_down packet must preserve response_failed semantics through the compatibility envelope.');
+
+  [
+    {label:'missing recent-story support semantics', recentStory:{}},
+    {label:'null recent-story support semantics', recentStory:{supportSemantic:null}},
+    {label:'empty recent-story support semantics', recentStory:{supportSemantic:''}},
+    {label:'unknown recent-story support semantics', recentStory:{supportSemantic:'support_unknown'}}
+  ].forEach(testCase => {
+    const reducedRepairingPacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+      primaryStory:{
+        key:'pullback_still_repairing',
+        label:'Chart Story',
+        icon:'ðŸ“‰',
+        text:'Still repairing',
+        evidenceFactIds:['support_lost'],
+        confidence:0.8,
+        rankReason:'test'
+      },
+      recentStory:{
+        key:'pullback_still_repairing',
+        steps:['repair_needed'],
+        stepDetails:[{key:'repair_needed', evidenceFactIds:['support_lost'], derivedFromSteps:['repair_needed'], derivedFromConditions:['support_failed']}],
+        evidenceFactIds:['support_lost'],
+        ...testCase.recentStory
+      },
+      diagnostics:{}
+    });
+    assert.strictEqual(reducedRepairingPacket.supportSemantic, 'support_failed', `Reduced pullback_still_repairing packet must preserve support_failed semantics with ${testCase.label}.`);
+  });
+
+  const sentinelRecentStoryPacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'failed_bounce',
+      label:'Chart Story',
+      icon:'📉',
+      text:'Failed bounce',
+      evidenceFactIds:['failed_bounce'],
+      confidence:0.9,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'failed_bounce',
+      supportSemantic:'support_unknown',
+      buyerResponseSemantic:'response_unknown',
+      confirmationSemantic:'confirmation_unknown',
+      steps:['failed_bounce'],
+      stepDetails:[{key:'failed_bounce', evidenceFactIds:['failed_bounce'], derivedFromSteps:['failed_bounce'], derivedFromConditions:['support_failed']}],
+      evidenceFactIds:['failed_bounce']
+    },
+    diagnostics:{}
+  });
+  assert.strictEqual(sentinelRecentStoryPacket.supportSemantic, 'support_failed', 'Unknown recent-story support sentinel must not outrank failed_bounce compatibility semantics.');
+  assert.strictEqual(sentinelRecentStoryPacket.buyerResponseSemantic, 'response_failed', 'Unknown recent-story buyer-response sentinel must not outrank failed_bounce compatibility semantics.');
+  assert.strictEqual(sentinelRecentStoryPacket.confirmationSemantic, 'follow_through_failed', 'Unknown recent-story confirmation sentinel must not outrank failed-bounce compatibility semantics.');
+
+  const missingRecentStoryPacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'structure_breaking_down',
+      label:'Chart Story',
+      icon:'📉',
+      text:'Breaking down',
+      evidenceFactIds:['structure_broken'],
+      confidence:0.9,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'structure_breaking_down',
+      supportSemantic:'',
+      buyerResponseSemantic:null,
+      confirmationSemantic:undefined,
+      steps:['broken_structure'],
+      stepDetails:[{key:'broken_structure', evidenceFactIds:['structure_broken'], derivedFromSteps:['broken_structure'], derivedFromConditions:['support_failed']}],
+      evidenceFactIds:['structure_broken']
+    },
+    diagnostics:{}
+  });
+  assert.strictEqual(missingRecentStoryPacket.supportSemantic, 'support_failed', 'Missing recent-story support semantics must fall through to structure_breaking_down compatibility semantics.');
+  assert.strictEqual(missingRecentStoryPacket.buyerResponseSemantic, 'response_failed', 'Missing recent-story buyer-response semantics must fall through to structure_breaking_down compatibility semantics.');
+
+  const meaningfulRecentStoryPacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'failed_bounce',
+      label:'Chart Story',
+      icon:'📉',
+      text:'Failed bounce',
+      evidenceFactIds:['failed_bounce'],
+      confidence:0.9,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'failed_bounce',
+      supportSemantic:'support_reclaimed',
+      buyerResponseSemantic:'response_present',
+      confirmationSemantic:'follow_through_unconfirmed',
+      steps:['failed_bounce'],
+      stepDetails:[{key:'failed_bounce', evidenceFactIds:['failed_bounce'], derivedFromSteps:['failed_bounce'], derivedFromConditions:['support_failed']}],
+      evidenceFactIds:['failed_bounce']
+    },
+    diagnostics:{}
+  });
+  assert.strictEqual(meaningfulRecentStoryPacket.supportSemantic, 'support_reclaimed', 'Meaningful recent-story support semantics must retain precedence over compatibility semantics.');
+  assert.strictEqual(meaningfulRecentStoryPacket.buyerResponseSemantic, 'response_present', 'Meaningful recent-story buyer-response semantics must retain precedence over compatibility semantics.');
+  assert.strictEqual(meaningfulRecentStoryPacket.confirmationSemantic, 'follow_through_unconfirmed', 'Meaningful recent-story confirmation semantics must retain precedence over compatibility semantics.');
+
+  const richNarrativePacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'failed_bounce',
+      label:'Chart Story',
+      icon:'📉',
+      text:'Failed bounce',
+      evidenceFactIds:['failed_bounce'],
+      confidence:0.9,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'failed_bounce',
+      supportSemantic:'support_unknown',
+      buyerResponseSemantic:'response_unknown',
+      confirmationSemantic:'confirmation_unknown',
+      steps:['failed_bounce'],
+      stepDetails:[{key:'failed_bounce', evidenceFactIds:['failed_bounce'], derivedFromSteps:['failed_bounce'], derivedFromConditions:['support_failed']}],
+      evidenceFactIds:['failed_bounce']
+    },
+    diagnostics:{
+      narrativeContext:{
+        support:{semantic:'support_present'},
+        buyerResponse:{semantic:'response_present'},
+        confirmation:{semantic:'follow_through_confirmed'},
+        storyEvents:[]
+      }
+    }
+  });
+  assert.strictEqual(richNarrativePacket.supportSemantic, 'support_present', 'Narrative-context support semantics must remain authoritative over unknown recent-story and compatibility values.');
+  assert.strictEqual(richNarrativePacket.buyerResponseSemantic, 'response_present', 'Narrative-context buyer-response semantics must remain authoritative over unknown recent-story and compatibility values.');
+  assert.strictEqual(richNarrativePacket.confirmationSemantic, 'follow_through_confirmed', 'Narrative-context confirmation semantics must remain authoritative over unknown recent-story and compatibility values.');
+
+  const unknownKeyPacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'unknown_story_key',
+      label:'Chart Story',
+      icon:'📍',
+      text:'Unknown story',
+      evidenceFactIds:['trend_context'],
+      confidence:0.5,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'unknown_story_key',
+      supportSemantic:'support_unknown',
+      buyerResponseSemantic:'response_unknown',
+      confirmationSemantic:'confirmation_unknown',
+      steps:['unknown_step'],
+      stepDetails:[{key:'unknown_step', evidenceFactIds:['trend_context'], derivedFromSteps:['unknown_step'], derivedFromConditions:[]}],
+      evidenceFactIds:['trend_context']
+    },
+    diagnostics:{}
+  });
+  assert.strictEqual(unknownKeyPacket.supportSemantic, 'support_unknown', 'Unknown key with unknown sentinels must remain support_unknown.');
+  assert.strictEqual(unknownKeyPacket.buyerResponseSemantic, 'response_unknown', 'Unknown key with unknown sentinels must remain response_unknown.');
+  assert.strictEqual(unknownKeyPacket.confirmationSemantic, 'follow_through_unknown', 'Unknown key with unknown sentinels must remain follow_through_unknown.');
 }
 
 function verifyInterpreterContractAndTutorBoundary(){
@@ -793,7 +1171,7 @@ function verifyStage15PostSupportReboundSelection(){
     candleEvidenceReclaimedPriorDayHigh:true,
     candleEvidenceHigherLowHold:true
   });
-  assert.strictEqual(postSupportRebound && postSupportRebound.key, 'off_level_wait_for_clearer_support', 'A rebound that has already moved off support must not fall back to the generic first-bounce story.');
+  assert.strictEqual(postSupportRebound && postSupportRebound.key, 'extended_after_run', 'A rebound that has already progressed materially away from support should promote to the extension story instead of staying in the first-bounce family.');
 
   const postSupportStabilising = selectPrimaryStory({
     ...baseTrendContext,
@@ -808,7 +1186,26 @@ function verifyStage15PostSupportReboundSelection(){
     candleEvidenceUpClosesAfterLow:1,
     candleEvidenceHigherLowHold:true
   });
-  assert.strictEqual(postSupportStabilising && postSupportStabilising.key, 'off_level_wait_for_clearer_support', 'A stabilising move that has already left support should stay off-level rather than reuse the first-bounce story.');
+  assert.strictEqual(postSupportStabilising && postSupportStabilising.key, 'extended_after_run', 'A stabilising move that is already materially extended from support should stay in the extension family rather than fall back to a first-bounce story.');
+
+  const stalledOffLevelRebound = selectPrimaryStory({
+    ...baseTrendContext,
+    extendedAfterRun:false,
+    recentlyLeftSupportZone:true,
+    offLevelWithoutStructureDamage:true,
+    setupLocationState:'off_level',
+    evaluationScanType:'20MA',
+    bounceAttempt:false,
+    bounceState:'attempt',
+    stabilisationState:'early',
+    reclaimConfirmed:false,
+    candleEvidenceUpClosesAfterLow:1,
+    candleEvidenceHigherLowHold:false,
+    bodyDescriptor:'small',
+    latestDirection:'flat',
+    weakVolume:true
+  });
+  assert.strictEqual(stalledOffLevelRebound && stalledOffLevelRebound.key, 'off_level_wait_for_clearer_support', 'A response that left support but failed to extend should stay in the off-level or stalled-rebound family.');
 
   const reclaimAfterSupportResponse = selectPrimaryStory({
     ...baseTrendContext,
@@ -823,7 +1220,30 @@ function verifyStage15PostSupportReboundSelection(){
     candleEvidenceReclaimedPriorDayHigh:true,
     candleEvidenceReclaimRangeMeaningful:true
   });
-  assert.strictEqual(reclaimAfterSupportResponse && reclaimAfterSupportResponse.key, 'off_level_wait_for_clearer_support', 'A reclaim after support response must not silently collapse into the generic first-bounce story once price is off-level.');
+  assert.strictEqual(reclaimAfterSupportResponse && reclaimAfterSupportResponse.key, 'extended_after_run', 'A reclaim after support response must not silently collapse into the generic first-bounce story once price is off-level.');
+
+  const narrativeContext = sandbox.chartGuruNarrativeContext({
+    ...baseTrendContext,
+    currentPrice:288.3,
+    ma20:273.251,
+    ma50:269.7692,
+    recentlyLeftSupportZone:true,
+    offLevelWithoutStructureDamage:true,
+    setupLocationState:'off_level',
+    evaluationScanType:'20MA',
+    bounceAttempt:true,
+    bounceState:'attempt',
+    reclaimConfirmed:true,
+    candleEvidenceUpClosesAfterLow:2,
+    candleEvidenceReclaimedPriorDayHigh:true,
+    candleEvidenceHigherLowHold:true,
+    supportTestState:'held',
+    buyerControlState:'emerging'
+  });
+  assert.strictEqual(narrativeContext.support.currentlyActive, false, 'A materially extended rebound should mark support as historical context rather than the active chart location.');
+  assert.strictEqual(narrativeContext.currentState.phase, 'extended_from_support', 'A materially extended rebound should expose the extended_from_support phase.');
+  assert.ok((narrativeContext.support.distanceFromSupportPct || 0) > 0.04, 'Extended rebound diagnostics should expose a meaningful distance from support.');
+  assert.ok(Array.isArray(narrativeContext.storyEvents) && narrativeContext.storyEvents.includes('rebound_extended'), 'Extended rebound chronology should emit rebound_extended.');
 
   const failedBounce = selectPrimaryStory({
     ...baseTrendContext,
@@ -842,6 +1262,333 @@ function verifyStage15PostSupportReboundSelection(){
   assert.ok(
     ['failed_bounce', 'pullback_still_repairing', 'structure_breaking_down'].includes(failedBounce && failedBounce.key),
     'A support touch followed by a failed bounce must stay in the failed-bounce/support-failure family.'
+  );
+}
+
+function verifyNullDistanceExtensionGuards(){
+  const sandbox = buildStage15SelectorSandbox();
+  const selectPrimaryStory = context => {
+    const candidates = sandbox.chartCoachPrimaryStoryCandidates(context);
+    return Array.isArray(candidates) && candidates.length ? candidates[0] : null;
+  };
+  const baseContext = {
+    recentSequence:[],
+    latestDirection:'green',
+    latestWickRejection:'',
+    bodyDescriptor:'strong',
+    maRelation:{above20:true, above50:true, above200:true},
+    structureIntact:true,
+    structureBroken:false,
+    structureWeakening:false,
+    pullbackNear20:true,
+    pullbackNear50:false,
+    recentlyLeftSupportZone:true,
+    offLevelWithoutStructureDamage:true,
+    bounceAttempt:true,
+    followThroughConfirmed:false,
+    failedBounce:false,
+    weakVolume:false,
+    activeVolume:false,
+    extendedAfterRun:false,
+    actionable:false,
+    setupLocationState:'off_level',
+    evaluationScanType:'20MA',
+    bounceState:'attempt',
+    stabilisationState:'early',
+    reclaimConfirmed:true,
+    candleEvidenceUpClosesAfterLow:2,
+    candleEvidenceReclaimedPriorDayHigh:true,
+    candleEvidenceHigherLowHold:true,
+    supportTestState:'held',
+    buyerControlState:'emerging'
+  };
+  const nullCases = [
+    {label:'missing currentPrice', context:{...baseContext, currentPrice:null, ma20:273.251, setupLocationState:'extended'}},
+    {label:'missing ma20', context:{...baseContext, currentPrice:288.3, ma20:null, pullbackZone:'extended'}},
+    {label:'missing currentPrice and ma20', context:{...baseContext, currentPrice:null, ma20:null, setupLocationState:'extended', pullbackZone:'extended'}},
+    {label:'historical pullbackNear20 only', context:{...baseContext, currentPrice:null, ma20:273.251, pullbackNear20:true}},
+    {label:'historical pullbackNear50 only', context:{...baseContext, currentPrice:288.3, ma20:null, pullbackNear20:false, pullbackNear50:true, evaluationScanType:'50MA', ma50:null}},
+    {label:'ocr style incomplete record', context:{...baseContext, currentPrice:null, ma20:null, ma50:null, latestDirection:'flat', bodyDescriptor:'small', bounceAttempt:false, setupLocationState:'extended'}}
+  ];
+  nullCases.forEach(testCase => {
+    const narrative = sandbox.chartGuruNarrativeContext(testCase.context);
+    const story = selectPrimaryStory(testCase.context);
+    assert.strictEqual(narrative.reboundExtended, false, `${testCase.label}: missing support distance must not set reboundExtended.`);
+    assert.strictEqual(narrative.extensionEvidencePresent, false, `${testCase.label}: missing support distance must not create extension evidence.`);
+    assert.strictEqual(narrative.support.distanceMeasured, false, `${testCase.label}: support distance should be marked unmeasurable.`);
+    assert.ok(!Array.isArray(narrative.storyEvents) || !narrative.storyEvents.includes('rebound_extended'), `${testCase.label}: storyEvents must not emit rebound_extended.`);
+    assert.notStrictEqual(narrative.currentState.phase, 'extended_from_support', `${testCase.label}: current phase must not claim an extended rebound.`);
+    assert.notStrictEqual(narrative.currentState.phase, 'away_from_support', `${testCase.label}: current phase must not claim away-from-support without measured distance.`);
+    assert.ok(['current_location_unresolved', 'stalled_after_response', 'at_support', 'responding_from_support', 'support_failed'].includes(narrative.currentState.phase), `${testCase.label}: current phase should stay neutral or unresolved.`);
+    assert.notStrictEqual(story && story.key, 'extended_after_run', `${testCase.label}: dominant story must not select the extension branch.`);
+  });
+
+  const measurableButNotExtended = {
+    ...baseContext,
+    currentPrice:206.5,
+    ma20:200,
+    setupLocationState:'extended',
+    pullbackZone:'extended'
+  };
+  const measurableNarrative = sandbox.chartGuruNarrativeContext(measurableButNotExtended);
+  const measurableStory = selectPrimaryStory(measurableButNotExtended);
+  assert.strictEqual(measurableNarrative.support.distanceMeasured, true, 'Measured-but-not-extended case: support distance should stay measurable.');
+  assert.strictEqual(measurableNarrative.reboundExtended, false, 'Measured-but-not-extended case: sticky historical extended fields must not force reboundExtended.');
+  assert.ok(!measurableNarrative.storyEvents.includes('rebound_extended'), 'Measured-but-not-extended case: storyEvents must not emit rebound_extended.');
+  assert.notStrictEqual(measurableStory && measurableStory.key, 'extended_after_run', 'Measured-but-not-extended case: dominant story must not select the extension branch.');
+
+  const thresholdContexts = [
+    {
+      label:'below threshold',
+      expectedExtended:false,
+      currentPrice:206.99
+    },
+    {
+      label:'at threshold',
+      expectedExtended:true,
+      currentPrice:207
+    },
+    {
+      label:'above threshold',
+      expectedExtended:true,
+      currentPrice:207.01
+    }
+  ];
+  thresholdContexts.forEach(testCase => {
+    const narrative = sandbox.chartGuruNarrativeContext({
+      ...baseContext,
+      currentPrice:testCase.currentPrice,
+      ma20:200,
+      setupLocationState:'extended',
+      pullbackZone:'extended'
+    });
+    const story = selectPrimaryStory({
+      ...baseContext,
+      currentPrice:testCase.currentPrice,
+      ma20:200,
+      setupLocationState:'extended',
+      pullbackZone:'extended'
+    });
+    assert.strictEqual(narrative.support.distanceMeasured, true, `${testCase.label}: support distance should be measurable.`);
+    assert.strictEqual(narrative.reboundExtended, testCase.expectedExtended, `${testCase.label}: reboundExtended should respect the measurable extension threshold.`);
+    assert.strictEqual(
+      Array.isArray(narrative.storyEvents) && narrative.storyEvents.includes('rebound_extended'),
+      testCase.expectedExtended,
+      `${testCase.label}: storyEvents should only emit rebound_extended when measurable extension is present.`
+    );
+    assert.strictEqual(
+      Boolean(story && story.key === 'extended_after_run'),
+      testCase.expectedExtended,
+      `${testCase.label}: dominant story should only select the extension branch when measurable extension is present.`
+    );
+  });
+
+  const positiveMeasuredExtension = {
+    ...baseContext,
+    currentPrice:288.3,
+    ma20:273.251,
+    pullbackNear20:false,
+    bounceAttempt:true,
+    bounceState:'attempt',
+    stabilisationState:'clear'
+  };
+  const positiveNarrative = sandbox.chartGuruNarrativeContext(positiveMeasuredExtension);
+  const positiveStory = selectPrimaryStory(positiveMeasuredExtension);
+  assert.strictEqual(positiveNarrative.support.distanceMeasured, true, 'Positive control: support distance should be measurable.');
+  assert.strictEqual(positiveNarrative.reboundExtended, true, 'Positive control: measurable post-support extension should still classify as reboundExtended.');
+  assert.strictEqual(positiveStory && positiveStory.key, 'extended_after_run', 'Positive control: measurable post-support extension should still select the extension story.');
+}
+
+function verifyExplicitSupportContextResolution(){
+  const sandbox = buildStage15SelectorSandbox();
+  const baseContext = {
+    recentSequence:[],
+    structureIntact:true,
+    structureBroken:false,
+    structureWeakening:false,
+    latestDirection:'green',
+    bodyDescriptor:'strong',
+    bounceAttempt:true,
+    bounceState:'attempt',
+    stabilisationState:'clear',
+    reclaimConfirmed:true,
+    candleEvidenceUpClosesAfterLow:2,
+    candleEvidenceReclaimedPriorDayHigh:true,
+    candleEvidenceHigherLowHold:true,
+    supportTestState:'held',
+    buyerControlState:'emerging',
+    recentlyLeftSupportZone:false,
+    offLevelWithoutStructureDamage:false,
+    extendedAfterRun:false,
+    failedBounce:false,
+    weakVolume:false,
+    activeVolume:true
+  };
+
+  const explicit50Context = {
+    ...baseContext,
+    supportContext:'50ma',
+    currentPrice:206,
+    ma50:200
+  };
+  const explicit50Narrative = sandbox.chartGuruNarrativeContext(explicit50Context);
+  assert.strictEqual(explicit50Narrative.support.level, '50ma_support', 'Explicit 50MA context must resolve the 50MA support level without legacy scan hints.');
+  assert.strictEqual(explicit50Narrative.support.distanceMeasured, true, 'Explicit 50MA context must produce a measurable support distance when price and ma50 are present.');
+  assert.ok(Number.isFinite(explicit50Narrative.support.distanceFromSupportPct), 'Explicit 50MA context must calculate a numeric support distance.');
+  assert.strictEqual(sandbox.chartGuruResolvedSupportType(explicit50Context), '50ma', 'Explicit 50MA context must resolve recentSupportType through the canonical support resolver.');
+  assert.strictEqual(sandbox.chartNarratorSupportLabel({recentSupportType:sandbox.chartGuruResolvedSupportType(explicit50Context)}), '50-day average', 'Narrator support label must name the 50-day average when explicit supportContext supplies it.');
+
+  const explicit20Context = {
+    ...baseContext,
+    supportContext:'20ma',
+    currentPrice:204,
+    ma20:200
+  };
+  const explicit20Narrative = sandbox.chartGuruNarrativeContext(explicit20Context);
+  assert.strictEqual(explicit20Narrative.support.level, '20ma_support', 'Explicit 20MA context must resolve the 20MA support level without legacy scan hints.');
+  assert.strictEqual(explicit20Narrative.support.distanceMeasured, true, 'Explicit 20MA context must produce a measurable support distance when price and ma20 are present.');
+  assert.strictEqual(sandbox.chartGuruResolvedSupportType(explicit20Context), '20ma', 'Explicit 20MA context must resolve recentSupportType through the canonical support resolver.');
+  assert.strictEqual(sandbox.chartNarratorSupportLabel({recentSupportType:sandbox.chartGuruResolvedSupportType(explicit20Context)}), '20-day average', 'Narrator support label must name the 20-day average when explicit supportContext supplies it.');
+
+  const explicitHeldResponse = sandbox.chartGuruNarrativeContext({
+    ...baseContext,
+    supportContext:'50ma',
+    currentPrice:202,
+    ma50:200,
+    supportTestState:'held',
+    bounceState:'improving',
+    stabilisationState:'clear'
+  });
+  assert.strictEqual(explicitHeldResponse.currentState.phase, 'responding_from_support', 'Explicit support context plus a measurable response must no longer stay unresolved.');
+  assert.strictEqual(explicitHeldResponse.support.semantic, 'support_present', 'Explicit support context plus a held test must preserve active support semantics.');
+
+  const explicitMeasuredExtension = sandbox.chartGuruNarrativeContext({
+    ...baseContext,
+    supportContext:'50ma',
+    currentPrice:207.2,
+    ma50:200,
+    recentlyLeftSupportZone:true,
+    offLevelWithoutStructureDamage:true,
+    supportTestState:'held'
+  });
+  assert.strictEqual(explicitMeasuredExtension.support.distanceMeasured, true, 'Explicit support context must still measure distance for extension checks.');
+  assert.strictEqual(explicitMeasuredExtension.reboundExtended, true, 'Explicit support context must allow measurable extension when current distance clears the extension threshold.');
+  assert.strictEqual(explicitMeasuredExtension.currentState.phase, 'extended_from_support', 'Explicit support context must expose the extended phase when the measured rebound is genuinely extended.');
+
+  [
+    {label:'missing 20MA', context:{...baseContext, supportContext:'20ma', currentPrice:204, ma20:null}},
+    {label:'missing 50MA', context:{...baseContext, supportContext:'50ma', currentPrice:206, ma50:null}},
+    {label:'missing current price', context:{...baseContext, supportContext:'20ma', currentPrice:null, ma20:200}}
+  ].forEach(testCase => {
+    const narrative = sandbox.chartGuruNarrativeContext(testCase.context);
+    assert.strictEqual(narrative.support.distanceMeasured, false, `${testCase.label}: missing data must keep support distance unresolved.`);
+    assert.strictEqual(narrative.reboundExtended, false, `${testCase.label}: missing data must not classify as an extended rebound.`);
+    assert.notStrictEqual(narrative.currentState.phase, 'extended_from_support', `${testCase.label}: missing data must not promote the record into the extension phase.`);
+  });
+
+  const conflictingHintsNarrative = sandbox.chartGuruNarrativeContext({
+    ...baseContext,
+    supportContext:'50ma',
+    pullbackNear20:true,
+    currentPrice:206,
+    ma20:198,
+    ma50:200
+  });
+  assert.strictEqual(conflictingHintsNarrative.support.level, '50ma_support', 'Explicit supportContext must outrank conflicting legacy pullbackNear20 hints.');
+  assert.ok(Math.abs(conflictingHintsNarrative.support.distanceFromSupportPct - 0.03) < 1e-9, 'Explicit supportContext must measure distance against the authoritative support level.');
+
+  const unsupportedContextNarrative = sandbox.chartGuruNarrativeContext({
+    ...baseContext,
+    supportContext:'other_support',
+    currentPrice:206,
+    ma20:198,
+    ma50:200
+  });
+  assert.strictEqual(unsupportedContextNarrative.support.distanceMeasured, false, 'Unsupported supportContext must not arbitrarily pick an MA for distance measurement.');
+
+  const legacyCompatibilityNarrative = sandbox.chartGuruNarrativeContext({
+    ...baseContext,
+    currentPrice:204,
+    ma20:200,
+    pullbackNear20:true,
+    evaluationScanType:'20MA'
+  });
+  assert.strictEqual(legacyCompatibilityNarrative.support.level, '20ma_support', 'Legacy support hints must continue to resolve the support level when supportContext is absent.');
+  assert.strictEqual(legacyCompatibilityNarrative.support.distanceMeasured, true, 'Legacy support hints must continue to produce measurable support distance.');
+}
+
+function verifyUnknownSupportStateFallbacks(){
+  const sandbox = buildEventPacketSandbox();
+  const hooks = analyseSetupModule.__test;
+
+  const reducedNearSupportPacket = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{
+      key:'constructive_pullback_near_20ma',
+      label:'Chart Story',
+      icon:'ðŸ“ˆ',
+      text:'Constructive pullback near 20MA',
+      evidenceFactIds:['support_context'],
+      confidence:0.8,
+      rankReason:'test'
+    },
+    recentStory:{
+      key:'constructive_pullback_near_20ma',
+      supportLabel:'20-day average',
+      steps:['support_test'],
+      stepDetails:[{key:'support_test', evidenceFactIds:['support_context'], derivedFromSteps:['support_test'], derivedFromConditions:['support_present']}],
+      evidenceFactIds:['support_context']
+    },
+    diagnostics:{}
+  });
+  assert.strictEqual(reducedNearSupportPacket.supportState, null, 'Reduced packets without narrative diagnostics must not emit a synthetic inactive supportState.');
+
+  const normalizedReducedNearSupportPacket = hooks.normalizeDeterministicEventPacket(reducedNearSupportPacket);
+  assert.strictEqual(normalizedReducedNearSupportPacket.supportState, null, 'Normalizer must preserve missing supportState as unknown rather than false.');
+  assert.strictEqual(
+    hooks.deterministicNearSupportContext(normalizedReducedNearSupportPacket, {setupStates:{pullbackZone:'near_20ma'}}),
+    true,
+    'Reduced legacy near-support packets must still use story and pullback fallbacks when support activity is unknown.'
+  );
+
+  const explicitInactiveSupportPacket = hooks.normalizeDeterministicEventPacket({
+    primaryStoryKey:'constructive_pullback_near_20ma',
+    dominantEventKey:'constructive_pullback_near_20ma',
+    recentStoryKey:'constructive_pullback_near_20ma',
+    supportState:{
+      level:'20ma_support',
+      currentlyActive:false
+    }
+  });
+  assert.strictEqual(
+    hooks.deterministicNearSupportContext(explicitInactiveSupportPacket, {setupStates:{pullbackZone:'near_20ma'}}),
+    false,
+    'Explicit inactive support must still override older near-support fallbacks.'
+  );
+
+  const unknownSupportActivityPacket = hooks.normalizeDeterministicEventPacket({
+    primaryStoryKey:'constructive_pullback_near_50ma',
+    dominantEventKey:'constructive_pullback_near_50ma',
+    recentStoryKey:'constructive_pullback_near_50ma',
+    supportState:{
+      level:'50ma_support',
+      currentlyActive:null
+    }
+  });
+  assert.strictEqual(
+    hooks.deterministicNearSupportContext(unknownSupportActivityPacket, {setupStates:{pullbackZone:'near_50ma'}}),
+    true,
+    'Unknown support activity must allow legacy near-support fallbacks to remain available.'
+  );
+
+  const noSupportEvidencePacket = hooks.normalizeDeterministicEventPacket({
+    primaryStoryKey:'unknown_story_key',
+    dominantEventKey:'unknown_story_key',
+    recentStoryKey:'unknown_story_key'
+  });
+  assert.strictEqual(
+    hooks.deterministicNearSupportContext(noSupportEvidencePacket, {setupStates:{pullbackZone:''}}),
+    false,
+    'Packets with no support evidence must remain unknown rather than being promoted to near support.'
   );
 }
 
@@ -1092,7 +1839,7 @@ function verifyStoryContinuityAndBenchmarks(){
     assert.ok(judge.repetitiveWording >= 2, `${fixture.id}: semantic judge must reject repetitive wording.`);
     assert.ok(judge.total >= 20, `${fixture.id}: semantic benchmark score must stay above regression threshold.`);
   }
-  assert.strictEqual(judgeSummaries.length, 8, 'Benchmark suite must evaluate all eight representative narration fixtures.');
+  assert.strictEqual(judgeSummaries.length, 10, 'Benchmark suite must evaluate all ten representative narration fixtures.');
 }
 
 async function run(){
@@ -1100,7 +1847,12 @@ async function run(){
   verifySemanticClassifierCoverage();
   verifyAppPayloadIncludesDeterministicEventPacket();
   verifyEventPacketContract();
+  verifySemanticEnvelopeCompatibilityFallback();
+  verifyEventPacketNarrativeSemanticAlignment();
   verifyStage15PostSupportReboundSelection();
+  verifyNullDistanceExtensionGuards();
+  verifyExplicitSupportContextResolution();
+  verifyUnknownSupportStateFallbacks();
   verifyInterpreterContractAndTutorBoundary();
   await verifyAuthorityContract();
   verifyStoryContinuityAndBenchmarks();

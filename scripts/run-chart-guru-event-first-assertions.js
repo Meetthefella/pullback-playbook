@@ -154,7 +154,16 @@ function buildEventPacketSandbox(){
     extractConstAssignment('CHART_GURU_EVENT_LABELS'),
     extractFunction('chartGuruDominantEventLabel'),
     extractFunction('chartGuruBuyerResponsePresent'),
+    extractFunction('chartGuruRecentSupportType'),
+    extractFunction('chartGuruResolvedSupportType'),
+    extractFunction('chartGuruRecentSupportResponsePresent'),
+    extractFunction('chartGuruSupportReferenceLevel'),
+    extractFunction('chartGuruSupportDistancePct'),
+    extractFunction('chartGuruSemanticEnvelopeFromNarrativeContext'),
+    extractFunction('chartGuruSemanticEnvelopeCompatibilityForStoryKey'),
+    extractFunction('chartGuruNarrativeContext'),
     extractFunction('chartGuruSemanticEnvelopeFromStory'),
+    extractFunction('chartGuruResolveSemanticEnvelopeValue'),
     extractFunction('eventPacketEvidenceIncludes'),
     extractFunction('buildDeterministicEventPacketFromChartCoach')
   ].join('\n\n');
@@ -255,6 +264,7 @@ function verifyDeterministicEventPacketPreservesTrace(){
     assert.ok(String(packet.supportSemantic || '').trim(), `${fixture.id}: packet should include supportSemantic.`);
     assert.ok(String(packet.buyerResponseSemantic || '').trim(), `${fixture.id}: packet should include buyerResponseSemantic.`);
     assert.ok(String(packet.confirmationSemantic || '').trim(), `${fixture.id}: packet should include confirmationSemantic.`);
+    assert.ok(Array.isArray(packet.storyEvents), `${fixture.id}: packet should include storyEvents.`);
     assert.deepStrictEqual(toPlainJson(packet.eventSequence), toPlainJson(recent.steps), `${fixture.id}: event sequence should preserve deterministic recent story steps.`);
     assert.deepStrictEqual(toPlainJson(packet.stepDetails), toPlainJson(recent.stepDetails), `${fixture.id}: step details should preserve deterministic recent story trace.`);
     assert.ok(packet.evidenceFactIds.includes(story.evidenceFactIds[0]), `${fixture.id}: packet should carry primary story evidence ids.`);
