@@ -152,13 +152,24 @@ function buildEventPacketSandbox(){
   sandbox.globalThis = sandbox;
   vm.runInNewContext([
     extractConstAssignment('CHART_GURU_EVENT_LABELS'),
+    `function numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    }`,
     extractFunction('chartGuruDominantEventLabel'),
     extractFunction('chartGuruBuyerResponsePresent'),
+    extractFunction('describeCandleBodyDirection'),
+    extractFunction('chartCoachRecentColorRun'),
     extractFunction('chartGuruRecentSupportType'),
     extractFunction('chartGuruResolvedSupportType'),
     extractFunction('chartGuruRecentSupportResponsePresent'),
     extractFunction('chartGuruSupportReferenceLevel'),
     extractFunction('chartGuruSupportDistancePct'),
+    extractFunction('chartGuruControlledPullbackPresent'),
+    extractFunction('chartGuruVolumeParticipationLabel'),
+    extractFunction('buildCanonicalChartStoryContext'),
     extractFunction('chartGuruSemanticEnvelopeFromNarrativeContext'),
     extractFunction('chartGuruSemanticEnvelopeCompatibilityForStoryKey'),
     extractFunction('chartGuruNarrativeContext'),
@@ -175,6 +186,14 @@ function buildStage15SelectorSandbox(){
   const sandbox = {console};
   sandbox.globalThis = sandbox;
   vm.runInNewContext([
+    `function numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    }`,
+    extractFunction('describeCandleBodyDirection'),
+    extractFunction('chartCoachBodyDescriptor'),
     extractFunction('chartCoachRecentColorRun'),
     extractFunction('chartCoachLargeBodyRun'),
     extractFunction('chartGuruBuyerResponsePresent'),
@@ -186,6 +205,9 @@ function buildStage15SelectorSandbox(){
     extractFunction('chartGuruRecentSupportResponsePresent'),
     extractFunction('chartGuruSupportReferenceLevel'),
     extractFunction('chartGuruSupportDistancePct'),
+    extractFunction('chartGuruControlledPullbackPresent'),
+    extractFunction('chartGuruVolumeParticipationLabel'),
+    extractFunction('buildCanonicalChartStoryContext'),
     extractFunction('chartGuruSemanticEnvelopeFromNarrativeContext'),
     extractFunction('chartGuruSemanticEnvelopeCompatibilityForStoryKey'),
     extractFunction('chartGuruNarrativeContext'),
@@ -1517,6 +1539,80 @@ function verifyExplicitSupportContextResolution(){
   assert.strictEqual(legacyCompatibilityNarrative.support.distanceMeasured, true, 'Legacy support hints must continue to produce measurable support distance.');
 }
 
+function verifyCanonicalStoryContextSelection(){
+  const sandbox = buildStage15SelectorSandbox();
+  const extendedReboundContext = {
+    recentSequence:[
+      {open:285, high:289, low:284.5, close:288.3},
+      {open:281.5, high:285.5, low:280.8, close:284.2},
+      {open:278.5, high:282, low:277.9, close:281.1}
+    ],
+    latestDirection:'green',
+    latestWickRejection:'',
+    bodyDescriptor:'strong',
+    maRelation:{above20:true, above50:true, above200:true},
+    structureIntact:true,
+    structureBroken:false,
+    structureWeakening:false,
+    pullbackNear20:false,
+    pullbackNear50:false,
+    recentlyLeftSupportZone:true,
+    offLevelWithoutStructureDamage:true,
+    bounceAttempt:true,
+    followThroughConfirmed:true,
+    failedBounce:false,
+    weakVolume:false,
+    activeVolume:true,
+    extendedAfterRun:false,
+    actionable:false,
+    setupLocationState:'off_level',
+    evaluationScanType:'20MA',
+    bounceState:'confirmed',
+    stabilisationState:'clear',
+    reclaimConfirmed:true,
+    candleEvidenceUpClosesAfterLow:2,
+    candleEvidenceReclaimedPriorDayHigh:true,
+    candleEvidenceHigherLowHold:true,
+    candleEvidenceReclaimRangeMeaningful:true,
+    currentPrice:288.3,
+    ma20:273.251,
+    ma50:269.7692,
+    supportContext:'20ma',
+    supportTestState:'held',
+    buyerControlState:'confirmed',
+    volumeParticipation:'constructive'
+  };
+  const storyContext = sandbox.buildCanonicalChartStoryContext(extendedReboundContext);
+  const primaryStory = sandbox.chartCoachPrimaryStoryCandidates(storyContext)[0] || null;
+  assert.strictEqual(storyContext.dominantStory, 'extended_after_support_rebound', 'Canonical story context must expose the post-support extension family for extended rebounds.');
+  assert.strictEqual(storyContext.dominantEvent, 'rebound_extended', 'Canonical story context must expose rebound_extended as the dominant event.');
+  assert.strictEqual(storyContext.currentPhase, 'extended_from_support', 'Canonical story context must preserve the extended_from_support current phase.');
+  assert.strictEqual(storyContext.support.currentlyActive, false, 'Canonical story context must mark support as historical once the rebound is extended.');
+  assert.strictEqual(storyContext.support.type, '20ma', 'Canonical story context must preserve the originating support type.');
+  assert.strictEqual(storyContext.support.testOutcome, 'held', 'Canonical story context must preserve the held support test outcome.');
+  assert.ok((storyContext.support.distancePct || 0) > 0.04, 'Canonical story context must expose the measured distance from support.');
+  assert.ok(Array.isArray(storyContext.storyEvents) && storyContext.storyEvents.includes('rebound_extended'), 'Canonical story context must preserve rebound_extended in chronology.');
+  assert.strictEqual(primaryStory && primaryStory.key, 'extended_after_run', 'The public Chart Guru story key should stay on the extension branch when canonical context says the rebound is extended.');
+
+  const stalledContext = sandbox.buildCanonicalChartStoryContext({
+    ...extendedReboundContext,
+    currentPrice:278.1,
+    bounceState:'attempt',
+    followThroughConfirmed:false,
+    buyerControlState:'emerging',
+    activeVolume:false,
+    weakVolume:true,
+    bodyDescriptor:'small',
+    latestDirection:'flat',
+    candleEvidenceReclaimedPriorDayHigh:false,
+    candleEvidenceReclaimRangeMeaningful:false
+  });
+  assert.strictEqual(stalledContext.dominantStory, 'stalled_after_support_response', 'Canonical story context must distinguish a stalled rebound from an extended one.');
+  assert.strictEqual(stalledContext.currentPhase, 'stalled_after_response', 'Canonical story context must preserve the stalled-after-response phase.');
+  assert.strictEqual(stalledContext.buyerResponse.semantic, 'response_present', 'A stalled rebound must preserve the initial buyer response semantic.');
+  assert.strictEqual(stalledContext.buyerControl.state, 'emerging', 'A stalled rebound must keep buyer control unconfirmed unless separate confirmation exists.');
+}
+
 function verifyUnknownSupportStateFallbacks(){
   const sandbox = buildEventPacketSandbox();
   const hooks = analyseSetupModule.__test;
@@ -1852,6 +1948,7 @@ async function run(){
   verifyStage15PostSupportReboundSelection();
   verifyNullDistanceExtensionGuards();
   verifyExplicitSupportContextResolution();
+  verifyCanonicalStoryContextSelection();
   verifyUnknownSupportStateFallbacks();
   verifyInterpreterContractAndTutorBoundary();
   await verifyAuthorityContract();

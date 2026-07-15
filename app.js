@@ -25885,6 +25885,73 @@ function canonicalCandleContext(record = {}, analysis = {}){
   };
 }
 
+function buildDeterministicReviewProse({storyContext = {}, decisionContext = {}} = {}){
+  const support = storyContext.support && typeof storyContext.support === 'object' ? storyContext.support : {};
+  const supportLabel = String(support.label || 'support').trim() || 'support';
+  const supportPhrase = supportLabel === 'support' ? 'support' : `the ${supportLabel}`;
+  const dominantStory = String(storyContext.dominantStory || '').trim();
+  const currentPhase = String(storyContext.currentPhase || '').trim();
+  const volumeState = String(storyContext.volume && storyContext.volume.state || '').trim();
+  const decisionVerdict = (() => {
+    const normalized = String(decisionContext.verdict || 'watch').trim().toLowerCase().replace(/\s+/g, '_');
+    if(['watch', 'near_entry', 'entry', 'avoid'].includes(normalized)) return normalized;
+    if(normalized.includes('near') && normalized.includes('entry')) return 'near_entry';
+    if(normalized.includes('entry')) return 'entry';
+    if(normalized.includes('avoid')) return 'avoid';
+    return 'watch';
+  })();
+
+  let chartRead = 'The recent candles still need a clearer next step.';
+  if(dominantStory === 'extended_after_support_rebound' || currentPhase === 'extended_from_support'){
+    chartRead = `Buyers did defend ${supportPhrase}, but the rebound has already extended away from that area, so this is no longer an active support test.`;
+  }else if(dominantStory === 'stalled_after_support_response' || currentPhase === 'stalled_after_response'){
+    chartRead = `Buyers responded around ${supportPhrase}, but the rebound has stalled and still needs cleaner follow-through.`;
+  }else if(dominantStory === 'confirmed_support_rebound'){
+    chartRead = `Buyers defended ${supportPhrase} and have started to confirm the rebound, although the setup still depends on the next proper trigger.`;
+  }else if(dominantStory === 'initial_support_response' || currentPhase === 'responding_from_support'){
+    chartRead = `Price is reacting from ${supportPhrase}, but the response is still early and needs another sign of control.`;
+  }else if(dominantStory === 'support_test_in_progress' || currentPhase === 'at_support'){
+    chartRead = `Price is sitting at ${supportPhrase}, so the key question is whether buyers can actually hold this support test.`;
+  }else if(dominantStory === 'failed_support_test' || dominantStory === 'structure_breaking_down' || currentPhase === 'support_failed'){
+    chartRead = `Support has failed around ${supportPhrase}, so the chart is still in repair mode rather than acting like a healthy pullback.`;
+  }else if(dominantStory === 'healthy_trend'){
+    chartRead = 'The bigger trend still looks constructive, but the recent candles are not yet creating a clearer pullback decision.';
+  }
+
+  if(volumeState === 'weak' && !/volume/i.test(chartRead)){
+    chartRead += ' Volume is still light, so the move has less backing behind it.';
+  }
+
+  let whatNext = 'Wait for the next clear improvement in price action before upgrading the read.';
+  if(currentPhase === 'extended_from_support'){
+    whatNext = 'Wait for a calmer pullback or consolidation rather than chasing the rebound away from support.';
+  }else if(currentPhase === 'stalled_after_response'){
+    whatNext = 'Wait for cleaner follow-through before treating the rebound as more than an initial response.';
+  }else if(currentPhase === 'support_failed'){
+    whatNext = 'Wait for the chart to repair and rebuild support before treating any bounce as meaningful.';
+  }else if(currentPhase === 'at_support' || currentPhase === 'responding_from_support'){
+    whatNext = `Watch for buyers to hold ${supportPhrase} and add a firmer follow-through candle.`;
+  }
+
+  let verdictLine = '';
+  if(decisionVerdict === 'near_entry'){
+    verdictLine = 'This can support Near Entry monitoring, but the chart story does not create an entry trigger on its own.';
+  }else if(decisionVerdict === 'watch'){
+    verdictLine = 'This still belongs in Watch until the chart story improves further.';
+  }else if(decisionVerdict === 'avoid'){
+    verdictLine = 'This chart story does not repair the current Avoid state.';
+  }else{
+    verdictLine = 'This chart story is descriptive only and does not change the resolver state.';
+  }
+
+  return {
+    chartRead,
+    whatNext,
+    verdictLine,
+    text:[chartRead, whatNext, verdictLine].filter(Boolean).join(' ').trim()
+  };
+}
+
 function deterministicCandleStructureSummary(record = {}, analysis = {}, options = {}){
   const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(record);
   const facts = canonicalCandleContext(record, analysis);
@@ -25950,6 +26017,44 @@ function deterministicCandleStructureSummary(record = {}, analysis = {}, options
   const aiMissing = !aiText;
   const aiGeneric = isGenericAiCandleCommentary(aiText);
   const aiContradictsCanonical = aiCandleCommentaryContradictsCanonical(aiText, facts);
+  const storyContext = buildCanonicalChartStoryContext({
+    ...facts,
+    latestDirection:facts.latestDirection,
+    bodyDescriptor:chartCoachBodyDescriptor(facts.latest),
+    recentSequence:Array.isArray(facts.recent) ? facts.recent : [],
+    structureIntact:['strong', 'intact', 'developing_clean'].includes(String(globalVerdict.structure_state || globalVerdict.structureState || '').trim().toLowerCase())
+      || ['alive', 'messy'].includes(String(globalVerdict.structure_eligibility || globalVerdict.structureEligibility || '').trim().toLowerCase()),
+    structureBroken:['broken', 'failed', 'dead', 'invalid'].includes(String(globalVerdict.structure_state || globalVerdict.structureState || '').trim().toLowerCase())
+      || String(globalVerdict.structure_eligibility || globalVerdict.structureEligibility || '').trim().toLowerCase() === 'broken',
+    structureWeakening:String(globalVerdict.structure_state || globalVerdict.structureState || '').trim().toLowerCase() === 'weakening'
+      || String(globalVerdict.structure_eligibility || globalVerdict.structureEligibility || '').trim().toLowerCase() === 'damaged',
+    pullbackNear20:String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase() === 'near_20ma',
+    pullbackNear50:String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase() === 'near_50ma',
+    recentlyLeftSupportZone:['left_support_zone', 'off_level'].includes(String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase())
+      || ['off_level', 'lost_support'].includes(String(globalVerdict.setup_location_state || globalVerdict.setupLocationState || '').trim().toLowerCase()),
+    offLevelWithoutStructureDamage:false,
+    weakVolume:false,
+    activeVolume:false,
+    volumeParticipation:'constructive',
+    actionable:normalizeGlobalVerdictKey(globalVerdict.final_verdict || globalVerdict.finalVerdict || 'watch') === 'entry',
+    extendedAfterRun:String(globalVerdict.setup_location_state || globalVerdict.setupLocationState || '').trim().toLowerCase() === 'extended'
+      || String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase() === 'extended',
+    historicalExtendedAfterRun:String(globalVerdict.setup_location_state || globalVerdict.setupLocationState || '').trim().toLowerCase() === 'extended'
+      || String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase() === 'extended',
+    supportContext:String(globalVerdict.support_context || globalVerdict.supportContext || '').trim().toLowerCase(),
+    supportTestState:String(globalVerdict.support_test_state || globalVerdict.supportTestState || '').trim().toLowerCase(),
+    buyerControlState:String(globalVerdict.buyer_control_state || globalVerdict.buyerControlState || '').trim().toLowerCase(),
+    bounceState:String(globalVerdict.bounce_state || globalVerdict.bounceState || '').trim().toLowerCase(),
+    stabilisationState:String(globalVerdict.stabilisation_state || globalVerdict.stabilisationState || '').trim().toLowerCase(),
+    evaluationScanType:String(globalVerdict.evaluation_scan_type || globalVerdict.evaluationScanType || '').trim(),
+    recentSupportType:chartGuruResolvedSupportType(globalVerdict),
+    near20:Number.isFinite(facts.currentPrice) && Number.isFinite(facts.ma20) && chartCoachProximityLabel(facts.currentPrice, facts.ma20) === 'near' ? 'near' : '',
+    near50:Number.isFinite(facts.currentPrice) && Number.isFinite(facts.ma50) && chartCoachProximityLabel(facts.currentPrice, facts.ma50) === 'near' ? 'near' : ''
+  });
+  const reviewProse = buildDeterministicReviewProse({
+    storyContext,
+    decisionContext:{verdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || 'watch'}
+  });
   const reason = aiMissing
     ? 'AI candle commentary missing'
     : (aiGeneric
@@ -25962,7 +26067,9 @@ function deterministicCandleStructureSummary(record = {}, analysis = {}, options
     aiMissing,
     aiGeneric,
     aiContradictsCanonical,
-    facts
+    facts,
+    storyContext,
+    reviewProse
   };
 }
 
@@ -26333,12 +26440,13 @@ function chartGuruSemanticEnvelopeCompatibilityForStoryKey(storyKey = ''){
     : null;
 }
 
-function chartGuruNarrativeContext(context = {}){
+function buildCanonicalChartStoryContext(context = {}){
   const supportType = chartGuruResolvedSupportType(context);
   const supportContext = String(context.supportContext || '').trim().toLowerCase();
   const supportLabel = supportType === '20ma'
     ? '20-day average'
     : (supportType === '50ma' ? '50-day average' : 'support');
+  const supportReferenceLevel = chartGuruSupportReferenceLevel(context, supportType);
   const supportDistancePct = chartGuruSupportDistancePct(context, supportType);
   const supportDistanceMeasured = Number.isFinite(supportDistancePct);
   const supportDistanceThresholdPct = supportType === '50ma' ? 0.03 : 0.025;
@@ -26414,6 +26522,12 @@ function chartGuruNarrativeContext(context = {}){
   const buyerControlSemantic = buyerControlState === 'confirmed'
     ? 'confirmed'
     : (buyerResponsePresent ? 'emerging' : 'none');
+  const volumeState = String(context.volumeParticipation || chartGuruVolumeParticipationLabel(context) || '').trim().toLowerCase() || 'constructive';
+  const pullbackQuality = context.failedBounce === true
+    || context.structureBroken === true
+    || context.structureWeakening === true
+    ? 'damaging'
+    : (chartGuruControlledPullbackPresent(context) ? 'controlled' : 'unknown');
   const supportEvents = [];
   if(context.structureIntact === true && context.structureBroken !== true) supportEvents.push('trend_remained_intact');
   else if(context.structureBroken === true) supportEvents.push('trend_broke_down');
@@ -26469,33 +26583,156 @@ function chartGuruNarrativeContext(context = {}){
           : (!supportDistanceMeasured && supportContextRecognized
             ? 'current_location_unresolved'
             : (context.structureIntact === true ? 'away_from_support' : 'repairing_structure')))));
+  const dominantEvent = context.failedBounce === true || supportInteraction === 'failed'
+    ? 'support_failed'
+    : (context.structureBroken === true
+      ? 'structure_breaking_down'
+      : (reboundStalled
+        ? 'rebound_stalled'
+        : (reboundExtended
+          ? 'rebound_extended'
+          : (buyerControlSemantic === 'confirmed'
+            ? 'buyer_control_confirmed'
+            : (buyerResponsePresent
+              ? 'buyers_responded'
+              : (supportInteraction === 'testing'
+                ? 'support_testing'
+                : (supportInteraction === 'held' ? 'support_held' : 'trend_remained_intact')))))));
+  const dominantStory = dominantEvent === 'support_failed'
+    ? (context.structureBroken === true ? 'structure_breaking_down' : 'failed_support_test')
+    : (dominantEvent === 'structure_breaking_down'
+      ? 'structure_breaking_down'
+      : (dominantEvent === 'rebound_stalled'
+        ? 'stalled_after_support_response'
+        : (dominantEvent === 'rebound_extended'
+          ? 'extended_after_support_rebound'
+          : (dominantEvent === 'buyer_control_confirmed'
+            ? 'confirmed_support_rebound'
+            : (dominantEvent === 'buyers_responded'
+              ? 'initial_support_response'
+              : (supportInteraction === 'testing'
+                ? 'support_test_in_progress'
+                : (supportInteraction === 'held' ? 'support_held_without_follow_through' : 'healthy_trend')))))));
+  const supportRelationship = supportInteraction === 'failed'
+    ? 'failed'
+    : (reboundExtended
+      ? 'extended_above'
+      : (reboundStalled
+        ? 'response_stalled'
+        : (supportCurrentlyActive
+          ? supportInteraction
+          : (!supportDistanceMeasured && supportContextRecognized
+            ? 'away_unresolved'
+            : (materiallyAwayFromSupport ? 'away_from_support' : 'unknown')))));
+  const support = {
+    level:supportType ? `${supportType}_support` : (supportContext || 'none'),
+    label:supportLabel,
+    type:supportType || '',
+    referenceLevel:supportReferenceLevel,
+    relationship:supportRelationship,
+    interaction:supportInteraction,
+    currentlyActive:supportCurrentlyActive,
+    recentlyTested:['testing', 'held', 'failed'].includes(supportInteraction),
+    testOutcome:supportInteraction || 'not_tested',
+    distanceFromSupportPct:supportDistancePct,
+    distancePct:supportDistancePct,
+    distanceMeasured:supportDistanceMeasured,
+    semantic:supportSemantic
+  };
   return {
-    support:{
-      level:supportType ? `${supportType}_support` : (supportContext || 'none'),
-      label:supportLabel,
-      interaction:supportInteraction,
-      currentlyActive:supportCurrentlyActive,
-      distanceFromSupportPct:supportDistancePct,
-      distanceMeasured:supportDistanceMeasured,
-      semantic:supportSemantic
+    ...context,
+    version:'chart-story-v1',
+    dominantStory,
+    dominantEvent,
+    currentPhase,
+    structure:{
+      state:context.structureBroken === true ? 'broken' : (context.structureWeakening === true ? 'weakening' : (context.structureIntact === true ? 'intact' : 'unknown'))
+    },
+    support,
+    pullback:{
+      occurred:!!(context.pullbackNear20 === true || context.pullbackNear50 === true || supportContextRecognized),
+      quality:pullbackQuality
     },
     buyerResponse:{
-      state:buyerResponsePresent ? 'present' : 'absent',
+      state:buyerResponsePresent ? 'present' : (supportInteraction === 'failed' ? 'failed' : (supportContextRecognized ? 'absent' : 'unknown')),
       semantic:buyerResponseSemantic
     },
     buyerControl:{
       state:buyerControlSemantic
     },
     confirmation:{
+      state:confirmationSemantic === 'follow_through_confirmed'
+        ? 'confirmed'
+        : (confirmationSemantic === 'follow_through_failed'
+          ? 'failed'
+          : (confirmationSemantic === 'follow_through_unconfirmed' ? 'unconfirmed' : 'unknown')),
       semantic:confirmationSemantic
     },
-    currentState:{
-      phase:currentPhase
+    sellerPressure:{
+      state:context.structureBroken === true || context.failedBounce === true || String(context.latestDirection || '').trim() === 'red'
+        ? 'active'
+        : (String(context.latestDirection || '').trim() === 'green' ? 'normal' : 'unknown')
+    },
+    volume:{
+      state:volumeState || 'unknown'
     },
     storyEvents,
+    nextChartNeed:dominantEvent === 'support_failed' || dominantEvent === 'structure_breaking_down'
+      ? 'repair'
+      : (reboundExtended
+        ? 'pullback_or_reset'
+        : (reboundStalled || buyerResponsePresent ? 'follow_through' : (supportCurrentlyActive ? 'support_hold' : 'none'))),
+    evidenceQuality:{
+      supportKnown:supportContextRecognized,
+      distanceKnown:supportDistanceMeasured,
+      candleOrderNormalized:true,
+      currentLocationKnown:supportDistanceMeasured
+    },
+    diagnostics:{
+      resolvedSupportType:supportType || '',
+      supportReferenceLevel,
+      supportDistanceThresholdPct:Number.isFinite(supportDistanceThresholdPct) ? supportDistanceThresholdPct : null,
+      extensionEvidencePresent,
+      reboundExtended,
+      reboundStalled
+    },
     reboundExtended,
     reboundStalled,
     extensionEvidencePresent
+  };
+}
+
+function chartGuruNarrativeContext(context = {}){
+  const storyContext = buildCanonicalChartStoryContext(context);
+  return {
+    support:{
+      level:String(storyContext.support && storyContext.support.level || '').trim(),
+      label:String(storyContext.support && storyContext.support.label || '').trim(),
+      interaction:String(storyContext.support && storyContext.support.interaction || '').trim(),
+      currentlyActive:storyContext.support && storyContext.support.currentlyActive === true,
+      distanceFromSupportPct:Number.isFinite(storyContext.support && storyContext.support.distanceFromSupportPct)
+        ? Number(storyContext.support.distanceFromSupportPct)
+        : null,
+      distanceMeasured:storyContext.support && storyContext.support.distanceMeasured === true,
+      semantic:String(storyContext.support && storyContext.support.semantic || '').trim()
+    },
+    buyerResponse:{
+      state:String(storyContext.buyerResponse && storyContext.buyerResponse.state || '').trim(),
+      semantic:String(storyContext.buyerResponse && storyContext.buyerResponse.semantic || '').trim()
+    },
+    buyerControl:{
+      state:String(storyContext.buyerControl && storyContext.buyerControl.state || '').trim()
+    },
+    confirmation:{
+      semantic:String(storyContext.confirmation && storyContext.confirmation.semantic || '').trim()
+    },
+    currentState:{
+      phase:String(storyContext.currentPhase || '').trim()
+    },
+    storyEvents:Array.isArray(storyContext.storyEvents) ? storyContext.storyEvents.slice() : [],
+    reboundExtended:storyContext.reboundExtended === true,
+    reboundStalled:storyContext.reboundStalled === true,
+    extensionEvidencePresent:storyContext.extensionEvidencePresent === true
   };
 }
 
@@ -27865,7 +28102,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     fact:'next_check'
   });
 
-  const storyContext = {
+  const storyInputs = {
     ...facts,
     latestDirection,
     bodyDescriptor,
@@ -27916,6 +28153,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   const greenRun = chartCoachRecentColorRun(recentSequence, 'green');
   const redRun = chartCoachRecentColorRun(recentSequence, 'red');
   const largeBodyRun = chartCoachLargeBodyRun(recentSequence);
+  const storyContext = buildCanonicalChartStoryContext(storyInputs);
   const narrativeContext = chartGuruNarrativeContext(storyContext);
   storyContext.recentSupportType = chartGuruResolvedSupportType(storyContext);
   storyContext.recentSupportResponsePresent = chartGuruRecentSupportResponsePresent(storyContext);
@@ -28062,6 +28300,54 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     storyEvents:Array.isArray(narrativeContext.storyEvents) ? narrativeContext.storyEvents.slice() : [],
     extensionEvidencePresent:narrativeContext.extensionEvidencePresent === true
   };
+  diagnostics.storyContext = {
+    version:String(storyContext.version || '').trim(),
+    dominantStory:String(storyContext.dominantStory || '').trim(),
+    dominantEvent:String(storyContext.dominantEvent || '').trim(),
+    currentPhase:String(storyContext.currentPhase || '').trim(),
+    support:{
+      type:String(storyContext.support && storyContext.support.type || '').trim(),
+      label:String(storyContext.support && storyContext.support.label || '').trim(),
+      relationship:String(storyContext.support && storyContext.support.relationship || '').trim(),
+      interaction:String(storyContext.support && storyContext.support.interaction || '').trim(),
+      currentlyActive:storyContext.support && storyContext.support.currentlyActive === true
+        ? true
+        : (storyContext.support && storyContext.support.currentlyActive === false ? false : null),
+      recentlyTested:storyContext.support && storyContext.support.recentlyTested === true,
+      testOutcome:String(storyContext.support && storyContext.support.testOutcome || '').trim(),
+      distanceMeasured:storyContext.support && storyContext.support.distanceMeasured === true,
+      distancePct:Number.isFinite(storyContext.support && storyContext.support.distancePct)
+        ? Number(storyContext.support.distancePct)
+        : null,
+      semantic:String(storyContext.support && storyContext.support.semantic || '').trim()
+    },
+    pullback:{
+      occurred:storyContext.pullback && storyContext.pullback.occurred === true,
+      quality:String(storyContext.pullback && storyContext.pullback.quality || '').trim()
+    },
+    buyerResponse:{
+      state:String(storyContext.buyerResponse && storyContext.buyerResponse.state || '').trim(),
+      semantic:String(storyContext.buyerResponse && storyContext.buyerResponse.semantic || '').trim()
+    },
+    buyerControl:{
+      state:String(storyContext.buyerControl && storyContext.buyerControl.state || '').trim()
+    },
+    confirmation:{
+      state:String(storyContext.confirmation && storyContext.confirmation.state || '').trim(),
+      semantic:String(storyContext.confirmation && storyContext.confirmation.semantic || '').trim()
+    },
+    volume:{
+      state:String(storyContext.volume && storyContext.volume.state || '').trim()
+    },
+    nextChartNeed:String(storyContext.nextChartNeed || '').trim(),
+    storyEvents:Array.isArray(storyContext.storyEvents) ? storyContext.storyEvents.slice() : [],
+    evidenceQuality:storyContext.evidenceQuality && typeof storyContext.evidenceQuality === 'object'
+      ? {...storyContext.evidenceQuality}
+      : {},
+    diagnostics:storyContext.diagnostics && typeof storyContext.diagnostics === 'object'
+      ? {...storyContext.diagnostics}
+      : {}
+  };
   diagnostics.storyCandidates = storyCandidates.map(candidate => ({
     id:String(candidate && candidate.key || '').trim(),
     eligible:true,
@@ -28071,13 +28357,13 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   }));
   diagnostics.selectedStory = primaryStory ? {
     id:String(primaryStory.key || '').trim(),
-    dominantEvent:chartGuruDominantEventLabel(primaryStory.key),
-    currentPhase:String(recentStory && recentStory.confidenceMode || '').trim(),
+    dominantEvent:String(storyContext.dominantEvent || chartGuruDominantEventLabel(primaryStory.key)).trim(),
+    currentPhase:String(storyContext.currentPhase || recentStory && recentStory.confidenceMode || '').trim(),
     reasons:[String(primaryStory.rankReason || '').trim()].filter(Boolean),
-    storyEvents:Array.isArray(narrativeContext.storyEvents) ? narrativeContext.storyEvents.slice() : [],
-    supportCurrentlyActive:narrativeContext.support && narrativeContext.support.currentlyActive === true,
-    supportDistancePct:Number.isFinite(narrativeContext.support && narrativeContext.support.distanceFromSupportPct)
-      ? Number(narrativeContext.support.distanceFromSupportPct)
+    storyEvents:Array.isArray(storyContext.storyEvents) ? storyContext.storyEvents.slice() : [],
+    supportCurrentlyActive:storyContext.support && storyContext.support.currentlyActive === true,
+    supportDistancePct:Number.isFinite(storyContext.support && storyContext.support.distancePct)
+      ? Number(storyContext.support.distancePct)
       : null
   } : null;
   return {
@@ -28148,6 +28434,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     ].map(id => String(id || '').trim()).filter(Boolean))],
     confidence:0.8,
     facts,
+    storyContext,
     diagnostics
   };
 }
@@ -28187,6 +28474,9 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
     const mergedChartCoach = {
       ...deterministicCoach,
       ...chartCoach,
+      storyContext:chartCoach.storyContext && typeof chartCoach.storyContext === 'object'
+        ? chartCoach.storyContext
+        : deterministicCoach.storyContext,
       primaryStory:mergedPrimaryStory,
       recentStory:mergedRecentStory,
       chartNarrator:chartCoach.chartNarrator || deterministicCoach.chartNarrator,
@@ -28220,6 +28510,7 @@ function selectReviewAiSummary(record, analysis = {}, options = {}){
     const mergedChartCoach = {
       ...deterministicCoach,
       ...chartCoach,
+      storyContext:deterministicCoach.storyContext,
       primaryStory:deterministicCoach.primaryStory,
       recentStory:deterministicCoach.recentStory,
       chartNarrator:deterministicCoach.chartNarrator,
@@ -35974,20 +36265,39 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
   const diagnostics = chartCoach && chartCoach.diagnostics && typeof chartCoach.diagnostics === 'object'
     ? chartCoach.diagnostics
     : {};
+  const storyContext = chartCoach && chartCoach.storyContext && typeof chartCoach.storyContext === 'object'
+    ? chartCoach.storyContext
+    : (diagnostics.storyContext && typeof diagnostics.storyContext === 'object' ? diagnostics.storyContext : {});
   const narrativeContext = diagnostics.narrativeContext && typeof diagnostics.narrativeContext === 'object'
     ? diagnostics.narrativeContext
     : {};
-  const narrativeSupportState = narrativeContext.support && typeof narrativeContext.support === 'object'
-    ? narrativeContext.support
+  const authoritativeSupportState = storyContext.support && typeof storyContext.support === 'object'
+    ? storyContext.support
+    : (narrativeContext.support && typeof narrativeContext.support === 'object' ? narrativeContext.support : null);
+  const authoritativeBuyerResponse = storyContext.buyerResponse && typeof storyContext.buyerResponse === 'object'
+    ? storyContext.buyerResponse
+    : (narrativeContext.buyerResponse && typeof narrativeContext.buyerResponse === 'object' ? narrativeContext.buyerResponse : {});
+  const authoritativeConfirmation = storyContext.confirmation && typeof storyContext.confirmation === 'object'
+    ? storyContext.confirmation
+    : (narrativeContext.confirmation && typeof narrativeContext.confirmation === 'object' ? narrativeContext.confirmation : {});
+  const authoritativeBuyerControl = storyContext.buyerControl && typeof storyContext.buyerControl === 'object'
+    ? storyContext.buyerControl
+    : (narrativeContext.buyerControl && typeof narrativeContext.buyerControl === 'object' ? narrativeContext.buyerControl : {});
+  const authoritativePhase = String(storyContext.currentPhase || narrativeContext.currentState && narrativeContext.currentState.phase || '').trim();
+  const narrativeSupportState = authoritativeSupportState
+    ? authoritativeSupportState
     : null;
   const dominantEventKey = String(primaryStory.key || recentStory.key || '').trim();
   const dominantEventLabel = chartGuruDominantEventLabel(dominantEventKey);
   const eventSequence = Array.isArray(recentStory.steps)
     ? recentStory.steps.map(step => String(step || '').trim()).filter(Boolean)
     : [];
-  const storyEvents = Array.isArray(narrativeContext.storyEvents)
-    ? narrativeContext.storyEvents.map(step => String(step || '').trim()).filter(Boolean)
-    : [];
+  const storyEvents = Array.isArray(storyContext.storyEvents)
+    ? storyContext.storyEvents.map(step => String(step || '').trim()).filter(Boolean)
+    : (Array.isArray(narrativeContext.storyEvents)
+      ? narrativeContext.storyEvents.map(step => String(step || '').trim()).filter(Boolean)
+      : [])
+    ;
   const evidenceFactIds = [...new Set([
     ...(Array.isArray(primaryStory.evidenceFactIds) ? primaryStory.evidenceFactIds : []),
     ...(Array.isArray(recentStory.evidenceFactIds) ? recentStory.evidenceFactIds : [])
@@ -35995,17 +36305,17 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
   const keyCompatibilityEnvelope = chartGuruSemanticEnvelopeFromStory(dominantEventKey, {});
   const semanticEnvelope = {
     supportSemantic:chartGuruResolveSemanticEnvelopeValue([
-      narrativeContext.support && narrativeContext.support.semantic,
+      authoritativeSupportState && authoritativeSupportState.semantic,
       recentStory.supportSemantic,
       keyCompatibilityEnvelope.supportSemantic
     ], ['support_unknown'], 'support_unknown') || 'support_unknown',
     buyerResponseSemantic:chartGuruResolveSemanticEnvelopeValue([
-      narrativeContext.buyerResponse && narrativeContext.buyerResponse.semantic,
+      authoritativeBuyerResponse && authoritativeBuyerResponse.semantic,
       recentStory.buyerResponseSemantic,
       keyCompatibilityEnvelope.buyerResponseSemantic
     ], ['response_unknown'], 'response_unknown') || 'response_unknown',
     confirmationSemantic:chartGuruResolveSemanticEnvelopeValue([
-      narrativeContext.confirmation && narrativeContext.confirmation.semantic,
+      authoritativeConfirmation && authoritativeConfirmation.semantic,
       recentStory.confirmationSemantic,
       keyCompatibilityEnvelope.confirmationSemantic
     ], ['follow_through_unknown', 'confirmation_unknown'], 'follow_through_unknown') || 'follow_through_unknown'
@@ -36046,8 +36356,8 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
     confirmationSemantic:semanticEnvelope.confirmationSemantic,
     storyEvents,
     supportState,
-    buyerControlState:String(narrativeContext.buyerControl && narrativeContext.buyerControl.state || '').trim(),
-    currentPhase:String(narrativeContext.currentState && narrativeContext.currentState.phase || '').trim(),
+    buyerControlState:String(authoritativeBuyerControl && authoritativeBuyerControl.state || '').trim(),
+    currentPhase:authoritativePhase,
     stepDetails:Array.isArray(recentStory.stepDetails)
       ? recentStory.stepDetails.map(detail => ({
         key:String(detail && detail.key || '').trim(),
@@ -36328,6 +36638,7 @@ function normalizeAnalysisResponse(raw){
         : repairChartGuruStoredText(String(safe.summaryText || safe.summary_text || '').trim()),
       source:String(safe.source || '').trim(),
       renderVersion:String(safe.renderVersion || safe.render_version || '').trim(),
+      storyContext:normalizeObject(safe.storyContext || safe.story_context) || null,
       diagnostics:normalizeObject(safe.diagnostics) || null,
       explanationFacts:Array.isArray(safe.explanationFacts || safe.explanation_facts)
         ? (safe.explanationFacts || safe.explanation_facts).map(item => String(item || '').trim()).filter(Boolean)

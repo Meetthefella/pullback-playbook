@@ -152,13 +152,24 @@ function buildEventPacketSandbox(){
   sandbox.globalThis = sandbox;
   const snippets = [
     extractConstAssignment('CHART_GURU_EVENT_LABELS'),
+    `function numericOrNull(value){
+      if(value === null || value === undefined) return null;
+      if(typeof value === 'string' && value.trim() === '') return null;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : null;
+    }`,
     extractFunction('chartGuruDominantEventLabel'),
     extractFunction('chartGuruBuyerResponsePresent'),
+    extractFunction('describeCandleBodyDirection'),
+    extractFunction('chartCoachRecentColorRun'),
     extractFunction('chartGuruRecentSupportType'),
     extractFunction('chartGuruResolvedSupportType'),
     extractFunction('chartGuruRecentSupportResponsePresent'),
     extractFunction('chartGuruSupportReferenceLevel'),
     extractFunction('chartGuruSupportDistancePct'),
+    extractFunction('chartGuruControlledPullbackPresent'),
+    extractFunction('chartGuruVolumeParticipationLabel'),
+    extractFunction('buildCanonicalChartStoryContext'),
     extractFunction('chartGuruSemanticEnvelopeFromNarrativeContext'),
     extractFunction('chartGuruSemanticEnvelopeCompatibilityForStoryKey'),
     extractFunction('chartGuruNarrativeContext'),
