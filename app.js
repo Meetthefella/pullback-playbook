@@ -25419,8 +25419,27 @@ function finalDisplayedAnalysisChartRead(record, analysis){
         ? String(sanitizedChartCoach.summaryText || '').trim()
         : String(selectedSummary.text || '').trim()
     );
-  const useFallback = /^deterministic_/.test(String(selectedSummary.source || ''));
-  const baseText = aiBaseText;
+  const selectedSummarySource = String(selectedSummary.source || '').trim();
+  const useFallback = selectedSummarySource === 'deterministic'
+    || /^deterministic_/.test(selectedSummarySource);
+  const recomputedDeterministicStoryContext = chartCoachFallback && chartCoachFallback.storyContext && typeof chartCoachFallback.storyContext === 'object'
+    ? chartCoachFallback.storyContext
+    : null;
+  const persistedDeterministicStoryContext = sanitizedChartCoach && sanitizedChartCoach.storyContext && typeof sanitizedChartCoach.storyContext === 'object'
+    ? sanitizedChartCoach.storyContext
+    : null;
+  const deterministicStoryContext = useFallback
+    ? (recomputedDeterministicStoryContext || persistedDeterministicStoryContext || null)
+    : (persistedDeterministicStoryContext || recomputedDeterministicStoryContext || null);
+  const deterministicReviewProse = deterministicStoryContext
+    ? buildDeterministicReviewProse({
+      storyContext:deterministicStoryContext,
+      decisionContext:{verdict:globalVerdict.final_verdict}
+    })
+    : null;
+  const baseText = useFallback
+    ? String(deterministicReviewProse && deterministicReviewProse.text || aiBaseText).trim()
+    : aiBaseText;
   const sanitizedText = repairChartGuruStoredText(sanitizeAliveWatchSemanticCopy(baseText, semanticSetup));
   return {
     text:sanitizedText,
@@ -25435,9 +25454,10 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     matchedPhrase:correction.matchedPhrase,
     outputChanged:correction.outputChanged || sanitizedText !== baseText,
     usedDeterministicFallback:useFallback,
-    selectedSummarySource:String(selectedSummary.source || ''),
+    selectedSummarySource:selectedSummarySource,
     fallbackReason:'deterministic_chart_coach',
     fallbackFacts:chartCoachFallback.facts || null,
+    reviewProse:deterministicReviewProse,
     chartCoach:sanitizedChartCoach || chartCoachFallback
   };
 }
@@ -25887,11 +25907,13 @@ function canonicalCandleContext(record = {}, analysis = {}){
 
 function buildDeterministicReviewProse({storyContext = {}, decisionContext = {}} = {}){
   const support = storyContext.support && typeof storyContext.support === 'object' ? storyContext.support : {};
+  const storyDiagnostics = storyContext.diagnostics && typeof storyContext.diagnostics === 'object' ? storyContext.diagnostics : {};
   const supportLabel = String(support.label || 'support').trim() || 'support';
   const supportPhrase = supportLabel === 'support' ? 'support' : `the ${supportLabel}`;
   const dominantStory = String(storyContext.dominantStory || '').trim();
   const currentPhase = String(storyContext.currentPhase || '').trim();
   const volumeState = String(storyContext.volume && storyContext.volume.state || '').trim();
+  const recentIndecision = storyDiagnostics.recentIndecision === true;
   const decisionVerdict = (() => {
     const normalized = String(decisionContext.verdict || 'watch').trim().toLowerCase().replace(/\s+/g, '_');
     if(['watch', 'near_entry', 'entry', 'avoid'].includes(normalized)) return normalized;
@@ -25901,8 +25923,17 @@ function buildDeterministicReviewProse({storyContext = {}, decisionContext = {}}
     return 'watch';
   })();
 
-  let chartRead = 'The recent candles still need a clearer next step.';
-  if(dominantStory === 'extended_after_support_rebound' || currentPhase === 'extended_from_support'){
+  let chartRead = 'The recent candles look indecisive, so neither buyers nor sellers proved much control yet.';
+  if(
+    dominantStory === 'doji_indecision'
+    || (
+      recentIndecision
+      && dominantStory === 'healthy_trend'
+      && !['extended_from_support', 'stalled_after_response', 'responding_from_support', 'at_support', 'support_failed'].includes(currentPhase)
+    )
+  ){
+    chartRead = 'The latest candle was small, so neither buyers nor sellers proved much control by the close.';
+  }else if(dominantStory === 'extended_after_support_rebound' || currentPhase === 'extended_from_support'){
     chartRead = `Buyers did defend ${supportPhrase}, but the rebound has already extended away from that area, so this is no longer an active support test.`;
   }else if(dominantStory === 'stalled_after_support_response' || currentPhase === 'stalled_after_response'){
     chartRead = `Buyers responded around ${supportPhrase}, but the rebound has stalled and still needs cleaner follow-through.`;
@@ -25921,9 +25952,21 @@ function buildDeterministicReviewProse({storyContext = {}, decisionContext = {}}
   if(volumeState === 'weak' && !/volume/i.test(chartRead)){
     chartRead += ' Volume is still light, so the move has less backing behind it.';
   }
+  if(recentIndecision && !/neither buyers nor sellers proved much control|neither side showed clear control/i.test(chartRead)){
+    chartRead += ' The latest candle was small, so neither buyers nor sellers proved much control by the close.';
+  }
 
   let whatNext = 'Wait for the next clear improvement in price action before upgrading the read.';
-  if(currentPhase === 'extended_from_support'){
+  if(
+    dominantStory === 'doji_indecision'
+    || (
+      recentIndecision
+      && dominantStory === 'healthy_trend'
+      && !['extended_from_support', 'stalled_after_response', 'responding_from_support', 'at_support', 'support_failed'].includes(currentPhase)
+    )
+  ){
+    whatNext = 'Wait for a clearer directional candle before treating the pause as meaningful progress.';
+  }else if(currentPhase === 'extended_from_support'){
     whatNext = 'Wait for a calmer pullback or consolidation rather than chasing the rebound away from support.';
   }else if(currentPhase === 'stalled_after_response'){
     whatNext = 'Wait for cleaner follow-through before treating the rebound as more than an initial response.';
@@ -25948,7 +25991,11 @@ function buildDeterministicReviewProse({storyContext = {}, decisionContext = {}}
     chartRead,
     whatNext,
     verdictLine,
-    text:[chartRead, whatNext, verdictLine].filter(Boolean).join(' ').trim()
+    text:[
+      `🧭 Chart Story: ${chartRead}`,
+      `🎯 What next?: ${whatNext}`,
+      verdictLine
+    ].filter(Boolean).join(' ').trim()
   };
 }
 
@@ -26692,6 +26739,9 @@ function buildCanonicalChartStoryContext(context = {}){
       resolvedSupportType:supportType || '',
       supportReferenceLevel,
       supportDistanceThresholdPct:Number.isFinite(supportDistanceThresholdPct) ? supportDistanceThresholdPct : null,
+      latestDirection:String(context.latestDirection || '').trim(),
+      bodyDescriptor:String(context.bodyDescriptor || '').trim(),
+      recentIndecision:context.bodyDescriptor === 'small' || context.latestDirection === 'flat',
       extensionEvidencePresent,
       reboundExtended,
       reboundStalled

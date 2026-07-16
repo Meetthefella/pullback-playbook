@@ -3,6 +3,7 @@ const {defineConfig} = require('@playwright/test');
 const baseURL = process.env.PP_BASE_URL || 'http://127.0.0.1:4173';
 const reuseExistingServer = process.env.PP_REUSE_EXISTING_SERVER === 'true';
 const disableManagedWebServer = process.env.PP_DISABLE_WEBSERVER === 'true';
+const gracefulShutdownSignal = process.platform === 'win32' ? 'SIGINT' : 'SIGTERM';
 
 module.exports = defineConfig({
   testDir:'./tests/ui',
@@ -20,7 +21,7 @@ module.exports = defineConfig({
     reuseExistingServer,
     timeout:30000,
     gracefulShutdown:{
-      signal:'SIGTERM',
+      signal:gracefulShutdownSignal,
       timeout:1000
     }
   },

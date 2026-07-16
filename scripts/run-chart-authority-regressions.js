@@ -459,7 +459,8 @@ function runDeterministicCandleFallbackRegression(){
     resolveGlobalVerdict(record){
       return record._globalVerdict || {final_verdict:'watch'};
     },
-    analysisDerivedStatesFromRecord(){
+    analysisDerivedStatesFromRecord(record){
+      if(record && record._derivedStates) return record._derivedStates;
       return {structureState:'intact', setupLocationState:'near_50ma', priceabilityState:'provisional', bounceState:'attempt', stabilisationState:'early'};
     },
     guardAnalysisMovingAverageLanguage(text = ''){
@@ -704,6 +705,395 @@ function runDeterministicCandleFallbackRegression(){
   );
   assert.ok(!/\bready for entry\b|\bthis is an entry signal\b|\bgo long\b|\bexecute entry\b/i.test(nearEntryRead.text), 'Chart Coach must not promote Entry by itself');
   assert.ok(/🎯 What next\?:/i.test(nearEntryRead.text), 'Chart Coach should keep the next-step framing');
+
+  const extendedReviewRecord = {
+    marketData:{price:288.3, ma20:273.251, ma50:269.7692, ma200:250},
+    _globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      support_context:'20ma',
+      support_test_state:'held',
+      buyer_control_state:'confirmed',
+      bounce_state:'confirmed',
+      stabilisation_state:'clear',
+      pullback_zone:'off_level',
+      setup_location_state:'off_level'
+    },
+    _derivedStates:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      setupLocationState:'off_level',
+      pullbackZone:'off_level',
+      priceabilityState:'provisional',
+      bounceState:'confirmed',
+      stabilisationState:'clear',
+      volumeState:'constructive',
+      supportContext:'20ma',
+      supportTestState:'held',
+      buyerControlState:'confirmed',
+      evaluationScanType:'20MA',
+      candleEvidenceUpClosesAfterLow:2,
+      candleEvidenceReclaimedPriorDayHigh:true,
+      candleEvidenceHigherLowHold:true,
+      candleEvidenceReclaimRangeMeaningful:true
+    }
+  };
+  const extendedReviewAnalysis = {
+    canonicalValues:{price:288.3, ma20:273.251, ma50:269.7692, ma200:250, volume:1500000},
+    trustedMarketContext:{
+      avgVolume30d:1400000,
+      recentCandleSequence:[
+        {date:'2026-07-03', open:285.2, high:289.0, low:284.8, close:288.3, volume:1500000},
+        {date:'2026-07-02', open:281.4, high:285.1, low:280.7, close:284.4, volume:1450000},
+        {date:'2026-07-01', open:278.1, high:281.8, low:277.6, close:281.0, volume:1380000}
+      ]
+    }
+  };
+  const extendedReviewRead = sandbox.finalDisplayedAnalysisChartRead(extendedReviewRecord, extendedReviewAnalysis);
+  assert.strictEqual(extendedReviewRead.usedDeterministicFallback, true, 'Extended rebound review case should still use deterministic Review prose.');
+  assert.strictEqual(String(extendedReviewRead.chartCoach && extendedReviewRead.chartCoach.storyContext && extendedReviewRead.chartCoach.storyContext.currentPhase || ''), 'extended_from_support', 'Extended rebound review case must preserve the canonical extended phase.');
+  assert.ok(/well beyond|extended away|no longer an active support test|moved well beyond/i.test(extendedReviewRead.text), 'Review prose must describe the post-support extension state.');
+  assert.ok(!/Support is reacting|Buyers emerging|buyer control is not convincing yet/i.test(extendedReviewRead.text), 'Review prose must not fall back to stale active-support wording once the rebound is extended.');
+  assert.strictEqual(extendedReviewRead.selectedSummarySource, 'deterministic_chart_coach', 'Fresh deterministic fallback should keep the generated deterministic source.');
+
+  const activeSupportRecord = {
+    marketData:{price:201.2, ma20:200.4, ma50:195.8, ma200:180},
+    _globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      support_context:'20ma',
+      support_test_state:'held',
+      buyer_control_state:'emerging',
+      bounce_state:'attempt',
+      stabilisation_state:'early',
+      pullback_zone:'near_20ma',
+      setup_location_state:'near_20ma'
+    },
+    _derivedStates:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      setupLocationState:'near_20ma',
+      pullbackZone:'near_20ma',
+      priceabilityState:'provisional',
+      bounceState:'attempt',
+      stabilisationState:'early',
+      volumeState:'constructive',
+      supportContext:'20ma',
+      supportTestState:'held',
+      buyerControlState:'emerging',
+      evaluationScanType:'20MA',
+      candleEvidenceUpClosesAfterLow:1
+    }
+  };
+  const activeSupportAnalysis = {
+    canonicalValues:{price:201.2, ma20:200.4, ma50:195.8, ma200:180, volume:1200000},
+    trustedMarketContext:{
+      avgVolume30d:1300000,
+      recentCandleSequence:[
+        {date:'2026-07-03', open:200.7, high:201.5, low:199.9, close:201.2, volume:1200000},
+        {date:'2026-07-02', open:201.8, high:202.1, low:199.6, close:200.5, volume:1180000},
+        {date:'2026-07-01', open:202.6, high:203.0, low:200.1, close:201.0, volume:1150000}
+      ]
+    }
+  };
+  const activeSupportRead = sandbox.finalDisplayedAnalysisChartRead(activeSupportRecord, activeSupportAnalysis);
+  assert.strictEqual(String(activeSupportRead.chartCoach && activeSupportRead.chartCoach.storyContext && activeSupportRead.chartCoach.storyContext.currentPhase || ''), 'responding_from_support', 'Early support-response review case must preserve the active support phase.');
+  assert.ok(/20-day average/i.test(activeSupportRead.text), 'Review prose must name the active support level when canonical context knows it.');
+  assert.ok(/early|needs another sign of control|follow-through|reacting/i.test(activeSupportRead.text), 'Review prose may describe an early support response when the chart is still near support.');
+  assert.ok(!/extended away|well beyond|no longer an active support test/i.test(activeSupportRead.text), 'Active-support review prose must not drift into the post-support extension family.');
+
+  const failedSupportRecord = {
+    marketData:{price:196.4, ma20:200.2, ma50:194.1, ma200:180},
+    _globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'weakening',
+      structure_eligibility:'damaged',
+      support_context:'20ma',
+      support_test_state:'failed',
+      buyer_control_state:'none',
+      bounce_state:'none',
+      stabilisation_state:'none',
+      pullback_zone:'off_level',
+      setup_location_state:'lost_support'
+    },
+    _derivedStates:{
+      structureState:'weakening',
+      structureEligibility:'damaged',
+      setupLocationState:'lost_support',
+      pullbackZone:'off_level',
+      priceabilityState:'unpriceable',
+      bounceState:'none',
+      stabilisationState:'none',
+      volumeState:'weak',
+      supportContext:'20ma',
+      supportTestState:'failed',
+      buyerControlState:'none',
+      evaluationScanType:'20MA'
+    }
+  };
+  const failedSupportAnalysis = {
+    canonicalValues:{price:196.4, ma20:200.2, ma50:194.1, ma200:180, volume:1000000},
+    trustedMarketContext:{
+      avgVolume30d:1200000,
+      recentCandleSequence:[
+        {date:'2026-07-03', open:198.8, high:199.3, low:195.9, close:196.4, volume:1000000},
+        {date:'2026-07-02', open:200.6, high:201.2, low:198.0, close:199.1, volume:1100000},
+        {date:'2026-07-01', open:202.2, high:202.7, low:199.9, close:200.5, volume:1150000}
+      ]
+    }
+  };
+  const failedSupportRead = sandbox.finalDisplayedAnalysisChartRead(failedSupportRecord, failedSupportAnalysis);
+  assert.ok(/failed|repair mode|repair/i.test(failedSupportRead.text), 'Failed-support review prose must retain failed or repairing semantics.');
+  assert.ok(!/support unknown/i.test(failedSupportRead.text), 'Failed-support review prose must not degrade to support_unknown wording.');
+
+  const explicit50ContextRecord = {
+    marketData:{price:206, ma20:198, ma50:200, ma200:180},
+    _globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      support_context:'50ma',
+      support_test_state:'held',
+      buyer_control_state:'emerging',
+      bounce_state:'attempt',
+      stabilisation_state:'early'
+    },
+    _derivedStates:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      setupLocationState:'near_50ma',
+      pullbackZone:'near_50ma',
+      priceabilityState:'provisional',
+      bounceState:'attempt',
+      stabilisationState:'early',
+      volumeState:'constructive',
+      supportContext:'50ma',
+      supportTestState:'held',
+      buyerControlState:'emerging'
+    }
+  };
+  const explicit50ContextAnalysis = {
+    canonicalValues:{price:206, ma20:198, ma50:200, ma200:180, volume:1250000},
+    trustedMarketContext:{
+      avgVolume30d:1300000,
+      recentCandleSequence:[
+        {date:'2026-07-03', open:203.9, high:206.2, low:203.4, close:206.0, volume:1250000},
+        {date:'2026-07-02', open:202.8, high:204.4, low:201.9, close:203.7, volume:1200000},
+        {date:'2026-07-01', open:201.4, high:203.0, low:200.8, close:202.5, volume:1180000}
+      ]
+    }
+  };
+  const explicit50ContextRead = sandbox.finalDisplayedAnalysisChartRead(explicit50ContextRecord, explicit50ContextAnalysis);
+  assert.ok(/50-day average/i.test(explicit50ContextRead.text), 'Review prose must name the correct support from explicit supportContext without relying on legacy hints.');
+
+  const missingDistanceRecord = {
+    marketData:{price:null, ma20:200.4, ma50:195.8, ma200:180},
+    _globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      support_context:'20ma',
+      support_test_state:'held',
+      buyer_control_state:'confirmed',
+      bounce_state:'confirmed',
+      stabilisation_state:'clear',
+      pullback_zone:'extended',
+      setup_location_state:'extended'
+    },
+    _derivedStates:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      setupLocationState:'extended',
+      pullbackZone:'extended',
+      priceabilityState:'provisional',
+      bounceState:'confirmed',
+      stabilisationState:'clear',
+      volumeState:'constructive',
+      supportContext:'20ma',
+      supportTestState:'held',
+      buyerControlState:'confirmed'
+    }
+  };
+  const missingDistanceRead = sandbox.finalDisplayedAnalysisChartRead(missingDistanceRecord, {
+    canonicalValues:{price:null, ma20:200.4, ma50:195.8, ma200:180, volume:1200000},
+    trustedMarketContext:{recentCandleSequence:activeSupportAnalysis.trustedMarketContext.recentCandleSequence}
+  });
+  assert.ok(!/extended away|well beyond|no longer an active support test/i.test(missingDistanceRead.text), 'Missing current price or MA data must not trigger a false extended-after-run review story.');
+  assert.notStrictEqual(String(missingDistanceRead.chartCoach && missingDistanceRead.chartCoach.storyContext && missingDistanceRead.chartCoach.storyContext.currentPhase || ''), 'extended_from_support', 'Missing current price or MA data must not classify as extended_from_support.');
+
+  assert.strictEqual(extendedReviewRecord._globalVerdict.final_verdict, 'watch', 'Review prose migration must not change the underlying canonical verdict.');
+  assert.strictEqual(nearEntryRead.usedDeterministicFallback, true, 'Review prose migration must not change deterministic fallback selection for near-entry prose cases.');
+
+  const persistedDeterministicCoach = sandbox.buildDeterministicChartCoach(extendedReviewRecord, extendedReviewAnalysis, {
+    derivedStates:extendedReviewRecord._derivedStates,
+    globalVerdict:extendedReviewRecord._globalVerdict
+  });
+  const persistedDeterministicRead = sandbox.finalDisplayedAnalysisChartRead(
+    extendedReviewRecord,
+    {
+      ...extendedReviewAnalysis,
+      chartCoach:{
+        ...persistedDeterministicCoach,
+        source:'deterministic',
+        summaryText:'🧭 Chart Story: Support is reacting. 🎯 What next?: Buyers emerging and buyer control is not convincing yet.'
+      }
+    }
+  );
+  assert.strictEqual(persistedDeterministicRead.selectedSummarySource, 'deterministic', 'Persisted deterministic chartCoach should preserve the exact restored source label.');
+  assert.strictEqual(persistedDeterministicRead.usedDeterministicFallback, true, 'Exact deterministic restore path must use the canonical deterministic Review prose.');
+  assert.ok(/well beyond|extended away|no longer an active support test|moved well beyond/i.test(persistedDeterministicRead.text), 'Persisted deterministic restore path must render the new post-support extension Review prose.');
+  assert.ok(!/Support is reacting|Buyers emerging|buyer control is not convincing yet/i.test(persistedDeterministicRead.text), 'Persisted deterministic restore path must not render stale stored section-summary phrases.');
+  assert.strictEqual(extendedReviewRecord._globalVerdict.final_verdict, 'watch', 'Persisted deterministic restore path must not alter the underlying verdict.');
+
+  const prefixedDeterministicRead = sandbox.finalDisplayedAnalysisChartRead(
+    extendedReviewRecord,
+    {
+      ...extendedReviewAnalysis,
+      chartCoach:{
+        ...persistedDeterministicCoach,
+        source:'deterministic_fallback',
+        summaryText:'🧭 Chart Story: stale deterministic summary'
+      }
+    }
+  );
+  assert.strictEqual(prefixedDeterministicRead.usedDeterministicFallback, true, 'Prefixed deterministic sources must continue to use deterministic Review prose.');
+  assert.ok(/well beyond|extended away|no longer an active support test|moved well beyond/i.test(prefixedDeterministicRead.text), 'Prefixed deterministic sources must keep the canonical Review prose path.');
+
+  const exactMatchSafetyRead = sandbox.finalDisplayedAnalysisChartRead(
+    extendedReviewRecord,
+    {
+      ...extendedReviewAnalysis,
+      chartCoach:{
+        ...persistedDeterministicCoach,
+        source:'restored_deterministic_summary',
+        summaryText:'Persisted AI-style text should stay on its own source path.'
+      }
+    }
+  );
+  assert.strictEqual(exactMatchSafetyRead.usedDeterministicFallback, false, 'Sources that merely contain deterministic must not be classified as deterministic Review output.');
+  assert.strictEqual(exactMatchSafetyRead.selectedSummarySource, 'restored_deterministic_summary', 'Non-matching deterministic-like sources should preserve their own source label.');
+  assert.ok(/Why it matters:|Volume:|Learning point:/i.test(exactMatchSafetyRead.text), 'Non-matching deterministic-like sources should stay on the multi-section Chart Coach summary path.');
+  assert.ok(!/no longer an active support test/i.test(exactMatchSafetyRead.text), 'Non-matching deterministic-like sources must not be upgraded onto the canonical deterministic Review prose path.');
+
+  const genuineAiSourceRead = sandbox.finalDisplayedAnalysisChartRead(
+    extendedReviewRecord,
+    {
+      ...extendedReviewAnalysis,
+      chartCoach:{
+        ...persistedDeterministicCoach,
+        source:'openai_two_step_chart_guru',
+        summaryText:'🧭 Chart Story: AI summary should remain unchanged.',
+        sections:[
+          {
+            key:'biggest_clue',
+            icon:'🧭',
+            label:'Chart Story',
+            text:'AI summary should remain unchanged.'
+          }
+        ]
+      }
+    }
+  );
+  assert.strictEqual(genuineAiSourceRead.usedDeterministicFallback, false, 'Non-deterministic AI sources must remain on the AI summary path.');
+  assert.ok(/AI summary should remain unchanged\./i.test(genuineAiSourceRead.text), 'Non-deterministic AI sources must not be overwritten by deterministic Review prose.');
+
+  const originalSelectReviewAiSummary = sandbox.selectReviewAiSummary;
+  sandbox.selectReviewAiSummary = () => ({
+    text:'Persisted deterministic summary should be ignored when recomputed facts disagree.',
+    source:'deterministic',
+    chartCoach:{
+      source:'deterministic',
+      summaryText:'🧭 Chart Story: Support is reacting. 🎯 What next?: Buyers emerging and buyer control is not convincing yet.',
+      storyContext:{
+        dominantStory:'initial_support_response',
+        currentPhase:'responding_from_support',
+        support:{
+          label:'20-day average',
+          type:'20ma',
+          currentlyActive:true
+        },
+        volume:{state:'constructive'},
+        diagnostics:{}
+      },
+      sections:[
+        {
+          key:'biggest_clue',
+          icon:'🧭',
+          label:'Chart Story',
+          text:'Support is reacting.'
+        },
+        {
+          key:'what_next',
+          icon:'🎯',
+          label:'What next?',
+          text:'Buyers emerging and buyer control is not convincing yet.'
+        }
+      ]
+    },
+    fallback:{
+      storyContext:{
+        dominantStory:'extended_after_support_rebound',
+        currentPhase:'extended_from_support',
+        support:{
+          label:'20-day average',
+          type:'20ma',
+          currentlyActive:false
+        },
+        volume:{state:'constructive'},
+        diagnostics:{}
+      },
+      facts:{source:'recomputed_fallback'}
+    }
+  });
+  const restoredDeterministicPrecedenceRead = sandbox.finalDisplayedAnalysisChartRead(extendedReviewRecord, extendedReviewAnalysis);
+  assert.strictEqual(restoredDeterministicPrecedenceRead.usedDeterministicFallback, true, 'Restored deterministic summaries must still use deterministic Review prose.');
+  assert.ok(/well beyond|extended away|no longer an active support test|moved well beyond/i.test(restoredDeterministicPrecedenceRead.text), 'Restored deterministic summaries must follow the recomputed canonical fallback story context when it disagrees with stale persisted metadata.');
+  assert.ok(!/Support is reacting|Buyers emerging|buyer control is not convincing yet/i.test(restoredDeterministicPrecedenceRead.text), 'Restored deterministic summaries must ignore stale persisted support-reaction wording when recomputed canonical facts show an extended rebound.');
+
+  sandbox.selectReviewAiSummary = () => ({
+    text:'Persisted deterministic summary should remain available when recomputed context is unavailable.',
+    source:'deterministic',
+    chartCoach:{
+      source:'deterministic',
+      summaryText:'🧭 Chart Story: Support is reacting. 🎯 What next?: Buyers emerging and buyer control is not convincing yet.',
+      storyContext:{
+        dominantStory:'initial_support_response',
+        currentPhase:'responding_from_support',
+        support:{
+          label:'20-day average',
+          type:'20ma',
+          currentlyActive:true
+        },
+        volume:{state:'constructive'},
+        diagnostics:{}
+      },
+      sections:[
+        {
+          key:'biggest_clue',
+          icon:'🧭',
+          label:'Chart Story',
+          text:'Support is reacting.'
+        },
+        {
+          key:'what_next',
+          icon:'🎯',
+          label:'What next?',
+          text:'Buyers emerging and buyer control is not convincing yet.'
+        }
+      ]
+    },
+    fallback:{
+      storyContext:null,
+      facts:{source:'recomputed_fallback_missing_story'}
+    }
+  });
+  const deterministicCompatibilityRead = sandbox.finalDisplayedAnalysisChartRead(activeSupportRecord, activeSupportAnalysis);
+  assert.strictEqual(deterministicCompatibilityRead.usedDeterministicFallback, true, 'Deterministic restore path should still use deterministic Review prose when fallback story context is missing.');
+  assert.ok(/reacting|needs another sign of control|follow-through/i.test(deterministicCompatibilityRead.text), 'Deterministic restore path may fall back to persisted sanitized story context when no recomputed fallback story context exists.');
+
+  sandbox.selectReviewAiSummary = originalSelectReviewAiSummary;
 
   const descending = [
     {date:'2026-06-30', open:198.4, high:201.2, low:197.9, close:200.09, volume:1000},
