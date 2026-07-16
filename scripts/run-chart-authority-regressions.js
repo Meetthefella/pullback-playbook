@@ -453,6 +453,11 @@ function runDeterministicCandleFallbackRegression(){
       const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
       return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
     },
+    normalizeVerdict(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      return ['entry','near_entry','watch','avoid'].includes(safe) ? safe : 'watch';
+    },
     normalizeTickerRecord(record){
       return record && typeof record === 'object' ? record : {};
     },
@@ -553,6 +558,11 @@ function runDeterministicCandleFallbackRegression(){
     'chartGuruSectionDisplayForKey',
     'aiCandleCommentaryContradictsCanonical',
     'isGenericTradePlanCommentary',
+    'canonicalVolumeParticipationForState',
+    'buildCanonicalStoryContextForRecord',
+    'canonicalDecisionSummaryFromStoryContext',
+    'canonicalNonChartBlockerSummary',
+    'buildDecisionSummary',
     'canonicalCandleContext',
     'buildDeterministicReviewProse',
     'deterministicCandleStructureSummary',
@@ -602,6 +612,94 @@ function runDeterministicCandleFallbackRegression(){
     globalVerdict:{final_verdict:'watch'}
   });
   assert.ok(/failed bounce|sellers pushed it back down/i.test(failedBounceFallback.text), 'Fallback should identify failed bounce or rejection');
+
+  const resolvedOffLevelFallback = sandbox.deterministicCandleStructureSummary(
+    bounceRecord,
+    bounceAnalysis,
+    {
+      globalVerdict:{final_verdict:'watch'},
+      derivedStates:{
+        structureState:'strong',
+        setupLocationState:'extended',
+        pullbackZone:'extended',
+        supportContext:'none',
+        supportTestState:'not_tested',
+        buyerControlState:'none',
+        bounceState:'attempt',
+        stabilisationState:'none',
+        volumeState:'supportive'
+      }
+    }
+  );
+  const resolvedOffLevelReviewText = String(
+    resolvedOffLevelFallback.reviewProse && (
+      resolvedOffLevelFallback.reviewProse.text
+      || resolvedOffLevelFallback.reviewProse.chartRead
+    ) || ''
+  );
+  assert.ok(/no longer an active support test|extended away from that area|away from support/i.test(resolvedOffLevelReviewText), 'Deterministic Review prose must respect resolved away-from-support overrides instead of reverting to a near-support read.');
+  const resolvedOffLevelDecisionSummary = sandbox.canonicalDecisionSummaryFromStoryContext({
+    finalVerdict:'watch',
+    storyContext:{
+      currentPhase:'away_from_support',
+      buyerControl:{state:'none'}
+    },
+    fallbackSummary:'Watch - waiting for confirmation.'
+  });
+  assert.strictEqual(resolvedOffLevelDecisionSummary, 'Watch - trend remains constructive, but price is currently away from support.', 'Shared canonical decision summary must expose away-from-support caution for resolved off-level watch states.');
+  assert.ok(!/waiting for confirmation|almost ready/i.test(String(resolvedOffLevelDecisionSummary || '')), 'Shared canonical decision summary must not fall back to generic readiness copy for away-from-support states.');
+
+  const resolvedFailedSupportFallback = sandbox.deterministicCandleStructureSummary(
+    bounceRecord,
+    bounceAnalysis,
+    {
+      globalVerdict:{final_verdict:'watch'},
+      derivedStates:{
+        structureState:'weakening',
+        setupLocationState:'near_20ma',
+        pullbackZone:'near_20ma',
+        supportContext:'failed',
+        supportTestState:'failed',
+        buyerControlState:'none',
+        bounceState:'none',
+        stabilisationState:'none',
+        volumeState:'weak'
+      }
+    }
+  );
+  const resolvedFailedSupportReviewText = String(
+    resolvedFailedSupportFallback.reviewProse && (
+      resolvedFailedSupportFallback.reviewProse.text
+      || resolvedFailedSupportFallback.reviewProse.chartRead
+    ) || ''
+  );
+  assert.ok(/support has failed|repair mode/i.test(resolvedFailedSupportReviewText), 'Deterministic Review prose must keep resolved failed-support semantics.');
+
+  const resolvedBuyerControlFallback = sandbox.deterministicCandleStructureSummary(
+    bounceRecord,
+    bounceAnalysis,
+    {
+      globalVerdict:{final_verdict:'near_entry'},
+      derivedStates:{
+        structureState:'strong',
+        setupLocationState:'near_20ma',
+        pullbackZone:'near_20ma',
+        supportContext:'active',
+        supportTestState:'held',
+        buyerControlState:'confirmed',
+        bounceState:'confirmed',
+        stabilisationState:'clear',
+        volumeState:'supportive'
+      }
+    }
+  );
+  const resolvedBuyerControlReviewText = String(
+    resolvedBuyerControlFallback.reviewProse && (
+      resolvedBuyerControlFallback.reviewProse.text
+      || resolvedBuyerControlFallback.reviewProse.chartRead
+    ) || ''
+  );
+  assert.ok(/started to confirm the rebound|does not create an entry trigger/i.test(resolvedBuyerControlReviewText), 'Deterministic Review prose must follow resolved buyer-control overrides.');
 
   const finalRead = sandbox.finalDisplayedAnalysisChartRead(bounceRecord, bounceAnalysis);
   assert.strictEqual(finalRead.usedDeterministicFallback, true, 'Generic AI output should be replaced by deterministic fallback');

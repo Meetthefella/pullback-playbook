@@ -18360,7 +18360,9 @@ function resolveVisualState(record, context = 'scanner', options = {}){
     watchlistLifecycleSnapshot,
     watchlistPriorityForRecord,
     normalizeGlobalVerdictKey,
-    normalizeVerdict
+    normalizeVerdict,
+    buildCanonicalStoryContextForRecord,
+    canonicalDecisionSummaryFromStoryContext
   });
 }
 
@@ -24276,11 +24278,277 @@ function stateLabelForDecisionSummary(finalVerdict){
   return 'Monitor';
 }
 
-function buildDecisionSummary({finalVerdict, displayedPlan, resolvedContract, derivedStates}){
+function canonicalVolumeParticipationForState(state = ''){
+  const safe = String(state || '').trim().toLowerCase();
+  if(['expanding', 'supportive', 'strong'].includes(safe)) return 'expanding';
+  if(safe === 'weak') return 'weak';
+  return 'constructive';
+}
+
+function buildCanonicalStoryContextForRecord(record = {}, options = {}){
+  const item = normalizeTickerRecord(record || {});
+  const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object'
+    ? options.globalVerdict
+    : resolveGlobalVerdict(item);
+  const derivedStates = options.derivedStates && typeof options.derivedStates === 'object'
+    ? options.derivedStates
+    : analysisDerivedStatesFromRecord(item);
+  const analysis = options.analysis && typeof options.analysis === 'object'
+    ? options.analysis
+    : {};
+  const facts = options.facts && typeof options.facts === 'object'
+    ? options.facts
+    : canonicalCandleContext(item, analysis);
+  const structureState = String(derivedStates.structureState || globalVerdict.structure_state || globalVerdict.structureState || '').trim().toLowerCase();
+  const structureEligibility = String(globalVerdict.structure_eligibility || globalVerdict.structureEligibility || '').trim().toLowerCase();
+  const pullbackZone = String(derivedStates.pullbackZone || globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase();
+  const setupLocationState = String(derivedStates.setupLocationState || globalVerdict.setup_location_state || globalVerdict.setupLocationState || '').trim().toLowerCase();
+  const volumeState = String(derivedStates.volumeState || globalVerdict.volume_state || globalVerdict.volumeState || '').trim().toLowerCase();
+  const supportContext = String(derivedStates.supportContext || globalVerdict.support_context || globalVerdict.supportContext || '').trim().toLowerCase();
+  const supportTestState = String(derivedStates.supportTestState || globalVerdict.support_test_state || globalVerdict.supportTestState || '').trim().toLowerCase();
+  const buyerControlState = String(derivedStates.buyerControlState || globalVerdict.buyer_control_state || globalVerdict.buyerControlState || '').trim().toLowerCase();
+  const bounceState = String(derivedStates.bounceState || globalVerdict.bounce_state || globalVerdict.bounceState || '').trim().toLowerCase();
+  const stabilisationState = String(derivedStates.stabilisationState || globalVerdict.stabilisation_state || globalVerdict.stabilisationState || '').trim().toLowerCase();
+  const evaluationScanType = String(derivedStates.evaluationScanType || globalVerdict.evaluation_scan_type || globalVerdict.evaluationScanType || '').trim();
+  return buildCanonicalChartStoryContext({
+    ...facts,
+    latestDirection:facts.latestDirection,
+    bodyDescriptor:chartCoachBodyDescriptor(facts.latest),
+    recentSequence:Array.isArray(facts.recent) ? facts.recent : [],
+    structureIntact:['strong', 'intact', 'developing_clean'].includes(structureState)
+      || ['alive', 'messy'].includes(structureEligibility),
+    structureBroken:['broken', 'failed', 'dead', 'invalid'].includes(structureState)
+      || structureEligibility === 'broken',
+    structureWeakening:structureState === 'weakening' || structureEligibility === 'damaged',
+    pullbackNear20:pullbackZone === 'near_20ma',
+    pullbackNear50:pullbackZone === 'near_50ma',
+    recentlyLeftSupportZone:['left_support_zone', 'off_level'].includes(pullbackZone)
+      || ['off_level', 'lost_support'].includes(setupLocationState),
+    offLevelWithoutStructureDamage:setupLocationState === 'off_level' && !['broken', 'failed', 'dead', 'invalid'].includes(structureState),
+    weakVolume:volumeState === 'weak',
+    activeVolume:['expanding', 'supportive', 'strong'].includes(volumeState),
+    volumeParticipation:canonicalVolumeParticipationForState(volumeState),
+    actionable:normalizeGlobalVerdictKey(globalVerdict.final_verdict || globalVerdict.finalVerdict || 'watch') === 'entry',
+    extendedAfterRun:setupLocationState === 'extended' || pullbackZone === 'extended',
+    historicalExtendedAfterRun:setupLocationState === 'extended' || pullbackZone === 'extended',
+    supportContext,
+    supportTestState,
+    buyerControlState,
+    bounceState,
+    stabilisationState,
+    evaluationScanType,
+    recentSupportType:chartGuruResolvedSupportType({
+      ...globalVerdict,
+      supportContext,
+      supportTestState,
+      evaluationScanType,
+      pullbackNear20:pullbackZone === 'near_20ma',
+      pullbackNear50:pullbackZone === 'near_50ma'
+    }),
+    near20:Number.isFinite(facts.currentPrice) && Number.isFinite(facts.ma20) && chartCoachProximityLabel(facts.currentPrice, facts.ma20) === 'near' ? 'near' : '',
+    near50:Number.isFinite(facts.currentPrice) && Number.isFinite(facts.ma50) && chartCoachProximityLabel(facts.currentPrice, facts.ma50) === 'near' ? 'near' : ''
+  });
+}
+
+function canonicalReviewTechnicalStructureLabelFromStoryContext(storyContext = {}){
+  const structureState = String(storyContext.structure && storyContext.structure.state || '').trim().toLowerCase();
+  if(['broken', 'failed', 'dead', 'invalid', 'damaged'].includes(structureState)) return 'Structure broken';
+  if(['weakening', 'weak', 'developing_loose'].includes(structureState)) return 'Structure weakening';
+  if(['developing', 'developing_clean'].includes(structureState)) return 'Structure developing';
+  if(['intact', 'strong'].includes(structureState)) return 'Structure intact';
+  return 'Structure n/a';
+}
+
+function canonicalReviewTechnicalPullbackLabelFromStoryContext(storyContext = {}){
+  const support = storyContext.support && typeof storyContext.support === 'object' ? storyContext.support : {};
+  const supportLabel = String(support.label || 'support').trim() || 'support';
+  const currentPhase = String(storyContext.currentPhase || '').trim();
+  if(currentPhase === 'support_failed') return `${supportLabel} failed`;
+  if(currentPhase === 'extended_from_support') return `Extended from ${supportLabel}`;
+  if(currentPhase === 'stalled_after_response') return `Stalled after ${supportLabel}`;
+  if(currentPhase === 'responding_from_support') return `Responding at ${supportLabel}`;
+  if(currentPhase === 'at_support') return `Testing ${supportLabel}`;
+  if(currentPhase === 'current_location_unresolved') return `${supportLabel} unresolved`;
+  if(support.recentlyTested === true && support.testOutcome === 'held' && support.currentlyActive === false) return `Held ${supportLabel}`;
+  if(support.type) return `Away from ${supportLabel}`;
+  return 'Support context unclear';
+}
+
+function canonicalReviewTechnicalBuyerLabelFromStoryContext(storyContext = {}){
+  const buyerResponse = storyContext.buyerResponse && typeof storyContext.buyerResponse === 'object' ? storyContext.buyerResponse : {};
+  const buyerControl = storyContext.buyerControl && typeof storyContext.buyerControl === 'object' ? storyContext.buyerControl : {};
+  const confirmation = storyContext.confirmation && typeof storyContext.confirmation === 'object' ? storyContext.confirmation : {};
+  const currentPhase = String(storyContext.currentPhase || '').trim();
+  const buyerResponseSemantic = String(buyerResponse.semantic || '').trim().toLowerCase();
+  const buyerControlState = String(buyerControl.state || '').trim().toLowerCase();
+  const confirmationState = String(confirmation.state || confirmation.semantic || '').trim().toLowerCase();
+  if(currentPhase === 'support_failed' || buyerResponseSemantic === 'response_failed') return 'Buyer response failed';
+  if(buyerControlState === 'confirmed' || confirmationState === 'confirmed' || confirmationState === 'follow_through_confirmed') return 'Buyer control confirmed';
+  if(currentPhase === 'stalled_after_response') return 'Follow-through stalled';
+  if(buyerResponseSemantic === 'response_present' || buyerControlState === 'emerging' || confirmationState === 'unconfirmed' || confirmationState === 'follow_through_unconfirmed') return 'Buyers responding';
+  if(currentPhase === 'at_support') return 'Buyer response pending';
+  return 'Buyer control not confirmed';
+}
+
+function canonicalReviewTechnicalContextLineFromStoryContext(storyContext = {}, record = {}){
+  return [
+    canonicalReviewTechnicalStructureLabelFromStoryContext(storyContext),
+    canonicalReviewTechnicalPullbackLabelFromStoryContext(storyContext),
+    canonicalReviewTechnicalBuyerLabelFromStoryContext(storyContext),
+    reviewTechnicalVolumeLabel(storyContext.volume && storyContext.volume.state || ''),
+    reviewTechnicalMarketLabel(record)
+  ].join(' | ');
+}
+
+function canonicalDecisionSummaryFromStoryContext({finalVerdict, storyContext, fallbackSummary = ''} = {}){
+  const verdict = normalizeGlobalVerdictKey(finalVerdict || 'watch');
+  const safeStoryContext = storyContext && typeof storyContext === 'object' ? storyContext : null;
+  if(!safeStoryContext) return String(fallbackSummary || '').trim();
+  const currentPhase = String(safeStoryContext.currentPhase || '').trim();
+  const dominantStory = String(safeStoryContext.dominantStory || '').trim();
+  const buyerControlState = String(safeStoryContext.buyerControl && safeStoryContext.buyerControl.state || '').trim().toLowerCase();
+  if(verdict === 'entry') return 'Entry - plan is valid and risk defined.';
+  if(verdict === 'avoid'){
+    if(currentPhase === 'support_failed' || dominantStory === 'failed_support_test' || dominantStory === 'structure_breaking_down'){
+      return 'Avoid - support failed and the chart needs repair.';
+    }
+    return 'Avoid - too weak or broken. Leave it alone.';
+  }
+  if(verdict === 'near_entry'){
+    if(currentPhase === 'extended_from_support') return 'Near Entry - rebound is constructive, but price is already away from support. Wait for the trigger or a reset.';
+    if(currentPhase === 'away_from_support') return 'Near Entry - trend remains constructive, but price is currently away from support. Wait for a reset.';
+    if(currentPhase === 'stalled_after_response') return 'Near Entry - buyers responded, but follow-through still needs to improve.';
+    if(currentPhase === 'responding_from_support' || currentPhase === 'at_support') return 'Near Entry - support is holding, but the trigger is still missing.';
+    if(buyerControlState === 'confirmed') return 'Near Entry - buyers are in control, but the entry trigger is still missing.';
+    return 'Near Entry - almost ready. Watch for confirmation.';
+  }
+  if(currentPhase === 'support_failed') return 'Watch - support failed. Let the chart repair.';
+  if(currentPhase === 'extended_from_support') return 'Watch - constructive rebound, but price is already away from support.';
+  if(currentPhase === 'away_from_support') return 'Watch - trend remains constructive, but price is currently away from support.';
+  if(currentPhase === 'stalled_after_response') return 'Watch - buyers responded, but follow-through stalled.';
+  if(currentPhase === 'responding_from_support') return 'Watch - support is holding, but buyers still need to prove control.';
+  if(currentPhase === 'at_support') return 'Watch - support is being tested. Wait for a real buyer response.';
+  if(currentPhase === 'current_location_unresolved') return 'Watch - support context is unresolved with current chart data.';
+  if(dominantStory === 'healthy_trend') return 'Watch - strong trend, but no usable pullback setup yet.';
+  return String(fallbackSummary || 'Watch - waiting for confirmation.').trim();
+}
+
+function canonicalNonChartBlockerSummary({
+  record = null,
+  finalVerdict = '',
+  structureEligibility = '',
+  structureState = '',
+  setupLocationState = '',
+  priceabilityState = '',
+  bounceState = '',
+  planStatus = '',
+  viability = '',
+  viabilityBranchId = '',
+  setupScore = null,
+  mainBlocker = ''
+} = {}){
+  const verdict = normalizeGlobalVerdictKey(finalVerdict || 'watch');
+  if(['entry', 'avoid'].includes(verdict)) return '';
+  const eligibility = String(structureEligibility || '').trim().toLowerCase();
+  const structure = String(structureState || '').trim().toLowerCase();
+  const location = String(setupLocationState || '').trim().toLowerCase();
+  const priceability = String(priceabilityState || '').trim().toLowerCase();
+  const bounce = String(bounceState || '').trim().toLowerCase();
+  const plan = String(planStatus || '').trim().toLowerCase();
+  const viabilityState = String(viability || '').trim().toLowerCase();
+  const branchId = String(viabilityBranchId || '').trim().toLowerCase();
+  const blocker = String(mainBlocker || '').trim();
+  const numericSetupScore = Number.isFinite(Number(setupScore))
+    ? Number(setupScore)
+    : (typeof rawSetupScoreForRecord === 'function' && record && typeof record === 'object'
+      ? Number(rawSetupScoreForRecord(record))
+      : null);
+  const aliveStructure = eligibility === 'alive'
+    || (!eligibility && ['strong', 'intact', 'developing_clean'].includes(structure));
+  const constructiveWaiting = aliveStructure
+    && ['attempt', 'early', 'confirmed'].includes(bounce)
+    && priceability !== 'unpriceable'
+    && viabilityState !== 'low_priority'
+    && !branchId.includes('extended')
+    && !branchId.includes('low_score')
+    && (numericSetupScore === null || numericSetupScore >= 5)
+    && !['invalid', 'missing', 'rebuild_required', 'too_wide'].includes(plan);
+  if(location === 'none' && constructiveWaiting) return '';
+  if((location === 'none' || location === 'off_level' || location === 'unclear')
+    && (viabilityState === 'low_priority'
+      || branchId.includes('low_score')
+      || (numericSetupScore !== null && numericSetupScore < 5)
+      || priceability === 'unpriceable')){
+    return 'Watch - strong trend, but no usable pullback setup yet.';
+  }
+  if(priceability === 'unpriceable') return 'Watch - price is too extended to price reliably.';
+  if(branchId.includes('low_score') || (numericSetupScore !== null && numericSetupScore < 5)){
+    return 'Watch - setup quality has slipped below useful watchlist quality.';
+  }
+  if(['invalid', 'missing', 'rebuild_required', 'too_wide'].includes(plan) && blocker){
+    return blocker;
+  }
+  return '';
+}
+
+function buildDecisionSummary({record = null, finalVerdict, displayedPlan, resolvedContract, derivedStates, globalVerdict = null, storyContext = null}){
+  void displayedPlan;
   const verdict = normalizeVerdict(finalVerdict || '');
-  if(verdict === 'entry') return 'Entry conditions met - plan is valid and risk defined.';
-  if(verdict === 'near_entry') return 'Setup is ready - waiting for confirmation trigger.';
-  if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
+  const item = record && typeof record === 'object' ? record : null;
+  const fallbackSummary = (() => {
+    if(verdict === 'entry') return 'Entry conditions met - plan is valid and risk defined.';
+    if(verdict === 'near_entry') return 'Setup is ready - waiting for confirmation trigger.';
+    if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
+    const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
+    const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
+    const developingState = structuralState === 'developing' || ['developing','developing_loose','developing_clean'].includes(structureState);
+    return developingState
+      ? 'Developing: still forming. Buyers have not taken control yet.'
+      : 'Monitor: still forming. Buyers have not taken control yet.';
+  })();
+  const authoritativeStoryContext = storyContext && typeof storyContext === 'object'
+    ? storyContext
+    : (record && typeof record === 'object' && typeof buildCanonicalStoryContextForRecord === 'function'
+      ? buildCanonicalStoryContextForRecord(record, {
+        globalVerdict:globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : resolveGlobalVerdict(record),
+        derivedStates
+      })
+      : null);
+  const verdictContext = globalVerdict && typeof globalVerdict === 'object'
+    ? globalVerdict
+    : (item ? resolveGlobalVerdict(item) : {});
+  const authoritativeBlockerText = String(
+    verdictContext.main_blocker
+    || verdictContext.mainBlocker
+    || verdictContext.reason
+    || resolvedContract && (resolvedContract.blockerReason || resolvedContract.reasonSummary)
+    || ''
+  ).trim();
+  const blockerSummary = typeof canonicalNonChartBlockerSummary === 'function'
+    ? canonicalNonChartBlockerSummary({
+      record:item,
+      finalVerdict:verdict,
+      structureEligibility:verdictContext.structure_eligibility || verdictContext.structureEligibility || '',
+      structureState:derivedStates && derivedStates.structureState || '',
+      setupLocationState:derivedStates && derivedStates.setupLocationState || verdictContext.setup_location_state || verdictContext.setupLocationState || '',
+      priceabilityState:derivedStates && derivedStates.priceabilityState || verdictContext.priceability_state || verdictContext.priceabilityState || '',
+      bounceState:derivedStates && derivedStates.bounceState || verdictContext.bounce_state || verdictContext.bounceState || '',
+      planStatus:resolvedContract && resolvedContract.planStatusKey || '',
+      viability:verdictContext.viability || '',
+      viabilityBranchId:verdictContext.viabilityBranchId || verdictContext.viability_branch_id || '',
+      setupScore:item && typeof rawSetupScoreForRecord === 'function' ? rawSetupScoreForRecord(item) : null,
+      mainBlocker:authoritativeBlockerText
+    })
+    : '';
+  const canonicalSummary = authoritativeStoryContext
+    ? canonicalDecisionSummaryFromStoryContext({
+      finalVerdict:verdict,
+      storyContext:authoritativeStoryContext,
+      fallbackSummary:''
+    })
+    : '';
+  if(blockerSummary) return blockerSummary;
+  if(canonicalSummary) return canonicalSummary;
   const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
   const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
   const developingState = structuralState === 'developing' || ['developing','developing_loose','developing_clean'].includes(structureState);
@@ -25933,7 +26201,11 @@ function buildDeterministicReviewProse({storyContext = {}, decisionContext = {}}
     )
   ){
     chartRead = 'The latest candle was small, so neither buyers nor sellers proved much control by the close.';
-  }else if(dominantStory === 'extended_after_support_rebound' || currentPhase === 'extended_from_support'){
+  }else if(
+    dominantStory === 'extended_after_support_rebound'
+    || currentPhase === 'extended_from_support'
+    || currentPhase === 'away_from_support'
+  ){
     chartRead = `Buyers did defend ${supportPhrase}, but the rebound has already extended away from that area, so this is no longer an active support test.`;
   }else if(dominantStory === 'stalled_after_support_response' || currentPhase === 'stalled_after_response'){
     chartRead = `Buyers responded around ${supportPhrase}, but the rebound has stalled and still needs cleaner follow-through.`;
@@ -25966,7 +26238,7 @@ function buildDeterministicReviewProse({storyContext = {}, decisionContext = {}}
     )
   ){
     whatNext = 'Wait for a clearer directional candle before treating the pause as meaningful progress.';
-  }else if(currentPhase === 'extended_from_support'){
+  }else if(currentPhase === 'extended_from_support' || currentPhase === 'away_from_support'){
     whatNext = 'Wait for a calmer pullback or consolidation rather than chasing the rebound away from support.';
   }else if(currentPhase === 'stalled_after_response'){
     whatNext = 'Wait for cleaner follow-through before treating the rebound as more than an initial response.';
@@ -26001,6 +26273,9 @@ function buildDeterministicReviewProse({storyContext = {}, decisionContext = {}}
 
 function deterministicCandleStructureSummary(record = {}, analysis = {}, options = {}){
   const globalVerdict = options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : resolveGlobalVerdict(record);
+  const authoritativeDerivedStates = options.derivedStates && typeof options.derivedStates === 'object'
+    ? options.derivedStates
+    : null;
   const facts = canonicalCandleContext(record, analysis);
   const hasContext = Number.isFinite(facts.currentPrice)
     && (Number.isFinite(facts.ma20) || Number.isFinite(facts.ma50) || Number.isFinite(facts.ma200))
@@ -26064,44 +26339,24 @@ function deterministicCandleStructureSummary(record = {}, analysis = {}, options
   const aiMissing = !aiText;
   const aiGeneric = isGenericAiCandleCommentary(aiText);
   const aiContradictsCanonical = aiCandleCommentaryContradictsCanonical(aiText, facts);
-  const storyContext = buildCanonicalChartStoryContext({
-    ...facts,
-    latestDirection:facts.latestDirection,
-    bodyDescriptor:chartCoachBodyDescriptor(facts.latest),
-    recentSequence:Array.isArray(facts.recent) ? facts.recent : [],
-    structureIntact:['strong', 'intact', 'developing_clean'].includes(String(globalVerdict.structure_state || globalVerdict.structureState || '').trim().toLowerCase())
-      || ['alive', 'messy'].includes(String(globalVerdict.structure_eligibility || globalVerdict.structureEligibility || '').trim().toLowerCase()),
-    structureBroken:['broken', 'failed', 'dead', 'invalid'].includes(String(globalVerdict.structure_state || globalVerdict.structureState || '').trim().toLowerCase())
-      || String(globalVerdict.structure_eligibility || globalVerdict.structureEligibility || '').trim().toLowerCase() === 'broken',
-    structureWeakening:String(globalVerdict.structure_state || globalVerdict.structureState || '').trim().toLowerCase() === 'weakening'
-      || String(globalVerdict.structure_eligibility || globalVerdict.structureEligibility || '').trim().toLowerCase() === 'damaged',
-    pullbackNear20:String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase() === 'near_20ma',
-    pullbackNear50:String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase() === 'near_50ma',
-    recentlyLeftSupportZone:['left_support_zone', 'off_level'].includes(String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase())
-      || ['off_level', 'lost_support'].includes(String(globalVerdict.setup_location_state || globalVerdict.setupLocationState || '').trim().toLowerCase()),
-    offLevelWithoutStructureDamage:false,
-    weakVolume:false,
-    activeVolume:false,
-    volumeParticipation:'constructive',
-    actionable:normalizeGlobalVerdictKey(globalVerdict.final_verdict || globalVerdict.finalVerdict || 'watch') === 'entry',
-    extendedAfterRun:String(globalVerdict.setup_location_state || globalVerdict.setupLocationState || '').trim().toLowerCase() === 'extended'
-      || String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase() === 'extended',
-    historicalExtendedAfterRun:String(globalVerdict.setup_location_state || globalVerdict.setupLocationState || '').trim().toLowerCase() === 'extended'
-      || String(globalVerdict.pullback_zone || globalVerdict.pullbackZone || '').trim().toLowerCase() === 'extended',
-    supportContext:String(globalVerdict.support_context || globalVerdict.supportContext || '').trim().toLowerCase(),
-    supportTestState:String(globalVerdict.support_test_state || globalVerdict.supportTestState || '').trim().toLowerCase(),
-    buyerControlState:String(globalVerdict.buyer_control_state || globalVerdict.buyerControlState || '').trim().toLowerCase(),
-    bounceState:String(globalVerdict.bounce_state || globalVerdict.bounceState || '').trim().toLowerCase(),
-    stabilisationState:String(globalVerdict.stabilisation_state || globalVerdict.stabilisationState || '').trim().toLowerCase(),
-    evaluationScanType:String(globalVerdict.evaluation_scan_type || globalVerdict.evaluationScanType || '').trim(),
-    recentSupportType:chartGuruResolvedSupportType(globalVerdict),
-    near20:Number.isFinite(facts.currentPrice) && Number.isFinite(facts.ma20) && chartCoachProximityLabel(facts.currentPrice, facts.ma20) === 'near' ? 'near' : '',
-    near50:Number.isFinite(facts.currentPrice) && Number.isFinite(facts.ma50) && chartCoachProximityLabel(facts.currentPrice, facts.ma50) === 'near' ? 'near' : ''
-  });
-  const reviewProse = buildDeterministicReviewProse({
-    storyContext,
-    decisionContext:{verdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || 'watch'}
-  });
+  const explicitStoryContext = options.storyContext && typeof options.storyContext === 'object'
+    ? options.storyContext
+    : null;
+  const storyContext = explicitStoryContext
+    || (typeof buildCanonicalStoryContextForRecord === 'function'
+      ? buildCanonicalStoryContextForRecord(record, {
+        analysis,
+        globalVerdict,
+        derivedStates:authoritativeDerivedStates,
+        facts
+      })
+      : null);
+  const reviewProse = storyContext && typeof buildDeterministicReviewProse === 'function'
+    ? buildDeterministicReviewProse({
+      storyContext,
+      decisionContext:{verdict:globalVerdict.final_verdict || globalVerdict.finalVerdict || 'watch'}
+    })
+    : '';
   const reason = aiMissing
     ? 'AI candle commentary missing'
     : (aiGeneric
@@ -28710,10 +28965,12 @@ function reconcileWatchlistPresentation({
       structureState:'broken'
     });
     const summary = buildDecisionSummary({
+      record:item,
       finalVerdict:'avoid',
       displayedPlan,
       resolvedContract,
-      derivedStates
+      derivedStates,
+      globalVerdict
     });
     return {
       ...base,
@@ -30864,7 +31121,10 @@ function reviewTechnicalVolumeLabel(state){
   const safe = String(state || '').trim().toLowerCase();
   if(['expanding', 'supportive', 'strong'].includes(safe)) return 'Volume expanding';
   if(safe === 'weak') return 'Volume weak';
-  return 'Volume constructive';
+  if(['constructive', 'normal'].includes(safe)) return 'Volume constructive';
+  if(['neutral', 'average'].includes(safe)) return 'Volume neutral';
+  if(!safe || ['unknown', 'n/a', 'na', 'none'].includes(safe)) return 'Volume n/a';
+  return 'Volume n/a';
 }
 
 function reviewTechnicalMarketLabel(record){
@@ -31027,6 +31287,16 @@ function buildResolvedReviewDisplayModel({
   const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
   const realism = planRealism && typeof planRealism === 'object' ? planRealism : {};
+  const analysisState = typeof getReviewAnalysisState === 'function' ? getReviewAnalysisState(item) : null;
+  const authoritativeStoryContext = typeof buildCanonicalStoryContextForRecord === 'function'
+    ? buildCanonicalStoryContextForRecord(item, {
+      analysis:analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+        ? analysisState.normalizedAnalysis
+        : {},
+      globalVerdict:global,
+      derivedStates:derived
+    })
+    : null;
   const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
     record:item,
     simplifiedState:simplified,
@@ -31083,13 +31353,52 @@ function buildResolvedReviewDisplayModel({
   const positionCostText = positionCostVisible && Number.isFinite(plan.capitalFit && plan.capitalFit.position_cost)
     ? `${Number(plan.capitalFit.position_cost.toFixed(2))}${plan.capitalFit.quote_currency ? ` ${plan.capitalFit.quote_currency}` : ''}`
     : '-';
-  const technicalContextLine = [
-    supportTestCopy ? supportTestCopy.technicalStructure : reviewTechnicalStructureLabel(simplified.structureState || derived.structureState || ''),
-    supportTestCopy ? supportTestCopy.technicalPullback : pullbackBounceDisplay.pullbackLabel,
-    supportTestCopy ? supportTestCopy.technicalBounce : pullbackBounceDisplay.bounceLabel,
-    reviewTechnicalVolumeLabel(simplified.volumeState || derived.volumeState || ''),
-    reviewTechnicalMarketLabel(item)
-  ].join(' | ');
+  const technicalContextLine = supportTestCopy
+    ? [
+      supportTestCopy.technicalStructure,
+      supportTestCopy.technicalPullback,
+      supportTestCopy.technicalBounce,
+      reviewTechnicalVolumeLabel(simplified.volumeState || derived.volumeState || ''),
+      reviewTechnicalMarketLabel(item)
+    ].join(' | ')
+    : (authoritativeStoryContext && typeof canonicalReviewTechnicalContextLineFromStoryContext === 'function'
+      ? canonicalReviewTechnicalContextLineFromStoryContext(authoritativeStoryContext, item)
+      : [
+        reviewTechnicalStructureLabel(simplified.structureState || derived.structureState || ''),
+        pullbackBounceDisplay.pullbackLabel,
+        pullbackBounceDisplay.bounceLabel,
+        reviewTechnicalVolumeLabel(simplified.volumeState || derived.volumeState || ''),
+        reviewTechnicalMarketLabel(item)
+      ].join(' | '));
+  const fallbackDecisionSummary = String(semantic.primaryReason || '').trim() || String(semantic.blocker || diagnosticsMessage || '').trim();
+  const blockerDecisionSummary = typeof canonicalNonChartBlockerSummary === 'function'
+    ? canonicalNonChartBlockerSummary({
+      record:item,
+      finalVerdict:simplified.canonicalVerdict || global.final_verdict || global.finalVerdict || 'watch',
+      structureEligibility:simplified.structureEligibility || global.structure_eligibility || global.structureEligibility || '',
+      structureState:simplified.structureState || derived.structureState || '',
+      setupLocationState:derived.setupLocationState || global.setup_location_state || global.setupLocationState || '',
+      priceabilityState:derived.priceabilityState || global.priceability_state || global.priceabilityState || '',
+      bounceState:simplified.bounceState || derived.bounceState || global.bounce_state || global.bounceState || '',
+      planStatus:plan.status || '',
+      viability:global.viability || '',
+      viabilityBranchId:global.viabilityBranchId || global.viability_branch_id || '',
+      setupScore:typeof rawSetupScoreForRecord === 'function' ? rawSetupScoreForRecord(item) : null,
+      mainBlocker:fallbackDecisionSummary
+    })
+    : '';
+  const chartStoryDecisionSummary = authoritativeStoryContext && typeof canonicalDecisionSummaryFromStoryContext === 'function'
+    ? canonicalDecisionSummaryFromStoryContext({
+      finalVerdict:simplified.canonicalVerdict || global.final_verdict || global.finalVerdict || 'watch',
+      storyContext:authoritativeStoryContext,
+      fallbackSummary:''
+    })
+    : '';
+  const decisionSummary = String(
+    blockerDecisionSummary
+    || chartStoryDecisionSummary
+    || fallbackDecisionSummary
+  ).trim();
   const compactTradeStatusLine = (supportTestCopy && !pricedButNotReady)
     ? supportTestCopy.tradeStatus
     : String(rawTradeStatus.line1 || diagnosticsMessage || 'No actionable trade yet.').trim();
@@ -31169,6 +31478,8 @@ function buildResolvedReviewDisplayModel({
     positionCostVisible,
     positionCostText,
     technicalContextLine,
+    decisionSummary,
+    storyContext:authoritativeStoryContext,
     pullbackBounceDisplay,
     planSummary,
     explanatoryReason,
@@ -31472,6 +31783,7 @@ function buildCanonicalReviewPresentationModel(record, options = {}){
     capitalFitVisual,
     positionCostVisible:resolvedReviewDisplay.positionCostVisible === true,
     positionCostText:resolvedReviewDisplay.positionCostText,
+    decisionSummary:resolvedReviewDisplay.decisionSummary,
     technicalContextLine:resolvedReviewDisplay.technicalContextLine,
     nextActionLabel:String(
       projectionActionGuidance
@@ -46567,7 +46879,7 @@ function renderReviewWorkspace(options = {}){
     displayedPlan,
     planRealism
   });
-  const decisionSummary = String(
+  const legacyDecisionSummary = String(
     projectionDecisionSummary
     || reviewSemanticStatus.primaryReason
     || reviewLifecycleBias.decisionSummary
@@ -47328,7 +47640,17 @@ function renderReviewWorkspace(options = {}){
       ? canonicalReviewPresentation.nextActionLabel
       : reviewNextActionLabel
   ).trim();
-  const technicalContextLine = resolvedReviewDisplay.technicalContextLine;
+  const decisionSummary = String(
+    canonicalReviewPresentation && canonicalReviewPresentation.decisionSummary
+      ? canonicalReviewPresentation.decisionSummary
+      : legacyDecisionSummary
+  ).trim();
+  const technicalContextLine = String(
+    canonicalReviewPresentation && canonicalReviewPresentation.technicalContextLine
+      ? canonicalReviewPresentation.technicalContextLine
+      : resolvedReviewDisplay.technicalContextLine
+  ).trim();
+  const renderedDecisionSummary = String(decisionSummary || snapshotVerdictLine || '').trim();
   if(typeof console !== 'undefined' && console.log){
     console.log('[REVIEW_RENDER_COMMIT]', {
       ticker:record.ticker,
@@ -47393,7 +47715,7 @@ function renderReviewWorkspace(options = {}){
         </div>
         ${snapshotWarningsMarkup ? `<div class="inline-status review-warning-row">${snapshotWarningsMarkup}</div>` : ''}
         ${downgradeSummary ? `<div class="tiny review-downgrade-badge"><span class="badge avoid">${escapeHtml(downgradeSummary.label)}</span> ${escapeHtml(downgradeSummary.transition)}</div>` : ''}
-        <div class="review-decision-primary decision-summary">${escapeHtml(snapshotVerdictLine)}</div>
+        <div class="review-decision-primary decision-summary">${escapeHtml(renderedDecisionSummary)}</div>
         <div class="tiny review-next-action-inline" id="reviewNextActionInline">Action guidance: ${escapeHtml(renderPresentationNextActionLabel)}</div>
       </div>
       <div class="reviewchartpanel reviewchartpanel--compact" data-tour="chart-upload">
@@ -51499,10 +51821,12 @@ function resolveGlobalVerdict(record, deps = {}){
       canonicalAuthoritySelectionSource:canonicalAuthoritySource
     };
   verdict.decision_summary = buildDecisionSummary({
+    record:item,
     finalVerdict:verdict.final_verdict,
     displayedPlan,
     resolvedContract:authorityResolvedContract,
-    derivedStates
+    derivedStates,
+    globalVerdict:verdict
   });
   if(!verdict.cumulativePenaltyTrace || !Array.isArray(verdict.cumulativePenaltyTrace.sources)){
     verdict.cumulativePenaltyTrace = resolverDeps.buildCumulativePenaltyTrace(item, {

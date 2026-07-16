@@ -4476,6 +4476,279 @@ function runSimplifiedPipelineAssertions(){
   if(bounceAttemptOnlyVisual.weakWatchDiminishingTrace.returnPath !== 'monitor_fallback'){
     throw new Error('Bounce-attempt-only monitor case must exit through monitor_fallback, not weak_watch_diminishing.');
   }
+  if(/support is holding|support is being tested|buyers still need to prove control|wait for a real buyer response/i.test(String(bounceAttemptOnlyVisual.decision_summary || ''))){
+    throw new Error('Unpriceable Watch card summary must not be replaced by canonical chart-only support copy.');
+  }
+  if(!/price reliably|usable pullback/i.test(String(bounceAttemptOnlyVisual.decision_summary || ''))){
+    throw new Error('Unpriceable Watch card summary must preserve the pricing blocker explanation.');
+  }
+
+  const lowScoreSupportStoryVisual = resolverPresentation.resolveVisualState({
+    ticker:'LOWQ',
+    plan:{},
+    marketData:{price:71.2, ma20:70.4, ma50:68.9, ma200:61.5, currency:'USD'}
+  }, 'scanner', {
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      stabilisationState:'clear',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'valid'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'valid'
+    },
+    setupScore:4
+  }, {
+    ...weakWatchReasonDeps,
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'alive',
+        viability:'watchlist',
+        viabilityBranchId:'alive_watchlist_low_score',
+        setup_location_state:'near_20ma',
+        priceability_state:'priceable',
+        final_verdict:'watch',
+        main_blocker:'Setup quality is too low.'
+      };
+    },
+    canonicalDecisionSummaryFromStoryContext(){
+      return 'Watch - support is holding, but buyers still need to prove control.';
+    },
+    buildCanonicalStoryContextForRecord(){
+      return {currentPhase:'responding_from_support'};
+    }
+  });
+  if(!/setup quality|usable pullback/i.test(String(lowScoreSupportStoryVisual.decision_summary || ''))){
+    throw new Error('Low-score Watch card summary must preserve quality-driven blocker copy.');
+  }
+  if(/buyers still need to prove control|support is holding/i.test(String(lowScoreSupportStoryVisual.decision_summary || ''))){
+    throw new Error('Low-score Watch card summary must not be replaced by canonical chart-confirmation copy.');
+  }
+
+  const invalidPlanSupportStoryVisual = resolverPresentation.resolveVisualState({
+    ticker:'PLANX',
+    plan:{},
+    marketData:{price:88.4, ma20:87.6, ma50:84.1, ma200:72.3, currency:'USD'}
+  }, 'scanner', {
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      stabilisationState:'clear',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'invalid'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'invalid'
+    },
+    setupScore:7
+  }, {
+    ...weakWatchReasonDeps,
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'alive',
+        viability:'watchlist',
+        viabilityBranchId:'alive_watchlist',
+        setup_location_state:'near_20ma',
+        priceability_state:'priceable',
+        final_verdict:'watch',
+        main_blocker:'Plan needs rebuilding before the setup is actionable.'
+      };
+    },
+    canonicalDecisionSummaryFromStoryContext(){
+      return 'Watch - support is holding, but buyers still need to prove control.';
+    },
+    buildCanonicalStoryContextForRecord(){
+      return {currentPhase:'responding_from_support'};
+    }
+  });
+  if(!/plan needs rebuilding/i.test(String(invalidPlanSupportStoryVisual.decision_summary || ''))){
+    throw new Error('Invalid-plan Watch card summary must preserve the plan blocker path.');
+  }
+  if(/buyers still need to prove control|support is holding/i.test(String(invalidPlanSupportStoryVisual.decision_summary || ''))){
+    throw new Error('Invalid-plan Watch card summary must not be replaced by canonical chart-confirmation copy.');
+  }
+
+  const canonicalConfirmationVisual = resolverPresentation.resolveVisualState({
+    ticker:'RESPX',
+    plan:{},
+    marketData:{price:104.8, ma20:103.9, ma50:100.4, ma200:91.7, currency:'USD'}
+  }, 'scanner', {
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      stabilisationState:'clear',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'valid'},
+    resolvedContract:{
+      finalVerdict:'near_entry',
+      final_verdict:'near_entry',
+      final_verdict_rendered:'near_entry',
+      planStatusKey:'valid'
+    },
+    setupScore:7
+  }, {
+    ...weakWatchReasonDeps,
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'alive',
+        viability:'watchlist',
+        viabilityBranchId:'alive_watchlist',
+        setup_location_state:'near_20ma',
+        priceability_state:'priceable',
+        final_verdict:'near_entry',
+        main_blocker:'Needs confirmation before promotion.'
+      };
+    },
+    canonicalDecisionSummaryFromStoryContext(){
+      return 'Near Entry - support is holding, but the trigger is still missing.';
+    },
+    buildCanonicalStoryContextForRecord(){
+      return {currentPhase:'responding_from_support'};
+    }
+  });
+  const baselineConfirmationVisual = resolverPresentation.resolveVisualState({
+    ticker:'RESPX',
+    plan:{},
+    marketData:{price:104.8, ma20:103.9, ma50:100.4, ma200:91.7, currency:'USD'}
+  }, 'scanner', {
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      stabilisationState:'clear',
+      bounceState:'attempt',
+      pullbackZone:'near_20ma'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'valid'},
+    resolvedContract:{
+      finalVerdict:'near_entry',
+      final_verdict:'near_entry',
+      final_verdict_rendered:'near_entry',
+      planStatusKey:'valid'
+    },
+    setupScore:7
+  }, {
+    ...weakWatchReasonDeps,
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'alive',
+        viability:'watchlist',
+        viabilityBranchId:'alive_watchlist',
+        setup_location_state:'near_20ma',
+        priceability_state:'priceable',
+        final_verdict:'near_entry',
+        main_blocker:'Needs confirmation before promotion.'
+      };
+    }
+  });
+  if(String(canonicalConfirmationVisual.decision_summary || '').trim() !== 'Near Entry - support is holding, but the trigger is still missing.'){
+    throw new Error('Ordinary chart-confirmation Near Entry case must use the canonical chart-story summary.');
+  }
+  if(canonicalConfirmationVisual.canonicalVerdict !== baselineConfirmationVisual.canonicalVerdict
+    || canonicalConfirmationVisual.visualBucket !== baselineConfirmationVisual.visualBucket){
+    throw new Error('Card summary fixes must not alter verdict or visual bucket.');
+  }
+
+  const missingPlanConstructiveNoneVisual = resolverPresentation.resolveVisualState({
+    ticker:'NOPLAN',
+    plan:{},
+    marketData:{price:96.4, ma20:95.8, ma50:92.1, ma200:84.6, currency:'USD'}
+  }, 'scanner', {
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'none',
+      priceabilityState:'priceable',
+      stabilisationState:'clear',
+      bounceState:'attempt',
+      pullbackZone:'none'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'missing'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'missing'
+    },
+    setupScore:7
+  }, {
+    ...weakWatchReasonDeps,
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'alive',
+        viability:'watchlist',
+        viabilityBranchId:'alive_watchlist',
+        setup_location_state:'none',
+        priceability_state:'priceable',
+        final_verdict:'watch',
+        main_blocker:'No valid invalidation level is available.'
+      };
+    }
+  });
+  if(String(missingPlanConstructiveNoneVisual.decision_summary || '').trim() !== 'No valid invalidation level is available.'){
+    throw new Error('Constructive scanner Watch with setupLocationState none and missing plan must show the missing-plan blocker.');
+  }
+  if(/waiting for confirmation/i.test(String(missingPlanConstructiveNoneVisual.decision_summary || ''))){
+    throw new Error('Constructive scanner Watch with missing plan must not use generic waiting-for-confirmation copy.');
+  }
+
+  const invalidPlanConstructiveNoneVisual = resolverPresentation.resolveVisualState({
+    ticker:'BADPLAN',
+    plan:{},
+    marketData:{price:96.4, ma20:95.8, ma50:92.1, ma200:84.6, currency:'USD'}
+  }, 'scanner', {
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'none',
+      priceabilityState:'priceable',
+      stabilisationState:'clear',
+      bounceState:'attempt',
+      pullbackZone:'none'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'invalid'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'invalid'
+    },
+    setupScore:7
+  }, {
+    ...weakWatchReasonDeps,
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'alive',
+        viability:'watchlist',
+        viabilityBranchId:'alive_watchlist',
+        setup_location_state:'none',
+        priceability_state:'priceable',
+        final_verdict:'watch',
+        main_blocker:'Plan needs rebuilding before the setup is actionable.'
+      };
+    }
+  });
+  if(String(invalidPlanConstructiveNoneVisual.decision_summary || '').trim() !== 'Plan needs rebuilding before the setup is actionable.'){
+    throw new Error('Constructive scanner Watch with invalid plan must keep the invalid-plan blocker visible.');
+  }
 
   const earlyBounceMessyMonitorDeps = {
     resolveGlobalVerdict(){
@@ -5668,6 +5941,10 @@ function runAiContractAssertions(){
     || !renderReviewWorkspaceSource.includes('renderSimplifiedChartPipelineMarkup(record, simplifiedChartPipeline || {})')
     || !renderReviewWorkspaceSource.includes('renderReviewChartStatusLine(record, simplifiedChartPipeline)')){
     throw new Error('Review chart rendering must be owned by the simplified pipeline only.');
+  }
+  if(!renderReviewWorkspaceSource.includes("const renderedDecisionSummary = String(decisionSummary || snapshotVerdictLine || '').trim();")
+    || !renderReviewWorkspaceSource.includes('<div class="review-decision-primary decision-summary">${escapeHtml(renderedDecisionSummary)}</div>')){
+    throw new Error('Review render must display canonical decisionSummary and fall back to snapshotVerdictLine only when canonical summary is unavailable.');
   }
   if(!simplifiedDecisionSource.includes("key:'chart_mismatch'")
     || !simplifiedDecisionSource.includes("key:'cant_read'")
@@ -9889,6 +10166,18 @@ function runReviewPricedButNotReadyAssertions(){
     normalizeTickerRecord(record){
       return record && typeof record === 'object' ? record : {};
     },
+    normalizeGlobalVerdictKey(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
+      return 'watch';
+    },
+    normalizeVerdict(value){
+      const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+      if(safe === 'nearentry') return 'near_entry';
+      if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
+      return 'watch';
+    },
     reviewCopyEvidence(){
       return {consolidating:false, terminalAvoid:false, structuralWeakness:false, noBounce:false};
     },
@@ -9911,16 +10200,34 @@ function runReviewPricedButNotReadyAssertions(){
       };
     },
     reviewTechnicalStructureLabel(){ return 'Structure strong'; },
-    reviewTechnicalVolumeLabel(){ return 'Volume supportive'; },
+    reviewTechnicalVolumeLabel(state){
+      const safe = String(state || '').trim().toLowerCase();
+      if(['expanding', 'supportive', 'strong'].includes(safe)) return 'Volume expanding';
+      if(safe === 'weak') return 'Volume weak';
+      if(['constructive', 'normal'].includes(safe)) return 'Volume constructive';
+      if(['neutral', 'average'].includes(safe)) return 'Volume neutral';
+      return 'Volume n/a';
+    },
     reviewTechnicalMarketLabel(){ return 'Market supportive'; },
     reviewConsolidationPresentationCopy(){
       return {summary:'', blocker:'', nextAction:''};
+    },
+    rawSetupScoreForRecord(record){
+      const rawScore = sandbox.numericOrNull(record && (record.rawScore ?? record.baseScore ?? (record.setup && record.setup.baseScore)));
+      return rawScore == null ? 0 : rawScore;
     }
   };
   vm.createContext(sandbox);
   [
     'resolveCanonicalTradePlanAuthority',
     'buildReviewSemanticStatus',
+    'canonicalReviewTechnicalStructureLabelFromStoryContext',
+    'canonicalReviewTechnicalPullbackLabelFromStoryContext',
+    'canonicalReviewTechnicalBuyerLabelFromStoryContext',
+    'canonicalReviewTechnicalContextLineFromStoryContext',
+    'canonicalDecisionSummaryFromStoryContext',
+    'canonicalNonChartBlockerSummary',
+    'buildDecisionSummary',
     'buildResolvedReviewDisplayModel'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
@@ -10129,6 +10436,574 @@ function runReviewPricedButNotReadyAssertions(){
   if(/The app knows the maths/i.test(String(weakSemantic.tradeStatus && weakSemantic.tradeStatus.line1 || '')) || String(weakSemantic.rrDisplay || '') === 'Priced'){
     throw new Error('Structurally weak valid-plan watch states must preserve stronger cautionary Review copy.');
   }
+
+  sandbox.buildCanonicalStoryContextForRecord = function(){
+    return {
+      structure:{state:'developing_clean'},
+      support:{label:'20MA'},
+      buyerResponse:{semantic:'response_present'},
+      buyerControl:{state:'emerging'},
+      confirmation:{state:'follow_through_unconfirmed'},
+      volume:{state:'supportive'},
+      currentPhase:'responding_from_support'
+    };
+  };
+  const canonicalLowScoreResolved = sandbox.buildResolvedReviewDisplayModel({
+    record:{ticker:'SCORE', rawScore:4, marketData:{price:55}},
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      structureState:'developing_clean',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      volumeState:'supportive'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist_low_score'
+    },
+    reviewSemanticStatus:{
+      primaryReason:'Conditions are not strong enough for active focus.',
+      blocker:'Conditions are not strong enough for active focus.',
+      tradeStatus:{line1:'Conditions are not strong enough for active focus.', line2:''},
+      showPlanFields:false,
+      showPlanMetrics:false,
+      showCapital:false
+    },
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'valid'},
+    planRealism:{raw_rr:2}
+  });
+  if(!/setup quality|active focus/i.test(String(canonicalLowScoreResolved.decisionSummary || ''))){
+    throw new Error('Low-score Review summary must preserve the blocker-first explanation.');
+  }
+  if(/support is holding|buyers still need to prove control/i.test(String(canonicalLowScoreResolved.decisionSummary || ''))){
+    throw new Error('Low-score Review summary must not be replaced by canonical chart-story copy.');
+  }
+  if(!/Structure developing/i.test(String(canonicalLowScoreResolved.technicalContextLine || ''))){
+    throw new Error('Developing canonical story context must render Structure developing in Review technical context.');
+  }
+
+  const canonicalUnpriceableResolved = sandbox.buildResolvedReviewDisplayModel({
+    record:{ticker:'PRICE', rawScore:7, marketData:{price:55}},
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      volumeState:'supportive'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    reviewSemanticStatus:{
+      primaryReason:'Trade remains unpriceable.',
+      blocker:'Trade remains unpriceable.',
+      tradeStatus:{line1:'Trade remains unpriceable.', line2:''},
+      showPlanFields:false,
+      showPlanMetrics:false,
+      showCapital:false
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'unpriceable',
+      bounceState:'attempt',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'valid'},
+    planRealism:{raw_rr:2}
+  });
+  if(!/price reliably|unpriceable/i.test(String(canonicalUnpriceableResolved.decisionSummary || ''))){
+    throw new Error('Unpriceable Review summary must preserve the pricing blocker.');
+  }
+  if(/support is holding|buyers still need to prove control/i.test(String(canonicalUnpriceableResolved.decisionSummary || ''))){
+    throw new Error('Unpriceable Review summary must not be replaced by canonical chart-story copy.');
+  }
+
+  const canonicalMissingPlanResolved = sandbox.buildResolvedReviewDisplayModel({
+    record:{ticker:'PLAN', rawScore:7, marketData:{price:55}},
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      volumeState:'supportive'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    reviewSemanticStatus:{
+      primaryReason:'Plan needs rebuilding before the setup is actionable.',
+      blocker:'Plan needs rebuilding before the setup is actionable.',
+      tradeStatus:{line1:'Plan needs rebuilding before the setup is actionable.', line2:''},
+      showPlanFields:false,
+      showPlanMetrics:false,
+      showCapital:false
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'missing'},
+    planRealism:{raw_rr:null}
+  });
+  if(!/plan needs rebuilding/i.test(String(canonicalMissingPlanResolved.decisionSummary || ''))){
+    throw new Error('Missing-plan Review summary must preserve the plan blocker.');
+  }
+  if(/support is holding|buyers still need to prove control/i.test(String(canonicalMissingPlanResolved.decisionSummary || ''))){
+    throw new Error('Missing-plan Review summary must not be replaced by canonical chart-story copy.');
+  }
+
+  const canonicalChartConfirmationResolved = sandbox.buildResolvedReviewDisplayModel({
+    record:{ticker:'CONF', rawScore:7, marketData:{price:55}},
+    simplifiedState:{
+      canonicalVerdict:'near_entry',
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      volumeState:'supportive'
+    },
+    globalVerdict:{
+      final_verdict:'near_entry',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    reviewSemanticStatus:{
+      primaryReason:'Needs stronger confirmation.',
+      blocker:'Needs stronger confirmation.',
+      tradeStatus:{line1:'Needs stronger confirmation.', line2:''},
+      showPlanFields:false,
+      showPlanMetrics:false,
+      showCapital:false
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'valid'},
+    planRealism:{raw_rr:2}
+  });
+  if(!/support is holding|trigger is still missing/i.test(String(canonicalChartConfirmationResolved.decisionSummary || ''))){
+    throw new Error('Chart-confirmation Review summary should use the canonical chart-story copy when no non-chart blocker controls.');
+  }
+
+  sandbox.buildCanonicalStoryContextForRecord = function(){
+    return {
+      structure:{state:'strong'},
+      support:{label:'20MA', type:'20ma'},
+      buyerResponse:{semantic:'response_absent'},
+      buyerControl:{state:'none'},
+      confirmation:{state:'follow_through_unknown'},
+      volume:{state:'supportive'},
+      currentPhase:'away_from_support'
+    };
+  };
+  const canonicalAwayFromSupportResolved = sandbox.buildResolvedReviewDisplayModel({
+    record:{ticker:'AWAY', rawScore:7, marketData:{price:55}},
+    simplifiedState:{
+      canonicalVerdict:'watch',
+      structureState:'strong',
+      structureEligibility:'alive',
+      bounceState:'attempt',
+      volumeState:'supportive'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    reviewSemanticStatus:{
+      primaryReason:'Monitor: still forming. Buyers have not taken control yet.',
+      blocker:'Monitor: still forming. Buyers have not taken control yet.',
+      tradeStatus:{line1:'Monitor: still forming. Buyers have not taken control yet.', line2:''},
+      showPlanFields:false,
+      showPlanMetrics:false,
+      showCapital:false
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'valid'},
+    planRealism:{raw_rr:2}
+  });
+  if(String(canonicalAwayFromSupportResolved.decisionSummary || '').trim() !== 'Watch - trend remains constructive, but price is currently away from support.'){
+    throw new Error('Away-from-support Watch Review summary must use the canonical away-from-support caution.');
+  }
+  if(/almost ready|waiting for confirmation/i.test(String(canonicalAwayFromSupportResolved.decisionSummary || ''))){
+    throw new Error('Away-from-support Watch Review summary must not fall back to generic readiness copy.');
+  }
+
+  const awayFromSupportWatchDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DAWAYW', rawScore:7},
+    finalVerdict:'watch',
+    displayedPlan:{status:'valid'},
+    resolvedContract:{structuralState:'developing', planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'away_from_support',
+      buyerControl:{state:'none'}
+    }
+  });
+  if(String(awayFromSupportWatchDecisionSummary || '').trim() !== 'Watch - trend remains constructive, but price is currently away from support.'){
+    throw new Error('buildDecisionSummary must use away-from-support Watch caution when canonical phase says price is away from support.');
+  }
+  if(/almost ready|waiting for confirmation/i.test(String(awayFromSupportWatchDecisionSummary || ''))){
+    throw new Error('buildDecisionSummary must not use generic fallback copy for away-from-support Watch states.');
+  }
+
+  const awayFromSupportNearEntryDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DAWAYN', rawScore:7},
+    finalVerdict:'near_entry',
+    displayedPlan:{status:'valid'},
+    resolvedContract:{structuralState:'near_entry', planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'near_entry',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'away_from_support',
+      buyerControl:{state:'none'}
+    }
+  });
+  if(String(awayFromSupportNearEntryDecisionSummary || '').trim() !== 'Near Entry - trend remains constructive, but price is currently away from support. Wait for a reset.'){
+    throw new Error('buildDecisionSummary must use away-from-support Near Entry caution when canonical phase says price is away from support.');
+  }
+  if(/almost ready|trigger is still missing/i.test(String(awayFromSupportNearEntryDecisionSummary || ''))){
+    throw new Error('Away-from-support Near Entry summary must not imply setup readiness.');
+  }
+
+  const extendedFromSupportDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DEXT', rawScore:7},
+    finalVerdict:'watch',
+    displayedPlan:{status:'valid'},
+    resolvedContract:{structuralState:'developing', planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'extended',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'extended_from_support',
+      buyerControl:{state:'none'}
+    }
+  });
+  if(String(extendedFromSupportDecisionSummary || '').trim() !== 'Watch - constructive rebound, but price is already away from support.'){
+    throw new Error('Extended-from-support summary must remain unchanged.');
+  }
+
+  const unpriceableDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DPRICE', rawScore:7},
+    finalVerdict:'watch',
+    displayedPlan:{status:'valid'},
+    resolvedContract:{structuralState:'developing', planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'unpriceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'responding_from_support',
+      buyerControl:{state:'emerging'}
+    }
+  });
+  if(!/price reliably/i.test(String(unpriceableDecisionSummary || '')) || /support is holding|buyers still need to prove control/i.test(String(unpriceableDecisionSummary || ''))){
+    throw new Error('buildDecisionSummary must preserve the unpriceable blocker ahead of canonical chart-story copy.');
+  }
+
+  const lowScoreDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DSCORE', rawScore:4},
+    finalVerdict:'watch',
+    displayedPlan:{status:'valid'},
+    resolvedContract:{structuralState:'developing', planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist_low_score'
+    },
+    storyContext:{
+      currentPhase:'responding_from_support',
+      buyerControl:{state:'emerging'}
+    }
+  });
+  if(!/setup quality|usable pullback/i.test(String(lowScoreDecisionSummary || '')) || /support is holding|buyers still need to prove control/i.test(String(lowScoreDecisionSummary || ''))){
+    throw new Error('buildDecisionSummary must preserve the low-score blocker ahead of canonical chart-story copy.');
+  }
+
+  const invalidPlanDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DPLAN', rawScore:7},
+    finalVerdict:'watch',
+    displayedPlan:{status:'missing'},
+    resolvedContract:{structuralState:'developing', planStatusKey:'missing', blockerReason:'No valid invalidation level is available.'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'responding_from_support',
+      buyerControl:{state:'emerging'}
+    }
+  });
+  if(String(invalidPlanDecisionSummary || '').trim() !== 'No valid invalidation level is available.'){
+    throw new Error('buildDecisionSummary must preserve the actual missing-plan blocker text when plan status controls.');
+  }
+  if(/support is holding|buyers still need to prove control/i.test(String(invalidPlanDecisionSummary || ''))){
+    throw new Error('buildDecisionSummary must not replace a plan blocker with canonical chart-story copy.');
+  }
+
+  const invalidPlanNearEntryDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DINVALID', rawScore:7},
+    finalVerdict:'near_entry',
+    displayedPlan:{status:'invalid'},
+    resolvedContract:{structuralState:'near_entry', planStatusKey:'invalid', blockerReason:'Plan needs adjustment.'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'near_entry',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'responding_from_support',
+      buyerControl:{state:'emerging'}
+    }
+  });
+  if(String(invalidPlanNearEntryDecisionSummary || '').trim() !== 'Plan needs adjustment.'){
+    throw new Error('buildDecisionSummary must preserve the actual invalid-plan blocker text.');
+  }
+  if(/support is holding|trigger is still missing/i.test(String(invalidPlanNearEntryDecisionSummary || ''))){
+    throw new Error('Invalid-plan Near Entry summary must not be replaced by canonical chart-story copy.');
+  }
+
+  const confirmationDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DCONF', rawScore:7},
+    finalVerdict:'near_entry',
+    displayedPlan:{status:'valid'},
+    resolvedContract:{structuralState:'near_entry', planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'near_entry',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'responding_from_support',
+      buyerControl:{state:'emerging'}
+    }
+  });
+  if(String(confirmationDecisionSummary || '').trim() !== 'Near Entry - support is holding, but the trigger is still missing.'){
+    throw new Error('buildDecisionSummary should use canonical chart-story summary when no non-chart blocker controls.');
+  }
+
+  const awayFromSupportMissingPlanDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DAWAYPLAN', rawScore:7},
+    finalVerdict:'watch',
+    displayedPlan:{status:'missing'},
+    resolvedContract:{structuralState:'developing', planStatusKey:'missing', blockerReason:'No valid invalidation level is available.'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'away_from_support',
+      buyerControl:{state:'none'}
+    }
+  });
+  if(String(awayFromSupportMissingPlanDecisionSummary || '').trim() !== 'No valid invalidation level is available.'){
+    throw new Error('Non-chart plan blockers must still beat away-from-support summaries.');
+  }
+
+  const awayFromSupportLowScoreDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DAWAYSCORE', rawScore:4},
+    finalVerdict:'watch',
+    displayedPlan:{status:'valid'},
+    resolvedContract:{structuralState:'developing', planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist_low_score'
+    },
+    storyContext:{
+      currentPhase:'away_from_support',
+      buyerControl:{state:'none'}
+    }
+  });
+  if(!/setup quality|usable pullback/i.test(String(awayFromSupportLowScoreDecisionSummary || ''))){
+    throw new Error('Low-score blockers must still beat away-from-support summaries.');
+  }
+
+  const originalBuildCanonicalStoryContextForRecord = sandbox.buildCanonicalStoryContextForRecord;
+  sandbox.buildCanonicalStoryContextForRecord = undefined;
+  const genericFallbackDecisionSummary = sandbox.buildDecisionSummary({
+    record:{ticker:'DFALL', rawScore:7},
+    finalVerdict:'watch',
+    displayedPlan:{status:'valid'},
+    resolvedContract:{structuralState:'developing', planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'developing_clean',
+      setupLocationState:'none',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:null
+  });
+  sandbox.buildCanonicalStoryContextForRecord = originalBuildCanonicalStoryContextForRecord;
+  if(String(genericFallbackDecisionSummary || '').trim() !== 'Developing: still forming. Buyers have not taken control yet.'){
+    throw new Error('buildDecisionSummary must still use the generic fallback summary when no blocker and no story context exist.');
+  }
+
+  const canonicalStructureStateFixtures = [
+    {state:'developing', expected:'Structure developing'},
+    {state:'developing_clean', expected:'Structure developing'},
+    {state:'strong', expected:'Structure intact'},
+    {state:'weakening', expected:'Structure weakening'},
+    {state:'broken', expected:'Structure broken'},
+    {state:'', expected:'Structure n/a'}
+  ];
+  canonicalStructureStateFixtures.forEach(fixture => {
+    const label = sandbox.canonicalReviewTechnicalStructureLabelFromStoryContext({
+      structure:{state:fixture.state}
+    });
+    if(label !== fixture.expected){
+      throw new Error(`Canonical Review structure label mismatch for ${fixture.state || 'unknown'}: expected "${fixture.expected}", got "${label}".`);
+    }
+  });
+
+  const volumeStateFixtures = [
+    {state:'constructive', expected:'Volume constructive'},
+    {state:'expanding', expected:'Volume expanding'},
+    {state:'weak', expected:'Volume weak'},
+    {state:'neutral', expected:'Volume neutral'},
+    {state:'average', expected:'Volume neutral'},
+    {state:'supportive', expected:'Volume expanding'},
+    {state:'normal', expected:'Volume constructive'},
+    {state:'', expected:'Volume n/a'},
+    {state:'unknown', expected:'Volume n/a'}
+  ];
+  volumeStateFixtures.forEach(fixture => {
+    const line = sandbox.canonicalReviewTechnicalContextLineFromStoryContext({
+      structure:{state:'strong'},
+      support:{label:'20MA'},
+      buyerResponse:{semantic:'response_present'},
+      buyerControl:{state:'emerging'},
+      confirmation:{state:'follow_through_unconfirmed'},
+      volume:{state:fixture.state},
+      currentPhase:'responding_from_support'
+    }, {});
+    if(!line.includes(fixture.expected)){
+      throw new Error(`Canonical Review volume projection mismatch for ${fixture.state || 'empty'}: expected technical context to include "${fixture.expected}", got "${line}".`);
+    }
+  });
 }
 
 function runCumulativePenaltyDisplayAssertions(){

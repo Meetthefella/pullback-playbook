@@ -305,8 +305,8 @@
 
   function decisionSummaryForVerdict(finalVerdict, options = {}, deps = {}){
     const verdict = coerceCanonicalVerdict(finalVerdict, deps);
+    const storyContext = options.storyContext && typeof options.storyContext === 'object' ? options.storyContext : null;
     if(verdict === 'entry') return 'Entry - your plan fits.';
-    if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
     if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
     const structureEligibility = String(options && options.structureEligibility || '').toLowerCase();
     const setupLocationState = String(options && options.setupLocationState || '').toLowerCase();
@@ -318,6 +318,8 @@
     const setupScore = Number.isFinite(Number(options && options.setupScore)) ? Number(options.setupScore) : null;
     const structureState = String(options && options.structureState || '').toLowerCase();
     const latePullbackState = String(options && options.latePullbackState || '').toLowerCase();
+    const mainBlocker = String(options && options.mainBlocker || '').trim();
+    const hasBlockingPlanStatus = ['invalid','missing','rebuild_required','too_wide'].includes(planStatus);
     const aliveStructure = structureEligibility === 'alive'
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const constructiveWaiting = aliveStructure
@@ -327,7 +329,14 @@
       && !viabilityBranchId.includes('extended')
       && !viabilityBranchId.includes('low_score')
       && (setupScore === null || setupScore >= 5)
-      && !['invalid','rebuild_required','too_wide'].includes(planStatus);
+      && !hasBlockingPlanStatus;
+    const canonicalSummary = storyContext && typeof deps.canonicalDecisionSummaryFromStoryContext === 'function'
+      ? String(deps.canonicalDecisionSummaryFromStoryContext({
+        finalVerdict:verdict,
+        storyContext,
+        fallbackSummary:''
+      }) || '').trim()
+      : '';
     if(setupLocationState === 'none' && constructiveWaiting) return 'Watch - waiting for confirmation.';
     if(latePullbackState === 'late') return 'Watch - trend is healthy, but the buyer response is already too far from support to chase.';
     if(setupLocationState === 'extended') return 'Watch - strong trend, but no clean pullback entry yet.';
@@ -335,8 +344,11 @@
     if((setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear') && (viability === 'low_priority' || viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5) || priceabilityState === 'unpriceable')) return 'Watch - strong trend, but no usable pullback setup yet.';
     if(priceabilityState === 'unpriceable') return 'Watch - price is too extended to price reliably.';
     if(viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5)) return 'Watch - setup quality has slipped below useful watchlist quality.';
+    if(hasBlockingPlanStatus && mainBlocker) return mainBlocker;
     if(structureEligibility === 'damaged') return 'Watch - structure weakening.';
     if(structureEligibility === 'messy') return 'Watch - structure still alive, but messy.';
+    if(canonicalSummary) return canonicalSummary;
+    if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
     return 'Watch - waiting for confirmation.';
   }
 
@@ -555,6 +567,12 @@
     const score = clampScore(optionSetupScore);
     const styleAttr = visualStyleForState(visual_tone === 'diminishing' ? 'watch' : visual_tone, score);
     const badge = deps.getBadge(renderedVerdict);
+    const storyContext = typeof deps.buildCanonicalStoryContextForRecord === 'function'
+      ? deps.buildCanonicalStoryContextForRecord(safeRecord, {
+        globalVerdict:legacyVerdict,
+        derivedStates
+      })
+      : null;
     const summaryOptions = {
       structuralState:resolvedContract && resolvedContract.structuralState,
       structureState:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase(),
@@ -564,8 +582,10 @@
       priceabilityState,
       bounceState,
       planStatus,
+      mainBlocker:legacyVerdict && (legacyVerdict.main_blocker || legacyVerdict.mainBlocker),
       viabilityBranchId,
-      setupScore:optionSetupScore
+      setupScore:optionSetupScore,
+      storyContext
     };
     const resolvedSummary = decisionSummaryForVerdict(renderedVerdict, summaryOptions, deps);
     const cardClass = cardClassForBucket(visualBucket);
