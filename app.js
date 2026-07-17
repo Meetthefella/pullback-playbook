@@ -47583,7 +47583,7 @@ function renderReviewWorkspace(options = {}){
     : '';
   const marketMetaLine = headerContextChip ? '' : `<div class="tiny">${escapeHtml(marketLine)}</div>`;
   const snapshotWarningsMarkup = [modifierMarkup, headerContextMarkup].filter(Boolean).join('');
-  const snapshotVerdictLine = decisionSummary;
+  const snapshotVerdictLine = String(legacyDecisionSummary || '').trim();
   const analysisResponseOpen = (((uiState.responseOpen[record.ticker] ?? false) || !!analysisState.error)) ? 'open' : '';
   const promptPreviewOpen = (uiState.promptOpen[record.ticker] ?? false) ? 'open' : '';
   const capitalFitLabel = capitalComfort.label || 'Unknown';
