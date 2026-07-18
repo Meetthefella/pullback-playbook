@@ -4938,6 +4938,35 @@ function buildTrackDiagnosticSnapshot(record){
         planStatus:'valid'
       }
       : sharedPresentation;
+    const authoritativeTrackDecisionProjection = typeof buildAuthoritativeDecisionProjection === 'function'
+      ? buildAuthoritativeDecisionProjection({
+        record:item,
+        finalVerdict:effectiveSharedPresentation && effectiveSharedPresentation.canonicalVerdict
+          ? effectiveSharedPresentation.canonicalVerdict
+          : (canonicalTrackRenderModel && canonicalTrackRenderModel.canonicalVerdict) || simplifiedState.canonicalVerdict || 'watch',
+        resolvedContract:{
+          planStatusKey:String(
+            effectiveSharedPresentation && effectiveSharedPresentation.planStatus
+            || simplifiedState.planStatus
+            || displayedPlan.status
+            || ''
+          ).trim().toLowerCase()
+        },
+        derivedStates,
+        globalVerdict,
+        authoritativeBlockerText:String(
+          effectiveSharedPresentation && (
+            effectiveSharedPresentation.trackBlocker
+            || effectiveSharedPresentation.mainBlocker
+            || effectiveSharedPresentation.primaryReason
+          )
+          || canonicalTrackRenderModel && canonicalTrackRenderModel.primaryReason
+          || simplifiedState.mainBlocker
+          || globalVerdict.reason
+          || ''
+        ).trim()
+      })
+      : null;
     const trackVisibleModel = persistedTrackVisibleModelFromPresentation(effectiveSharedPresentation);
     const debugPlanUI = resolvePlanVisibility({
       state:globalVerdict.finalVerdict || globalVerdict.final_verdict,
@@ -5060,6 +5089,13 @@ function buildTrackDiagnosticSnapshot(record){
       resolvedRR:Number.isFinite(Number(simplifiedState.resolvedRR)) ? Number(simplifiedState.resolvedRR) : null,
       entryGatePass:simplifiedState.entryGatePass === true,
       nearEntryGatePass:simplifiedState.nearEntryGatePass === true,
+      trackCurrentPhase:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.currentPhase || '').trim(),
+      trackActionability:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.actionability || '').trim(),
+      trackDecisiveReason:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.decisiveReason || '').trim(),
+      trackBlocker:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.blocker || '').trim(),
+      trackSupportRelationship:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.supportRelationship || '').trim(),
+      trackOpportunityCondition:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.opportunityCondition || '').trim(),
+      trackPlanCondition:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.planStatus || '').trim(),
       primaryBlockerReason:String(canonicalTrackRenderModel && canonicalTrackRenderModel.primaryReason || trackVisibleModel.primaryReason || effectiveSharedPresentation.primaryReason || effectiveSharedPresentation.mainBlocker || renderedVisibleModel && renderedVisibleModel.primaryReason || ''),
       avoidTriggerSource:String(simplifiedState.avoidTriggerSource || ''),
       terminalAvoidApplied:simplifiedState.terminalAvoidApplied === true,
@@ -5099,6 +5135,19 @@ function buildTrackDiagnosticSnapshot(record){
       lifecycleSnapshot:safeDiagnosticClone(lifecycleSnapshot || {}, {}),
       consistencyAudit:safeDiagnosticClone(consistencyAudit || [], []),
       visibleModel:safeDiagnosticClone(trackVisibleModel || {}, {}),
+      semantics:safeDiagnosticClone({
+        canonicalVerdict:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.canonicalVerdict || trackStateHealth.canonicalVerdict || '').trim(),
+        currentPhase:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.currentPhase || '').trim(),
+        actionability:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.actionability || '').trim(),
+        decisiveReason:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.decisiveReason || '').trim(),
+        blocker:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.blocker || '').trim(),
+        supportRelationship:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.supportRelationship || '').trim(),
+        opportunityCondition:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.opportunityCondition || '').trim(),
+        planStatus:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.planStatus || '').trim().toLowerCase() || 'unknown',
+        upgradeCondition:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.upgradeCondition || '').trim(),
+        downgradeCondition:String(authoritativeTrackDecisionProjection && authoritativeTrackDecisionProjection.downgradeCondition || '').trim(),
+        authoritySource:String(authoritativeTrackDecisionProjection ? 'canonical_semantic_projection' : 'presentation_compatibility_fallback').trim()
+      }, {}),
       resolverTrace:safeDiagnosticClone(trackDebug.resolverTrace || {}, {}),
       planTrace:safeDiagnosticClone(trackDebug.planTrace || {}, {}),
       gateTrace:safeDiagnosticClone(trackDebug.gateTrace || {}, {}),
@@ -9817,6 +9866,9 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       const scanScore = numericValueOrNull(source.scan && source.scan.score);
       return Number.isFinite(reviewScore) ? reviewScore : (Number.isFinite(setupScore) ? setupScore : (Number.isFinite(scanScore) ? scanScore : 0));
     });
+  const resolveDerivedStates = typeof analysisDerivedStatesFromRecord === 'function'
+    ? analysisDerivedStatesFromRecord
+    : (() => ({}));
   const simplifiedState = options.simplifiedState && typeof options.simplifiedState === 'object'
     ? options.simplifiedState
     : resolveSimplifiedStateForSurface(item, options.surface || 'track', {
@@ -9837,7 +9889,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       reason:String(options.reason || 'shared_presentation'),
       derivedStates:simplifiedState && simplifiedState.debug && simplifiedState.debug.derivedStates
         ? simplifiedState.debug.derivedStates
-        : analysisDerivedStatesFromRecord(item),
+        : resolveDerivedStates(item),
       effectivePlan:effectivePlanForRecord(item, {allowScannerFallback:true}),
       displayedPlan:applyPlanGate(item, derivePlanStateSafe(
         item.plan && item.plan.entry,
@@ -10084,12 +10136,64 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     : (effectiveCanonicalVerdict === 'entry'
       ? true
       : (visibleModel.planVisible === true || simplifiedState.planVisible === true));
+  const resolvedPrimaryReason = String(projectionAuthority
+    ? 'Buyers are in control and the setup is ready to act on.'
+    : (
+      (trackRenderModel && trackRenderModel.primaryReason)
+      || (preserveTrackedLifecycleCanonicalVerdict
+        ? (effectiveCanonicalVerdict === 'entry'
+          ? 'Buyers are in control and the setup is ready to act on.'
+          : 'The setup is close, but confirmation still needs to improve.')
+        : '')
+      || (effectiveCanonicalVerdict === 'entry'
+        ? 'Buyers are in control and the setup is ready to act on.'
+        : (effectiveCanonicalVerdict === 'near_entry'
+          ? String(visibleModel.primaryReason || 'The setup is close, but confirmation still needs to improve.').trim()
+          : String(visibleModel.primaryReason || mainBlocker || '').trim()))
+    )
+  ).trim();
   const planStatus = String(
     (trackRenderModel && trackRenderModel.planStatus)
     || visibleModel.planStatus
     || simplifiedState.planStatus
     || ''
   ).trim().toLowerCase() || 'missing';
+  const semanticDerivedStates = simplifiedState && simplifiedState.debug && simplifiedState.debug.derivedStates
+    ? simplifiedState.debug.derivedStates
+    : resolveDerivedStates(item);
+  const trackDecisionProjection = typeof buildAuthoritativeDecisionProjection === 'function'
+    ? buildAuthoritativeDecisionProjection({
+      record:item,
+      finalVerdict:effectiveCanonicalVerdict,
+      resolvedContract:{planStatusKey:planStatus},
+      derivedStates:semanticDerivedStates,
+      globalVerdict,
+      authoritativeBlockerText:String(
+        (trackRenderModel && trackRenderModel.mainBlocker)
+        || visibleModel.mainBlocker
+        || simplifiedState.mainBlocker
+        || globalVerdict.reason
+        || ''
+      ).trim()
+    })
+    : null;
+  const trackDecisionSemantics = trackDecisionProjection && trackDecisionProjection.semantics
+    ? trackDecisionProjection.semantics
+    : null;
+  const trackDecisionSummary = String(
+    trackDecisionSemantics && typeof trackDecisionSummaryFromSemantics === 'function'
+      ? trackDecisionSummaryFromSemantics(trackDecisionSemantics, headline || '')
+      : (headline || '')
+  ).trim();
+  const trackPrimaryReason = resolvedPrimaryReason;
+  const trackNextAction = String(nextAction || '').trim();
+  const trackPlanSummary = String(
+    (trackRenderModel && trackRenderModel.planSummary)
+    || (effectiveCanonicalVerdict === 'entry'
+      ? 'Trade plan available.'
+      : (visibleModel.planSummary || mainBlocker || 'No actionable trade plan yet.'))
+  ).trim();
+  const trackBlocker = String(trackDecisionSemantics && trackDecisionSemantics.blockerSummary || mainBlocker || '').trim();
   return {
     canonicalVerdict:effectiveCanonicalVerdict,
     finalVerdict:effectiveCanonicalVerdict,
@@ -10117,32 +10221,39 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     ).trim(),
     headline,
     statusText:headline,
-    primaryReason:String(projectionAuthority
-      ? 'Buyers are in control and the setup is ready to act on.'
-      : (
-        (trackRenderModel && trackRenderModel.primaryReason)
-        || (preserveTrackedLifecycleCanonicalVerdict
-          ? (effectiveCanonicalVerdict === 'entry'
-            ? 'Buyers are in control and the setup is ready to act on.'
-            : 'The setup is close, but confirmation still needs to improve.')
-          : '')
-        || (effectiveCanonicalVerdict === 'entry'
-          ? 'Buyers are in control and the setup is ready to act on.'
-          : (effectiveCanonicalVerdict === 'near_entry'
-            ? String(visibleModel.primaryReason || 'The setup is close, but confirmation still needs to improve.').trim()
-            : String(visibleModel.primaryReason || mainBlocker || '').trim()))
-      )
-    ).trim(),
+    primaryReason:resolvedPrimaryReason,
     mainBlocker,
     nextAction,
     planVisible,
     planStatus,
-    planSummary:String(
-      (trackRenderModel && trackRenderModel.planSummary)
-      || (effectiveCanonicalVerdict === 'entry'
-        ? 'Trade plan available.'
-        : (visibleModel.planSummary || mainBlocker || 'No actionable trade plan yet.'))
-    ).trim(),
+    planSummary:trackPlanSummary,
+    trackDecisionSummary,
+    trackPrimaryReason,
+    trackNextAction,
+    trackPlanSummary,
+    trackCurrentPhase:String(trackDecisionSemantics && trackDecisionSemantics.currentPhase || '').trim(),
+    trackActionability:String(trackDecisionSemantics && trackDecisionSemantics.actionability || '').trim(),
+    trackDecisiveReason:String(trackDecisionSemantics && trackDecisionSemantics.decisiveReason || '').trim(),
+    trackBlocker,
+    trackSupportRelationship:String(trackDecisionSemantics && trackDecisionSemantics.supportRelationship || '').trim(),
+    trackOpportunityCondition:String(trackDecisionSemantics && trackDecisionSemantics.opportunityCondition || '').trim(),
+    trackPlanCondition:String(trackDecisionSemantics && trackDecisionSemantics.planCondition || planStatus || '').trim().toLowerCase(),
+    trackUpgradeCondition:String(trackDecisionSemantics && trackDecisionSemantics.nextRequiredEvent || '').trim(),
+    trackDowngradeCondition:String(trackDecisionSemantics && trackDecisionSemantics.reasonKind || '').trim(),
+    trackSemanticProjection:trackDecisionProjection && typeof trackDecisionProjection === 'object'
+      ? {
+        canonicalVerdict:String(trackDecisionProjection.canonicalVerdict || effectiveCanonicalVerdict || '').trim(),
+        currentPhase:String(trackDecisionProjection.currentPhase || '').trim(),
+        actionability:String(trackDecisionProjection.actionability || '').trim(),
+        decisiveReason:String(trackDecisionProjection.decisiveReason || '').trim(),
+        blocker:String(trackDecisionProjection.blocker || trackBlocker || '').trim(),
+        supportRelationship:String(trackDecisionProjection.supportRelationship || '').trim(),
+        opportunityCondition:String(trackDecisionProjection.opportunityCondition || '').trim(),
+        planStatus:String(trackDecisionProjection.planStatus || planStatus || '').trim().toLowerCase(),
+        upgradeCondition:String(trackDecisionProjection.upgradeCondition || '').trim(),
+        downgradeCondition:String(trackDecisionProjection.downgradeCondition || '').trim()
+      }
+      : null,
     setupScore:Number((trackRenderModel && trackRenderModel.setupScore) || resolveSetupScore(item) || 0),
     lifecycleState:normalizeGlobalVerdictKey((options.lifecycleSnapshot && options.lifecycleSnapshot.state) || '') || effectiveCanonicalVerdict,
     lifecycleLabel:String((options.lifecycleSnapshot && options.lifecycleSnapshot.label) || verdictLabel(effectiveCanonicalVerdict || 'watch') || 'Watch').trim(),
@@ -10447,7 +10558,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
 function persistedTrackVisibleModelFromPresentation(presentation = {}){
   const canonicalVerdict = normalizeGlobalVerdictKey(presentation.canonicalVerdict || presentation.finalVerdict || 'watch');
   const visibleBucket = normalizeVisualBucketForPairing(presentation.visualBucket || 'monitor', canonicalVerdict);
-  const persistedHeadline = String(presentation.headline || presentation.statusText || '').trim();
+  const persistedHeadline = String(presentation.trackDecisionSummary || presentation.headline || presentation.statusText || '').trim();
   const persistedHeadlineVerdict = normalizeGlobalVerdictKey(reviewVerdictOverrideFromLabel(persistedHeadline) || '');
   const headline = persistedHeadline && (
     !persistedHeadlineVerdict
@@ -10465,9 +10576,16 @@ function persistedTrackVisibleModelFromPresentation(presentation = {}){
     tone:visibleBucket,
     badgeLabel:String(verdictPresentationLabelForKey(canonicalVerdict || 'watch') || 'Watch').trim(),
     headline,
-    primaryReason:String(presentation.primaryReason || presentation.mainBlocker || '').trim(),
-    nextAction:String(presentation.nextAction || '').trim(),
-    planSummary:String(presentation.planSummary || '').trim(),
+    primaryReason:String(presentation.trackPrimaryReason || presentation.primaryReason || presentation.mainBlocker || '').trim(),
+    nextAction:String(presentation.trackNextAction || presentation.nextAction || '').trim(),
+    planSummary:String(presentation.trackPlanSummary || presentation.planSummary || '').trim(),
+    currentPhase:String(presentation.trackCurrentPhase || '').trim(),
+    actionability:String(presentation.trackActionability || '').trim(),
+    decisiveReason:String(presentation.trackDecisiveReason || '').trim(),
+    trackBlocker:String(presentation.trackBlocker || '').trim(),
+    supportRelationship:String(presentation.trackSupportRelationship || '').trim(),
+    opportunityCondition:String(presentation.trackOpportunityCondition || '').trim(),
+    planCondition:String(presentation.trackPlanCondition || presentation.planStatus || '').trim().toLowerCase(),
     lowerPriority:visibleBucket === 'diminishing',
     internalVisualBucket:visibleBucket
   };
@@ -18362,7 +18480,9 @@ function resolveVisualState(record, context = 'scanner', options = {}){
     normalizeGlobalVerdictKey,
     normalizeVerdict,
     buildCanonicalStoryContextForRecord,
-    canonicalDecisionSummaryFromStoryContext
+    canonicalDecisionSummaryFromStoryContext,
+    buildDecisionSemantics,
+    sharedDecisionSummaryFromSemantics
   });
 }
 
@@ -24491,6 +24611,343 @@ function canonicalNonChartBlockerSummary({
   return '';
 }
 
+function buildDecisionSemantics({
+  record = null,
+  finalVerdict = '',
+  resolvedContract = null,
+  derivedStates = null,
+  globalVerdict = null,
+  storyContext = null,
+  authoritativeBlockerText = ''
+} = {}){
+  const normalizeSemanticBlockerCandidate = (value) => {
+    const text = String(value || '').trim();
+    if(!text) return '';
+    const normalized = text.toLowerCase();
+    if(
+      /needs stronger confirmation/.test(normalized)
+      || /support is holding/.test(normalized)
+      || /buyers still need to prove control/.test(normalized)
+      || /trigger is still missing/.test(normalized)
+      || /almost ready/.test(normalized)
+      || /still forming\./.test(normalized)
+      || /buyers have not taken control yet/.test(normalized)
+      || /no usable pullback setup yet/.test(normalized)
+      || /wait for (stronger confirmation|buyers to prove control|the trigger|a usable pullback|price to reset)/.test(normalized)
+    ){
+      return '';
+    }
+    return text;
+  };
+  const item = record && typeof record === 'object' ? record : null;
+  const verdict = normalizeGlobalVerdictKey(finalVerdict || 'watch');
+  const contract = resolvedContract && typeof resolvedContract === 'object' ? resolvedContract : {};
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const global = globalVerdict && typeof globalVerdict === 'object'
+    ? globalVerdict
+    : (item ? resolveGlobalVerdict(item) : {});
+  const authoritativeStoryContext = storyContext && typeof storyContext === 'object'
+    ? storyContext
+    : (item && typeof buildCanonicalStoryContextForRecord === 'function'
+      ? buildCanonicalStoryContextForRecord(item, {globalVerdict:global, derivedStates:derived})
+      : null);
+  const currentPhase = String(authoritativeStoryContext && authoritativeStoryContext.currentPhase || '').trim().toLowerCase();
+  const dominantStory = String(authoritativeStoryContext && authoritativeStoryContext.dominantStory || '').trim().toLowerCase();
+  const structureState = String(derived.structureState || global.structure_state || global.structureState || '').trim().toLowerCase();
+  const structureEligibility = String(global.structure_eligibility || global.structureEligibility || '').trim().toLowerCase();
+  const setupLocationState = String(derived.setupLocationState || global.setup_location_state || global.setupLocationState || '').trim().toLowerCase();
+  const priceabilityState = String(derived.priceabilityState || global.priceability_state || global.priceabilityState || '').trim().toLowerCase();
+  const bounceState = String(derived.bounceState || global.bounce_state || global.bounceState || '').trim().toLowerCase();
+  const buyerControlState = String(authoritativeStoryContext && authoritativeStoryContext.buyerControl && authoritativeStoryContext.buyerControl.state || '').trim().toLowerCase();
+  const supportLabel = String(authoritativeStoryContext && authoritativeStoryContext.support && authoritativeStoryContext.support.label || 'support').trim() || 'support';
+  const planStatus = String(contract.planStatusKey || '').trim().toLowerCase();
+  const resolvedAuthoritativeBlockerText = [
+    authoritativeBlockerText,
+    global.main_blocker,
+    global.mainBlocker,
+    global.reason,
+    contract.blockerReason,
+    contract.reasonSummary
+  ]
+    .map(normalizeSemanticBlockerCandidate)
+    .find(Boolean) || '';
+  const blockerSummary = typeof canonicalNonChartBlockerSummary === 'function'
+    ? canonicalNonChartBlockerSummary({
+      record:item,
+      finalVerdict:verdict,
+      structureEligibility,
+      structureState,
+      setupLocationState,
+      priceabilityState,
+      bounceState,
+      planStatus,
+      viability:global.viability || '',
+      viabilityBranchId:global.viabilityBranchId || global.viability_branch_id || '',
+      setupScore:item && typeof rawSetupScoreForRecord === 'function' ? rawSetupScoreForRecord(item) : null,
+      mainBlocker:resolvedAuthoritativeBlockerText
+    })
+    : '';
+  let chartCondition = 'unknown';
+  let opportunityCondition = 'unknown';
+  let reasonKind = 'unknown';
+  let nextRequiredEvent = '';
+  let evidenceStrength = 'unknown';
+  let supportRelationship = 'unknown';
+  if(currentPhase === 'support_failed'){
+    chartCondition = 'repair';
+    opportunityCondition = 'broken';
+    reasonKind = 'repair';
+    nextRequiredEvent = 'repair';
+    supportRelationship = 'failed_support';
+    evidenceStrength = 'weak';
+  }else if(currentPhase === 'extended_from_support'){
+    chartCondition = 'extended_away_from_support';
+    opportunityCondition = 'reset_required';
+    reasonKind = 'extension';
+    nextRequiredEvent = 'reset_to_support';
+    supportRelationship = 'away_from_support';
+    evidenceStrength = 'constructive';
+  }else if(currentPhase === 'away_from_support'){
+    chartCondition = 'off_support';
+    opportunityCondition = 'reset_required';
+    reasonKind = 'extension';
+    nextRequiredEvent = 'reset_to_support';
+    supportRelationship = 'away_from_support';
+    evidenceStrength = 'constructive';
+  }else if(currentPhase === 'stalled_after_response'){
+    chartCondition = 'response_stalled';
+    opportunityCondition = 'confirmation_pending';
+    reasonKind = 'confirmation_needed';
+    nextRequiredEvent = 'follow_through';
+    supportRelationship = 'recent_support_hold';
+    evidenceStrength = 'mixed';
+  }else if(currentPhase === 'responding_from_support'){
+    chartCondition = 'support_holding';
+    opportunityCondition = verdict === 'near_entry' ? 'close_but_unconfirmed' : 'developing';
+    reasonKind = 'confirmation_needed';
+    nextRequiredEvent = buyerControlState === 'confirmed' ? 'entry_trigger' : 'buyer_control';
+    supportRelationship = 'active_support_test';
+    evidenceStrength = buyerControlState === 'confirmed' ? 'strong' : 'emerging';
+  }else if(currentPhase === 'at_support'){
+    chartCondition = 'testing_support';
+    opportunityCondition = 'developing';
+    reasonKind = 'confirmation_needed';
+    nextRequiredEvent = 'buyer_response';
+    supportRelationship = 'active_support_test';
+    evidenceStrength = 'early';
+  }else if(currentPhase === 'current_location_unresolved'){
+    chartCondition = 'unresolved';
+    opportunityCondition = 'unknown';
+    reasonKind = 'unknown';
+    nextRequiredEvent = 'clarify_support_context';
+    supportRelationship = 'unresolved';
+  }else if(dominantStory === 'healthy_trend'){
+    chartCondition = 'healthy_trend_without_pullback';
+    opportunityCondition = 'waiting_for_pullback';
+    reasonKind = 'confirmation_needed';
+    nextRequiredEvent = 'pullback_into_support';
+    evidenceStrength = 'constructive';
+  }
+  if(buyerControlState === 'confirmed' && ['responding_from_support', 'at_support'].includes(currentPhase)){
+    evidenceStrength = 'strong';
+  }
+  if(blockerSummary){
+    opportunityCondition = 'blocked';
+    reasonKind = 'blocker';
+  }else if(verdict === 'entry'){
+    opportunityCondition = 'actionable';
+    reasonKind = 'confirmation_complete';
+    nextRequiredEvent = 'execute_if_trigger_valid';
+    evidenceStrength = 'strong';
+  }else if(verdict === 'avoid' && reasonKind === 'unknown'){
+    opportunityCondition = 'broken';
+    reasonKind = chartCondition === 'repair' ? 'repair' : 'damage';
+    nextRequiredEvent = chartCondition === 'repair' ? 'repair' : 'stand_aside';
+    evidenceStrength = 'weak';
+  }
+  return {
+    finalVerdict:verdict,
+    currentPhase,
+    dominantStory,
+    supportLabel,
+    chartCondition,
+    opportunityCondition,
+    supportRelationship,
+    decisiveReason:blockerSummary || dominantStory || currentPhase || '',
+    reasonKind,
+    actionability:verdict === 'entry'
+      ? 'actionable'
+      : (blockerSummary
+        ? 'blocked'
+        : (verdict === 'near_entry'
+          ? 'near_entry'
+          : (verdict === 'avoid' ? 'avoid' : 'watch'))),
+    nextRequiredEvent,
+    evidenceStrength,
+    planCondition:planStatus || 'unknown',
+    blockerSummary,
+    storyContext:authoritativeStoryContext
+  };
+}
+
+function buildAuthoritativeDecisionProjection({
+  record = null,
+  finalVerdict = '',
+  resolvedContract = null,
+  derivedStates = null,
+  globalVerdict = null,
+  storyContext = null,
+  authoritativeBlockerText = '',
+  analysis = null
+} = {}){
+  const item = record && typeof record === 'object' ? record : null;
+  const resolveDerivedStates = typeof analysisDerivedStatesFromRecord === 'function'
+    ? analysisDerivedStatesFromRecord
+    : (() => ({}));
+  const derived = derivedStates && typeof derivedStates === 'object'
+    ? derivedStates
+    : (item ? resolveDerivedStates(item) : {});
+  const global = globalVerdict && typeof globalVerdict === 'object'
+    ? globalVerdict
+    : (item ? resolveGlobalVerdict(item) : {});
+  const contract = resolvedContract && typeof resolvedContract === 'object'
+    ? resolvedContract
+    : {};
+  const explicitAnalysis = analysis && typeof analysis === 'object'
+    ? analysis
+    : null;
+  const analysisState = item && typeof getReviewAnalysisState === 'function'
+    ? getReviewAnalysisState(item)
+    : null;
+  const normalizedAnalysis = explicitAnalysis
+    || (analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+      ? analysisState.normalizedAnalysis
+      : null);
+  const authoritativeStoryContext = storyContext && typeof storyContext === 'object'
+    ? storyContext
+    : (item && typeof buildCanonicalStoryContextForRecord === 'function'
+      ? buildCanonicalStoryContextForRecord(item, {
+        analysis:normalizedAnalysis || {},
+        globalVerdict:global,
+        derivedStates:derived
+      })
+      : null);
+  const semantics = typeof buildDecisionSemantics === 'function'
+    ? buildDecisionSemantics({
+      record:item,
+      finalVerdict,
+      resolvedContract:contract,
+      derivedStates:derived,
+      globalVerdict:global,
+      storyContext:authoritativeStoryContext,
+      authoritativeBlockerText
+    })
+    : null;
+  const safeSemantics = semantics && typeof semantics === 'object' ? semantics : null;
+  return {
+    storyContext:authoritativeStoryContext,
+    semantics:safeSemantics,
+    normalizedAnalysis:normalizedAnalysis || null,
+    canonicalVerdict:String(safeSemantics && safeSemantics.finalVerdict || normalizeGlobalVerdictKey(finalVerdict || global.final_verdict || global.finalVerdict || 'watch')).trim(),
+    currentPhase:String(safeSemantics && safeSemantics.currentPhase || '').trim(),
+    actionability:String(safeSemantics && safeSemantics.actionability || '').trim(),
+    decisiveReason:String(safeSemantics && safeSemantics.decisiveReason || '').trim(),
+    blocker:String(safeSemantics && safeSemantics.blockerSummary || '').trim(),
+    supportRelationship:String(safeSemantics && safeSemantics.supportRelationship || '').trim(),
+    opportunityCondition:String(safeSemantics && safeSemantics.opportunityCondition || '').trim(),
+    planStatus:String(safeSemantics && safeSemantics.planCondition || contract.planStatusKey || '').trim().toLowerCase() || 'unknown',
+    upgradeCondition:String(safeSemantics && safeSemantics.nextRequiredEvent || '').trim(),
+    downgradeCondition:String(safeSemantics && safeSemantics.reasonKind || '').trim()
+  };
+}
+
+function sharedDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''){
+  const verdict = normalizeGlobalVerdictKey(semantics.finalVerdict || 'watch');
+  const currentPhase = String(semantics.currentPhase || '').trim().toLowerCase();
+  const dominantStory = String(semantics.dominantStory || '').trim().toLowerCase();
+  const buyerControlState = String(semantics.storyContext && semantics.storyContext.buyerControl && semantics.storyContext.buyerControl.state || '').trim().toLowerCase();
+  if(semantics.blockerSummary) return String(semantics.blockerSummary || '').trim();
+  if(verdict === 'entry') return 'Entry - plan is valid and risk defined.';
+  if(verdict === 'avoid'){
+    if(currentPhase === 'support_failed' || dominantStory === 'failed_support_test' || dominantStory === 'structure_breaking_down'){
+      return 'Avoid - support failed and the chart needs repair.';
+    }
+    return 'Avoid - too weak or broken. Leave it alone.';
+  }
+  if(verdict === 'near_entry'){
+    if(currentPhase === 'extended_from_support') return 'Near Entry - rebound is constructive, but price is already away from support. Wait for the trigger or a reset.';
+    if(currentPhase === 'away_from_support') return 'Near Entry - trend remains constructive, but price is currently away from support. Wait for a reset.';
+    if(currentPhase === 'stalled_after_response') return 'Near Entry - buyers responded, but follow-through still needs to improve.';
+    if(currentPhase === 'responding_from_support' || currentPhase === 'at_support') return 'Near Entry - support is holding, but the trigger is still missing.';
+    if(buyerControlState === 'confirmed') return 'Near Entry - buyers are in control, but the entry trigger is still missing.';
+    return 'Near Entry - almost ready. Watch for confirmation.';
+  }
+  if(currentPhase === 'support_failed') return 'Watch - support failed. Let the chart repair.';
+  if(currentPhase === 'extended_from_support') return 'Watch - constructive rebound, but price is already away from support.';
+  if(currentPhase === 'away_from_support') return 'Watch - trend remains constructive, but price is currently away from support.';
+  if(currentPhase === 'stalled_after_response') return 'Watch - buyers responded, but follow-through stalled.';
+  if(currentPhase === 'responding_from_support') return 'Watch - support is holding, but buyers still need to prove control.';
+  if(currentPhase === 'at_support') return 'Watch - support is being tested. Wait for a real buyer response.';
+  if(currentPhase === 'current_location_unresolved') return 'Watch - support context is unresolved with current chart data.';
+  if(dominantStory === 'healthy_trend') return 'Watch - strong trend, but no usable pullback setup yet.';
+  return String(fallbackSummary || 'Watch - waiting for confirmation.').trim();
+}
+
+function reviewDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''){
+  if(typeof sharedDecisionSummaryFromSemantics === 'function'){
+    return sharedDecisionSummaryFromSemantics(semantics, fallbackSummary);
+  }
+  return String(fallbackSummary || '').trim();
+}
+
+function trackDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''){
+  const currentPhase = String(semantics.currentPhase || '').trim().toLowerCase();
+  const blockerSummary = String(semantics.blockerSummary || '').trim();
+  const genericHealthyTrendBlocker = /strong trend, but no usable pullback setup yet/i.test(blockerSummary);
+  if(genericHealthyTrendBlocker && currentPhase === 'away_from_support'){
+    return 'Watch - trend remains constructive, but price is currently away from support. Wait for a reset.';
+  }
+  if(genericHealthyTrendBlocker && currentPhase === 'extended_from_support'){
+    return 'Watch - constructive rebound, but price is already away from support. Wait for a reset.';
+  }
+  if(typeof sharedDecisionSummaryFromSemantics === 'function'){
+    return sharedDecisionSummaryFromSemantics(semantics, fallbackSummary);
+  }
+  return String(fallbackSummary || '').trim();
+}
+
+function reviewNextActionFromDecisionSemantics(semantics = {}, options = {}){
+  const safeSemantics = semantics && typeof semantics === 'object' ? semantics : {};
+  const optionBag = options && typeof options === 'object'
+    ? options
+    : {legacySemanticNextAction:options};
+  // `semantics.*` are the canonical authority for Review action guidance.
+  // `legacySemanticNextAction` and `legacySimplifiedActionLabel` are compatibility fallbacks only.
+  const legacySemanticNextAction = String(optionBag.legacySemanticNextAction || '').trim();
+  const legacySimplifiedActionLabel = String(optionBag.legacySimplifiedActionLabel || '').trim();
+  if(safeSemantics.nextRequiredEvent === 'execute_if_trigger_valid') return 'Execute only if the trigger remains valid.';
+  if(safeSemantics.nextRequiredEvent === 'repair') return 'Wait for the setup to repair before reviewing it again.';
+  if(safeSemantics.nextRequiredEvent === 'reset_to_support') return 'Wait for price to reset into support before reviewing entry quality again.';
+  if(safeSemantics.nextRequiredEvent === 'follow_through') return 'Wait for stronger follow-through before considering an entry.';
+  if(safeSemantics.nextRequiredEvent === 'entry_trigger') return 'Wait for the trigger to confirm before considering entry.';
+  if(safeSemantics.nextRequiredEvent === 'buyer_control') return 'Wait for buyers to prove control before considering an entry.';
+  if(safeSemantics.nextRequiredEvent === 'buyer_response') return 'Wait for a real buyer response before considering an entry.';
+  if(safeSemantics.nextRequiredEvent === 'pullback_into_support') return 'Wait for a usable pullback into support before considering entry.';
+  if(safeSemantics.currentPhase === 'support_failed') return 'Wait for the setup to repair before reviewing it again.';
+  if(safeSemantics.currentPhase === 'away_from_support' || safeSemantics.currentPhase === 'extended_from_support'){
+    return 'Wait for price to reset into support before reviewing entry quality again.';
+  }
+  if(safeSemantics.currentPhase === 'stalled_after_response') return 'Wait for stronger follow-through before considering an entry.';
+  const semanticBlockerText = String(safeSemantics.blockerSummary || safeSemantics.decisiveReason || '').trim();
+  const genericSemanticBlocker = /no actionable plan yet|no actionable trade yet|review setup inputs/i.test(semanticBlockerText);
+  if(safeSemantics.reasonKind === 'blocker' && semanticBlockerText && !genericSemanticBlocker){
+    return 'Review setup inputs';
+  }
+  if(legacySemanticNextAction) return legacySemanticNextAction;
+  if(legacySimplifiedActionLabel) return legacySimplifiedActionLabel;
+  return 'Review setup inputs';
+}
+
 function buildDecisionSummary({record = null, finalVerdict, displayedPlan, resolvedContract, derivedStates, globalVerdict = null, storyContext = null}){
   void displayedPlan;
   const verdict = normalizeVerdict(finalVerdict || '');
@@ -24524,31 +24981,23 @@ function buildDecisionSummary({record = null, finalVerdict, displayedPlan, resol
     || resolvedContract && (resolvedContract.blockerReason || resolvedContract.reasonSummary)
     || ''
   ).trim();
-  const blockerSummary = typeof canonicalNonChartBlockerSummary === 'function'
-    ? canonicalNonChartBlockerSummary({
+  const semantics = typeof buildDecisionSemantics === 'function'
+    ? buildDecisionSemantics({
       record:item,
       finalVerdict:verdict,
-      structureEligibility:verdictContext.structure_eligibility || verdictContext.structureEligibility || '',
-      structureState:derivedStates && derivedStates.structureState || '',
-      setupLocationState:derivedStates && derivedStates.setupLocationState || verdictContext.setup_location_state || verdictContext.setupLocationState || '',
-      priceabilityState:derivedStates && derivedStates.priceabilityState || verdictContext.priceability_state || verdictContext.priceabilityState || '',
-      bounceState:derivedStates && derivedStates.bounceState || verdictContext.bounce_state || verdictContext.bounceState || '',
-      planStatus:resolvedContract && resolvedContract.planStatusKey || '',
-      viability:verdictContext.viability || '',
-      viabilityBranchId:verdictContext.viabilityBranchId || verdictContext.viability_branch_id || '',
-      setupScore:item && typeof rawSetupScoreForRecord === 'function' ? rawSetupScoreForRecord(item) : null,
-      mainBlocker:authoritativeBlockerText
-    })
-    : '';
-  const canonicalSummary = authoritativeStoryContext
-    ? canonicalDecisionSummaryFromStoryContext({
-      finalVerdict:verdict,
+      resolvedContract,
+      derivedStates,
+      globalVerdict:verdictContext,
       storyContext:authoritativeStoryContext,
-      fallbackSummary:''
+      authoritativeBlockerText
     })
+    : null;
+  const semanticSummary = semantics
+    && (semantics.blockerSummary || authoritativeStoryContext)
+    && typeof sharedDecisionSummaryFromSemantics === 'function'
+    ? sharedDecisionSummaryFromSemantics(semantics, '')
     : '';
-  if(blockerSummary) return blockerSummary;
-  if(canonicalSummary) return canonicalSummary;
+  if(semanticSummary) return semanticSummary;
   const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
   const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
   const developingState = structuralState === 'developing' || ['developing','developing_loose','developing_clean'].includes(structureState);
@@ -29695,7 +30144,11 @@ function buildTrackLongPressContract(options = {}){
   };
   const currentTrackReasonCopy = String(
     currentTrackPresentation && (
-      currentTrackPresentation.primaryReason
+      currentTrackPresentation.trackPrimaryReason
+      || currentTrackPresentation.trackBlocker
+      || currentTrackPresentation.trackPlanSummary
+      || currentTrackPresentation.trackNextAction
+      || currentTrackPresentation.primaryReason
       || currentTrackPresentation.mainBlocker
       || currentTrackPresentation.planSummary
       || currentTrackPresentation.nextAction
@@ -31288,15 +31741,6 @@ function buildResolvedReviewDisplayModel({
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
   const realism = planRealism && typeof planRealism === 'object' ? planRealism : {};
   const analysisState = typeof getReviewAnalysisState === 'function' ? getReviewAnalysisState(item) : null;
-  const authoritativeStoryContext = typeof buildCanonicalStoryContextForRecord === 'function'
-    ? buildCanonicalStoryContextForRecord(item, {
-      analysis:analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
-        ? analysisState.normalizedAnalysis
-        : {},
-      globalVerdict:global,
-      derivedStates:derived
-    })
-    : null;
   const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
     record:item,
     simplifiedState:simplified,
@@ -31317,8 +31761,40 @@ function buildResolvedReviewDisplayModel({
       line2:'Long-press the ticker card in Track for more info.',
       rr:'Priced'
     };
-  const nextActionLabel = String(semantic.nextAction || simplified.actionLabel || '').trim() || 'Review setup inputs';
   const diagnosticsMessage = String(semantic.blocker || semantic.primaryReason || simplified.mainBlocker || simplified.planStatus || 'No actionable plan yet.').trim();
+  const decisionProjection = typeof buildAuthoritativeDecisionProjection === 'function'
+    ? buildAuthoritativeDecisionProjection({
+      record:item,
+      finalVerdict:simplified.canonicalVerdict || global.final_verdict || global.finalVerdict || 'watch',
+      resolvedContract:{planStatusKey:plan.status || ''},
+      derivedStates:derived,
+      globalVerdict:global,
+      authoritativeBlockerText:String(semantic.blocker || semantic.primaryReason || diagnosticsMessage || '').trim(),
+      analysis:analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+        ? analysisState.normalizedAnalysis
+        : null
+    })
+    : null;
+  const authoritativeStoryContext = decisionProjection && decisionProjection.storyContext
+    ? decisionProjection.storyContext
+    : (typeof buildCanonicalStoryContextForRecord === 'function'
+      ? buildCanonicalStoryContextForRecord(item, {
+        analysis:analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+          ? analysisState.normalizedAnalysis
+          : {},
+        globalVerdict:global,
+        derivedStates:derived
+      })
+      : null);
+  const decisionSemantics = decisionProjection && decisionProjection.semantics
+    ? decisionProjection.semantics
+    : null;
+  const nextActionLabel = typeof reviewNextActionFromDecisionSemantics === 'function'
+    ? reviewNextActionFromDecisionSemantics(decisionSemantics, {
+      legacySemanticNextAction:String(semantic.nextAction || '').trim(),
+      legacySimplifiedActionLabel:String(simplified.actionLabel || '').trim()
+    })
+    : (String(semantic.nextAction || simplified.actionLabel || '').trim() || 'Review setup inputs');
   const planUI = {
     showPlan:semantic.showPlanFields === true,
     showRR:semantic.showPlanMetrics === true,
@@ -31371,34 +31847,20 @@ function buildResolvedReviewDisplayModel({
         reviewTechnicalMarketLabel(item)
       ].join(' | '));
   const fallbackDecisionSummary = String(semantic.primaryReason || '').trim() || String(semantic.blocker || diagnosticsMessage || '').trim();
-  const blockerDecisionSummary = typeof canonicalNonChartBlockerSummary === 'function'
-    ? canonicalNonChartBlockerSummary({
-      record:item,
-      finalVerdict:simplified.canonicalVerdict || global.final_verdict || global.finalVerdict || 'watch',
-      structureEligibility:simplified.structureEligibility || global.structure_eligibility || global.structureEligibility || '',
-      structureState:simplified.structureState || derived.structureState || '',
-      setupLocationState:derived.setupLocationState || global.setup_location_state || global.setupLocationState || '',
-      priceabilityState:derived.priceabilityState || global.priceability_state || global.priceabilityState || '',
-      bounceState:simplified.bounceState || derived.bounceState || global.bounce_state || global.bounceState || '',
-      planStatus:plan.status || '',
-      viability:global.viability || '',
-      viabilityBranchId:global.viabilityBranchId || global.viability_branch_id || '',
-      setupScore:typeof rawSetupScoreForRecord === 'function' ? rawSetupScoreForRecord(item) : null,
-      mainBlocker:fallbackDecisionSummary
-    })
+  const semanticDecisionSummary = decisionSemantics && typeof reviewDecisionSummaryFromSemantics === 'function'
+    ? String(reviewDecisionSummaryFromSemantics(decisionSemantics, fallbackDecisionSummary) || '').trim()
     : '';
-  const chartStoryDecisionSummary = authoritativeStoryContext && typeof canonicalDecisionSummaryFromStoryContext === 'function'
-    ? canonicalDecisionSummaryFromStoryContext({
+  const confirmationOnlyFallback = /needs stronger confirmation|still forming|buyers have not taken control yet/i.test(fallbackDecisionSummary);
+  const canonicalStorySummary = confirmationOnlyFallback
+    && authoritativeStoryContext
+    && typeof canonicalDecisionSummaryFromStoryContext === 'function'
+    ? String(canonicalDecisionSummaryFromStoryContext({
       finalVerdict:simplified.canonicalVerdict || global.final_verdict || global.finalVerdict || 'watch',
       storyContext:authoritativeStoryContext,
-      fallbackSummary:''
-    })
+      fallbackSummary:fallbackDecisionSummary
+    }) || '').trim()
     : '';
-  const decisionSummary = String(
-    blockerDecisionSummary
-    || chartStoryDecisionSummary
-    || fallbackDecisionSummary
-  ).trim();
+  const decisionSummary = semanticDecisionSummary || canonicalStorySummary || fallbackDecisionSummary;
   const compactTradeStatusLine = (supportTestCopy && !pricedButNotReady)
     ? supportTestCopy.tradeStatus
     : String(rawTradeStatus.line1 || diagnosticsMessage || 'No actionable trade yet.').trim();
@@ -31480,6 +31942,8 @@ function buildResolvedReviewDisplayModel({
     technicalContextLine,
     decisionSummary,
     storyContext:authoritativeStoryContext,
+    decisionProjection,
+    decisionSemantics,
     pullbackBounceDisplay,
     planSummary,
     explanatoryReason,
@@ -31786,9 +32250,11 @@ function buildCanonicalReviewPresentationModel(record, options = {}){
     decisionSummary:resolvedReviewDisplay.decisionSummary,
     technicalContextLine:resolvedReviewDisplay.technicalContextLine,
     nextActionLabel:String(
-      projectionActionGuidance
-      || (reviewRenderModel && reviewRenderModel.nextAction)
-      || (entryReady ? 'Execute only if the trigger remains valid.' : resolvedReviewDisplay.nextActionLabel)
+      projectionEntryDisplayOverride
+        ? (projectionActionGuidance || 'Execute only if the trigger remains valid.')
+        : (entryReady
+          ? ((reviewRenderModel && reviewRenderModel.nextAction) || 'Execute only if the trigger remains valid.')
+          : (resolvedReviewDisplay.nextActionLabel || (reviewRenderModel && reviewRenderModel.nextAction) || 'Review setup inputs'))
     ).trim(),
     planSummary:resolvedReviewDisplay.planSummary,
     contractFingerprint:String(reviewRenderModel && reviewRenderModel.contractFingerprint || '')
@@ -39554,16 +40020,18 @@ function buildTrackProjectionSnapshotFromPersistedPresentation(record, context =
     resolvedSectionKey,
     decisionSummary:String(
       canonicalTrackRenderModel && (canonicalTrackRenderModel.headline || canonicalTrackRenderModel.statusText)
+      || sharedPresentation.trackDecisionSummary
       || sharedPresentation.headline
       || sharedPresentation.statusText
-      || snapshotPresentation && (snapshotPresentation.headline || snapshotPresentation.statusText)
+      || snapshotPresentation && (snapshotPresentation.trackDecisionSummary || snapshotPresentation.headline || snapshotPresentation.statusText)
       || ''
     ).trim(),
     actionGuidance:String(
       canonicalTrackRenderModel && (canonicalTrackRenderModel.nextAction || canonicalTrackRenderModel.actionLabel)
+      || sharedPresentation.trackNextAction
       || sharedPresentation.nextAction
       || sharedPresentation.actionLabel
-      || snapshotPresentation && (snapshotPresentation.nextAction || snapshotPresentation.actionLabel)
+      || snapshotPresentation && (snapshotPresentation.trackNextAction || snapshotPresentation.nextAction || snapshotPresentation.actionLabel)
       || ''
     ).trim(),
     persistedPresentationAvailable:persistedSharedPresentation != null,
@@ -39642,6 +40110,20 @@ function evaluatePersistedReviewProjectionValidity(record, snapshot, context = '
     reason:'persisted_review_projection_validation'
   })) || {};
   const reviewResolverVerdict = normalizeGlobalVerdictKey(projectionSuppressedReviewState.canonicalVerdict || '');
+  const validationAnalysisState = typeof getReviewAnalysisState === 'function'
+    ? getReviewAnalysisState(item)
+    : null;
+  const validationStoryContext = typeof buildCanonicalStoryContextForRecord === 'function'
+    ? buildCanonicalStoryContextForRecord(item, {
+      analysis:validationAnalysisState && validationAnalysisState.normalizedAnalysis && typeof validationAnalysisState.normalizedAnalysis === 'object'
+        ? validationAnalysisState.normalizedAnalysis
+        : {},
+      globalVerdict,
+      derivedStates
+    })
+    : null;
+  const validationCurrentPhase = String(validationStoryContext && validationStoryContext.currentPhase || '').trim().toLowerCase();
+  const validationDominantStory = String(validationStoryContext && validationStoryContext.dominantStory || '').trim().toLowerCase();
   const effectivePlan = effectivePlanForRecord(item, {allowScannerFallback:true});
   let displayedPlan = applySetupConfirmationPlanGate(
     item,
@@ -39687,6 +40169,12 @@ function evaluatePersistedReviewProjectionValidity(record, snapshot, context = '
   }
   if(normalizeGlobalVerdictKey(globalVerdict.final_verdict || '') === 'avoid'){
     return {valid:false, reason:'fresh_canonical_avoid', precedence, reviewResolverVerdict, reviewVerdictFallback};
+  }
+  if(
+    validationCurrentPhase === 'support_failed'
+    || ['failed_support_test', 'structure_breaking_down'].includes(validationDominantStory)
+  ){
+    return {valid:false, reason:'failed_support_story', precedence, reviewResolverVerdict, reviewVerdictFallback};
   }
   if(['broken','dead','failed'].includes(structureState) || structureEligibility === 'broken'){
     return {valid:false, reason:'structural_damage', precedence, reviewResolverVerdict, reviewVerdictFallback};

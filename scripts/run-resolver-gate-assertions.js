@@ -100,6 +100,7 @@ function parseJsonPrefix(output){
 }
 
 function runScanPresentationAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const scannerView = sandbox.window.ScannerView;
   const scannerResultsSupport = sandbox.window.ScannerResultsSupport;
   if(!scannerView || typeof scannerView.scanPresentationForView !== 'function'){
@@ -4384,6 +4385,7 @@ function runSimplifiedPipelineAssertions(){
     throw new Error('LNG-style alive extended unpriceable Watch must commit the weak-watch diminishing trace before monitor fallback.');
   }
 
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
   const weakWatchReasonDeps = {
     resolveGlobalVerdict(){
       return {
@@ -4420,6 +4422,27 @@ function runSimplifiedPipelineAssertions(){
     normalizeGlobalVerdictKey:resolverCore.normalizeGlobalVerdictKey,
     normalizeVerdict:resolverCore.normalizeVerdict
   };
+  const scanSemanticSandbox = {
+    console,
+    normalizeGlobalVerdictKey:resolverCore.normalizeGlobalVerdictKey,
+    resolveGlobalVerdict(record){
+      return weakWatchReasonDeps.resolveGlobalVerdict(record);
+    },
+    rawSetupScoreForRecord(record){
+      const raw = Number(record && record.rawScore);
+      return Number.isFinite(raw) ? raw : 0;
+    }
+  };
+  vm.createContext(scanSemanticSandbox);
+  [
+    'canonicalNonChartBlockerSummary',
+    'buildDecisionSemantics',
+    'sharedDecisionSummaryFromSemantics'
+  ].forEach(functionName => {
+    vm.runInContext(extractFunctionSource(appSource, functionName), scanSemanticSandbox, {filename:`app.js#${functionName}`});
+  });
+  weakWatchReasonDeps.buildDecisionSemantics = scanSemanticSandbox.buildDecisionSemantics;
+  weakWatchReasonDeps.sharedDecisionSummaryFromSemantics = scanSemanticSandbox.sharedDecisionSummaryFromSemantics;
 
   const bounceAttemptOnlyVisual = resolverPresentation.resolveVisualState({
     ticker:'ATMBR',
@@ -4665,6 +4688,60 @@ function runSimplifiedPipelineAssertions(){
   if(canonicalConfirmationVisual.canonicalVerdict !== baselineConfirmationVisual.canonicalVerdict
     || canonicalConfirmationVisual.visualBucket !== baselineConfirmationVisual.visualBucket){
     throw new Error('Card summary fixes must not alter verdict or visual bucket.');
+  }
+
+  const awayFromSupportVisual = resolverPresentation.resolveVisualState({
+    ticker:'AWAYSCAN',
+    rawScore:7,
+    plan:{},
+    marketData:{price:104.8, ma20:103.9, ma50:100.4, ma200:91.7, currency:'USD'}
+  }, 'scanner', {
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      stabilisationState:'clear',
+      bounceState:'attempt',
+      pullbackZone:'off_level'
+    },
+    effectivePlan:{},
+    displayedPlan:{status:'valid'},
+    resolvedContract:{
+      finalVerdict:'watch',
+      final_verdict:'watch',
+      final_verdict_rendered:'watch',
+      planStatusKey:'valid'
+    },
+    setupScore:7
+  }, {
+    ...weakWatchReasonDeps,
+    resolveGlobalVerdict(){
+      return {
+        structure_eligibility:'alive',
+        viability:'watchlist',
+        viabilityBranchId:'alive_watchlist',
+        setup_location_state:'off_level',
+        priceability_state:'priceable',
+        final_verdict:'watch',
+        main_blocker:''
+      };
+    },
+    buildCanonicalStoryContextForRecord(){
+      return {
+        currentPhase:'away_from_support',
+        support:{label:'20MA'},
+        buyerControl:{state:'none'}
+      };
+    }
+  });
+  if(String(awayFromSupportVisual.decision_summary || '').trim() !== 'Watch - trend remains constructive, but price is currently away from support.'){
+    throw new Error('Scanner Watch summary must use away-from-support caution when canonical phase says price is off support.');
+  }
+  if(/setup quality fading|chart needs to stabilise|buyers are failing|developing toward entry|no pullback/i.test(String(awayFromSupportVisual.decision_summary || ''))){
+    throw new Error('Scanner away-from-support Watch summary must avoid synthetic negative language.');
+  }
+  if(awayFromSupportVisual.canonicalVerdict !== 'watch' || awayFromSupportVisual.visualBucket !== 'monitor'){
+    throw new Error('Scanner away-from-support summary migration must not alter verdict or visual bucket.');
   }
 
   const missingPlanConstructiveNoneVisual = resolverPresentation.resolveVisualState({
@@ -10227,11 +10304,104 @@ function runReviewPricedButNotReadyAssertions(){
     'canonicalReviewTechnicalContextLineFromStoryContext',
     'canonicalDecisionSummaryFromStoryContext',
     'canonicalNonChartBlockerSummary',
+    'buildDecisionSemantics',
+    'sharedDecisionSummaryFromSemantics',
+    'reviewDecisionSummaryFromSemantics',
+    'reviewNextActionFromDecisionSemantics',
     'buildDecisionSummary',
     'buildResolvedReviewDisplayModel'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});
   });
+  const blockedSemantics = sandbox.buildDecisionSemantics({
+    record:{ticker:'SEMPLAN', rawScore:7},
+    finalVerdict:'watch',
+    resolvedContract:{planStatusKey:'missing', blockerReason:'No valid invalidation level is available.'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'responding_from_support',
+      support:{label:'20MA'},
+      buyerControl:{state:'emerging'}
+    },
+    authoritativeBlockerText:'No valid invalidation level is available.'
+  });
+  if(blockedSemantics.reasonKind !== 'blocker' || blockedSemantics.actionability !== 'blocked' || blockedSemantics.planCondition !== 'missing'){
+    throw new Error('Decision semantics must preserve blocker-first actionability for missing-plan watch states.');
+  }
+  if(blockedSemantics.currentPhase !== 'responding_from_support' || blockedSemantics.supportRelationship !== 'active_support_test'){
+    throw new Error('Decision semantics must preserve canonical phase and support relationship for support-holding states.');
+  }
+  if(String(sandbox.sharedDecisionSummaryFromSemantics(blockedSemantics, '') || '').trim() !== 'No valid invalidation level is available.'){
+    throw new Error('Shared decision summaries must preserve blocker-first copy from the semantic layer.');
+  }
+  const awaySemantics = sandbox.buildDecisionSemantics({
+    record:{ticker:'SEMAWAY', rawScore:7},
+    finalVerdict:'watch',
+    resolvedContract:{planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'attempt'
+    },
+    globalVerdict:{
+      final_verdict:'watch',
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    storyContext:{
+      currentPhase:'away_from_support',
+      support:{label:'20MA'},
+      buyerControl:{state:'none'}
+    }
+  });
+  if(awaySemantics.reasonKind !== 'extension' || awaySemantics.nextRequiredEvent !== 'reset_to_support' || awaySemantics.opportunityCondition !== 'reset_required'){
+    throw new Error('Decision semantics must classify away-from-support watch states as reset-required extensions.');
+  }
+  const awaySummary = String(sandbox.reviewDecisionSummaryFromSemantics(awaySemantics, '') || '').trim();
+  if(awaySummary !== 'Watch - trend remains constructive, but price is currently away from support.'){
+    throw new Error('Review summaries must use the semantic away-from-support caution.');
+  }
+  if(/setup quality fading|chart needs to stabilise|buyers are failing|developing toward entry|no pullback/i.test(awaySummary)){
+    throw new Error('Away-from-support semantic summaries must avoid synthetic negative language.');
+  }
+  const entrySemantics = sandbox.buildDecisionSemantics({
+    record:{ticker:'SEMENTRY', rawScore:8},
+    finalVerdict:'entry',
+    resolvedContract:{planStatusKey:'valid'},
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'confirmed'
+    },
+    globalVerdict:{
+      final_verdict:'entry',
+      structure_eligibility:'alive',
+      viability:'accept',
+      viabilityBranchId:'entry_ready'
+    },
+    storyContext:{
+      currentPhase:'responding_from_support',
+      support:{label:'20MA'},
+      buyerControl:{state:'confirmed'}
+    }
+  });
+  if(entrySemantics.actionability !== 'actionable' || entrySemantics.nextRequiredEvent !== 'execute_if_trigger_valid' || entrySemantics.evidenceStrength !== 'strong'){
+    throw new Error('Decision semantics must preserve actionable Entry semantics without recalculating verdict authority.');
+  }
   const semantic = sandbox.buildReviewSemanticStatus({
     simplifiedState:{
       canonicalVerdict:'watch',
@@ -11181,6 +11351,9 @@ function runCumulativePenaltyDisplayAssertions(){
     'warningStateFromInputs',
     'deriveDisplaySetupScore',
     'isAccepted50MaSupportTestDisplayState',
+    'buildDecisionSemantics',
+    'reviewDecisionSummaryFromSemantics',
+    'reviewNextActionFromDecisionSemantics',
     'buildResolvedReviewDisplayModel'
   ].forEach(functionName => {
     vm.runInContext(extractFunctionSource(appSource, functionName), sandbox, {filename:`app.js#${functionName}`});

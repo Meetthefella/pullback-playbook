@@ -320,6 +320,32 @@
     const latePullbackState = String(options && options.latePullbackState || '').toLowerCase();
     const mainBlocker = String(options && options.mainBlocker || '').trim();
     const hasBlockingPlanStatus = ['invalid','missing','rebuild_required','too_wide'].includes(planStatus);
+    const semanticSummary = typeof deps.buildDecisionSemantics === 'function'
+      && typeof deps.sharedDecisionSummaryFromSemantics === 'function'
+      && (storyContext || mainBlocker)
+      ? String(deps.sharedDecisionSummaryFromSemantics(deps.buildDecisionSemantics({
+        record:setupScore !== null ? {rawScore:setupScore} : null,
+        finalVerdict:verdict,
+        resolvedContract:{planStatusKey:planStatus},
+        derivedStates:{
+          structureState,
+          setupLocationState,
+          priceabilityState,
+          bounceState
+        },
+        globalVerdict:{
+          final_verdict:verdict,
+          structure_eligibility:structureEligibility,
+          viability,
+          viabilityBranchId,
+          setup_location_state:setupLocationState,
+          priceability_state:priceabilityState,
+          bounce_state:bounceState
+        },
+        storyContext,
+        authoritativeBlockerText:mainBlocker
+      }), '') || '').trim()
+      : '';
     const aliveStructure = structureEligibility === 'alive'
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const constructiveWaiting = aliveStructure
@@ -345,9 +371,9 @@
     if(priceabilityState === 'unpriceable') return 'Watch - price is too extended to price reliably.';
     if(viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5)) return 'Watch - setup quality has slipped below useful watchlist quality.';
     if(hasBlockingPlanStatus && mainBlocker) return mainBlocker;
+    if(semanticSummary) return semanticSummary;
     if(structureEligibility === 'damaged') return 'Watch - structure weakening.';
     if(structureEligibility === 'messy') return 'Watch - structure still alive, but messy.';
-    if(canonicalSummary) return canonicalSummary;
     if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
     return 'Watch - waiting for confirmation.';
   }

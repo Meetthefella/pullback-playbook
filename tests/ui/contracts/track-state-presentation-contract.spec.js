@@ -101,9 +101,13 @@ async function seedScenario(page, scenario){
         setup_location_state:seed.setupLocationState,
         priceability_state:seed.priceabilityState,
         structure_state:seed.structureState,
+        structure_eligibility:seed.structureEligibility,
         stabilisation_state:seed.stabilisationState,
         bounce_state:seed.bounceState,
         volume_state:seed.volumeState,
+        support_context:seed.supportContext || '',
+        support_test_state:seed.supportTestState || '',
+        buyer_control_state:seed.buyerControlState || '',
         candle_evidence_reclaim_range_meaningful:seed.reclaimRangeMeaningful === true ? 'yes' : 'no',
         candle_evidence_reclaimed_prior_day_high:seed.reclaimedPriorDayHigh === true ? 'yes' : 'no',
         has_clear_invalidation_level:seed.planStatus === 'valid' ? 'yes' : 'no',
@@ -120,7 +124,10 @@ async function seedScenario(page, scenario){
     record.scan.summary = seed.scanSummary;
     record.review.analysisState = {
       normalized:{
-        coach_summary:seed.coachSummary
+        coach_summary:seed.coachSummary,
+        ...(seed.normalizedAnalysis && typeof seed.normalizedAnalysis === 'object'
+          ? seed.normalizedAnalysis
+          : {})
       }
     };
     record.review.manualReview = {
@@ -304,6 +311,257 @@ function nearEntryScenario(){
   };
 }
 
+function awayFromSupportScenario(){
+  return {
+    ticker:'AWAY',
+    companyName:'Away From Support Plc',
+    canonicalVerdict:'watch',
+    visualBucket:'monitor',
+    badgeLabel:'Watch',
+    actionLabel:'Wait for a reset into support before considering entry again.',
+    scanVerdictLabel:'Watch',
+    scanScore:7,
+    scanSummary:'Trend remains constructive, but price is already away from support.',
+    coachSummary:'Constructive rebound, but the opportunity has already moved away from support.',
+    price:72.4,
+    previousClose:71.8,
+    ma20:67.1,
+    ma50:63.9,
+    ma200:58.2,
+    rsi:66.4,
+    volume:2410000,
+    avgVolume:1980000,
+    structureState:'strong',
+    structureEligibility:'alive',
+    setupLocationState:'off_level',
+    pullbackZone:'left_support_zone',
+    priceabilityState:'priceable',
+    bounceState:'confirmed',
+    stabilisationState:'clear',
+    volumeState:'supportive',
+    trendState:'strong',
+    strongBullishReversal:true,
+    strongBullishContinuation:true,
+    reclaimAttempt:true,
+    reclaimsLevel:true,
+    reclaimRangeMeaningful:true,
+    reclaimedPriorDayHigh:true,
+    entry:73.2,
+    stop:67.4,
+    target:86.0,
+    planStatus:'valid',
+    riskStatus:'fits_risk',
+    tradeability:'tradable',
+    triggerState:'waiting_for_trigger',
+    scannerResolvedRR:2.2,
+    planStamped:true
+  };
+}
+
+function supportFailedScenario(){
+  return {
+    ticker:'FAILR',
+    companyName:'Failed Support Plc',
+    canonicalVerdict:'avoid',
+    visualBucket:'avoid',
+    badgeLabel:'Avoid',
+    actionLabel:'Wait for stronger confirmation before considering entry.',
+    scanVerdictLabel:'Avoid',
+    scanScore:3,
+    scanSummary:'Support failed and the setup needs repair.',
+    coachSummary:'The prior support test failed and buyers lost control.',
+    price:47.2,
+    previousClose:49.6,
+    ma20:50.8,
+    ma50:52.1,
+    ma200:58.4,
+    rsi:38.2,
+    volume:3180000,
+    avgVolume:2010000,
+    structureState:'weakening',
+    structureEligibility:'damaged',
+    setupLocationState:'lost_support',
+    pullbackZone:'below_support',
+    priceabilityState:'unpriceable',
+    bounceState:'failed',
+    supportContext:'20ma_support',
+    supportTestState:'failed',
+    buyerControlState:'none',
+    stabilisationState:'none',
+    volumeState:'heavy_distribution',
+    trendState:'weakening',
+    entry:'',
+    stop:'',
+    target:'',
+    planStatus:'missing',
+    riskStatus:'plan_missing',
+    tradeability:'unpriceable',
+    triggerState:'',
+    scannerResolvedRR:'',
+    planStamped:false,
+    normalizedAnalysis:{
+      canonicalValues:{
+        price:47.2,
+        ma20:50.8,
+        ma50:52.1,
+        ma200:58.4
+      },
+      trustedMarketContext:{
+        recentCandleSequence:[
+          {date:'2026-06-27', open:49.8, high:50.1, low:46.8, close:47.2, volume:3180000},
+          {date:'2026-06-26', open:48.4, high:50.0, low:48.1, close:49.6, volume:2640000},
+          {date:'2026-06-25', open:50.7, high:51.1, low:48.6, close:48.8, volume:2410000}
+        ]
+      }
+    }
+  };
+}
+
+async function extractSemanticAgreement(page, ticker){
+  return page.evaluate(({ticker}) => {
+    const record = getTickerRecord(ticker);
+    const globalVerdict = resolveGlobalVerdict(record);
+    const reviewSimplified = resolveSimplifiedStateForSurface(record, 'review', {
+      log:false,
+      source:'track_state_semantic_contract',
+      reason:'track_state_semantic_contract'
+    });
+    const trackSimplified = resolveSimplifiedStateForSurface(record, 'track', {
+      log:false,
+      source:'track_state_semantic_contract',
+      reason:'track_state_semantic_contract'
+    });
+    const derivedStates = analysisDerivedStatesFromRecord(record);
+    const displayedPlan = deriveCurrentPlanState(
+      record.plan && record.plan.entry,
+      record.plan && record.plan.stop,
+      record.plan && record.plan.firstTarget,
+      record.marketData && record.marketData.currency
+    );
+    const resolvedVerdict = reviewSimplified.canonicalVerdict || globalVerdict.final_verdict || globalVerdict.finalVerdict || 'watch';
+    const rrValue = Number.isFinite(displayedPlan && displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
+      ? Number(displayedPlan.rewardRisk.rrRatio)
+      : null;
+    const reviewSemanticStatus = buildReviewSemanticStatus({
+      record,
+      simplifiedState:reviewSimplified,
+      globalVerdict,
+      derivedStates,
+      displayedPlan,
+      planRealism:{raw_rr:rrValue, realistic_rr:rrValue}
+    });
+    const reviewDisplay = buildResolvedReviewDisplayModel({
+      record,
+      simplifiedState:reviewSimplified,
+      globalVerdict,
+      reviewSemanticStatus,
+      derivedStates,
+      displayedPlan,
+      planRealism:{raw_rr:rrValue, realistic_rr:rrValue}
+    });
+    const trackPresentation = buildSharedReviewTrackPresentation(record, {
+      surface:'track',
+      simplifiedState:trackSimplified,
+      lifecycleSnapshot:watchlistLifecycleSnapshot(record),
+      globalVerdict,
+      source:'track_state_semantic_contract',
+      reason:'track_state_semantic_contract'
+    });
+    const trackDiagnostics = buildTrackDiagnosticSnapshot(record);
+    const reviewProjection = reviewDisplay && reviewDisplay.decisionProjection ? reviewDisplay.decisionProjection : null;
+    const trackProjection = trackPresentation && trackPresentation.trackSemanticProjection ? trackPresentation.trackSemanticProjection : null;
+    return {
+      reviewProjection,
+      trackProjection,
+      diagnosticsSemantics:trackDiagnostics && trackDiagnostics.semantics ? trackDiagnostics.semantics : null,
+      reviewDecisionSummary:String(reviewDisplay && reviewDisplay.decisionSummary || ''),
+      trackDecisionSummary:String(trackPresentation && trackPresentation.trackDecisionSummary || ''),
+      trackPrimaryReason:String(trackPresentation && trackPresentation.trackPrimaryReason || ''),
+      trackNextAction:String(trackPresentation && trackPresentation.trackNextAction || '')
+    };
+  }, {ticker});
+}
+
+async function resolveReviewActionConflict(page, {
+  ticker,
+  verdict = 'watch',
+  globalVerdict = {},
+  simplifiedState = {},
+  reviewSemanticStatus = {},
+  derivedStates = {},
+  displayedPlan = {},
+  planRealism = {},
+  analysisState = null,
+  storyContextOverride = null
+}){
+  return page.evaluate(payload => {
+    const record = {
+      ticker:payload.ticker,
+      marketData:{price:55, currency:'USD'},
+      review:{},
+      setup:{},
+      plan:{},
+      watchlist:{}
+    };
+    if(payload.analysisState){
+      record.review.analysisState = payload.analysisState;
+    }
+    const global = {
+      final_verdict:payload.verdict,
+      ...payload.globalVerdict
+    };
+    const simplified = {
+      canonicalVerdict:payload.verdict,
+      ...payload.simplifiedState
+    };
+    const originalBuildCanonicalStoryContextForRecord = typeof buildCanonicalStoryContextForRecord === 'function'
+      ? buildCanonicalStoryContextForRecord
+      : null;
+    if(payload.storyContextOverride){
+      globalThis.buildCanonicalStoryContextForRecord = function(){
+        return payload.storyContextOverride;
+      };
+    }
+    let resolved = null;
+    try{
+      resolved = buildResolvedReviewDisplayModel({
+        record,
+        simplifiedState:simplified,
+        globalVerdict:global,
+        reviewSemanticStatus:payload.reviewSemanticStatus,
+        derivedStates:payload.derivedStates,
+        displayedPlan:payload.displayedPlan,
+        planRealism:payload.planRealism
+      });
+    }finally{
+      if(payload.storyContextOverride){
+        if(originalBuildCanonicalStoryContextForRecord){
+          globalThis.buildCanonicalStoryContextForRecord = originalBuildCanonicalStoryContextForRecord;
+        }else{
+          delete globalThis.buildCanonicalStoryContextForRecord;
+        }
+      }
+    }
+    return {
+      nextActionLabel:String(resolved.nextActionLabel || ''),
+      decisionSummary:String(resolved.decisionSummary || ''),
+      storyContext:resolved.storyContext || null,
+      decisionProjection:resolved.decisionProjection || null
+    };
+  }, {
+    ticker,
+    verdict,
+    globalVerdict,
+    simplifiedState,
+    reviewSemanticStatus,
+    derivedStates,
+    displayedPlan,
+    planRealism,
+    analysisState,
+    storyContextOverride
+  });
+}
+
 test('canonical Entry uses a neutral tracked section heading and consistent review/track RR copy', async ({page}) => {
   await bootApp(page);
   await seedScenario(page, entryScenario());
@@ -380,6 +638,45 @@ test('canonical Near Entry stays distinct from Entry', async ({page}) => {
 
   expect(entryPanelText).not.toContain('Status: Entry Ready');
   expect(entryPanelText).not.toContain('This setup is Entry because');
+});
+
+test('Review and Track may differ in wording but agree on the full authoritative semantic projection', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+
+  const result = await extractSemanticAgreement(page, 'WATC');
+
+  expect(result.reviewDecisionSummary).toContain('Watch');
+  expect(result.trackDecisionSummary).toContain('Watch');
+  expect(result.reviewDecisionSummary).not.toBe('');
+  expect(result.trackDecisionSummary).not.toBe('');
+  expect(result.trackPrimaryReason).not.toBe('');
+  expect(result.trackNextAction).not.toBe('');
+  expect(result.reviewProjection).toMatchObject({
+    canonicalVerdict:'watch',
+    currentPhase:result.trackProjection.currentPhase,
+    actionability:'blocked',
+    decisiveReason:result.trackProjection.decisiveReason,
+    blocker:result.trackProjection.blocker,
+    supportRelationship:result.trackProjection.supportRelationship,
+    opportunityCondition:result.trackProjection.opportunityCondition,
+    planStatus:result.trackProjection.planStatus
+  });
+  expect(result.trackProjection).toMatchObject({
+    canonicalVerdict:'watch',
+    actionability:'blocked'
+  });
+  expect(result.diagnosticsSemantics).toMatchObject({
+    canonicalVerdict:result.trackProjection.canonicalVerdict,
+    currentPhase:result.trackProjection.currentPhase,
+    actionability:result.trackProjection.actionability,
+    decisiveReason:result.trackProjection.decisiveReason,
+    blocker:result.trackProjection.blocker,
+    supportRelationship:result.trackProjection.supportRelationship,
+    opportunityCondition:result.trackProjection.opportunityCondition,
+    planStatus:result.trackProjection.planStatus
+  });
+  expect(result.diagnosticsSemantics.authoritySource).toBe('canonical_semantic_projection');
 });
 
 test('constructive weak-RR Watch keeps the specific nearby-resistance explanation in Review', async ({page}) => {
@@ -490,6 +787,595 @@ test('constructive weak-RR Watch keeps the specific nearby-resistance explanatio
   expect(combinedText).toMatch(/reward-to-risk is still too weak|not good enough yet/i);
   expect(combinedText).not.toMatch(/The app knows the maths, but the trade isn't ready/i);
   expect(combinedText).not.toMatch(/Long-press the ticker card in Track for more info/i);
+});
+
+test('Review next action uses semantic reset guidance before conflicting legacy confirmation labels', async ({page}) => {
+  await bootApp(page);
+  const result = await resolveReviewActionConflict(page, {
+    ticker:'RSET',
+    verdict:'watch',
+    globalVerdict:{
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    simplifiedState:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      actionLabel:'Wait for stronger confirmation before considering entry.'
+    },
+    reviewSemanticStatus:{
+      nextAction:'Wait for stronger confirmation before considering entry.',
+      primaryReason:'Legacy confirmation guidance should not win.',
+      blocker:'Legacy confirmation guidance should not win.'
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'confirmed',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'valid'},
+    planRealism:{raw_rr:2.3},
+    storyContextOverride:{
+      structure:{state:'strong'},
+      support:{label:'20MA'},
+      buyerResponse:{semantic:'response_present'},
+      buyerControl:{state:'confirmed'},
+      confirmation:{state:'follow_through_confirmed'},
+      volume:{state:'supportive'},
+      currentPhase:'away_from_support'
+    }
+  });
+
+  expect(result.decisionProjection.currentPhase).toBe('away_from_support');
+  expect(result.nextActionLabel).toMatch(/reset into support|usable pullback into support/i);
+  expect(result.nextActionLabel).not.toMatch(/stronger confirmation|stabilise|review again later/i);
+});
+
+test('Review next action uses failed-support guidance before constructive legacy watch labels', async ({page}) => {
+  await bootApp(page);
+  const result = await resolveReviewActionConflict(page, {
+    ticker:'FAIL',
+    verdict:'watch',
+    globalVerdict:{
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    simplifiedState:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      actionLabel:'Wait for stronger confirmation before considering entry.'
+    },
+    reviewSemanticStatus:{
+      nextAction:'Wait for stronger confirmation before considering entry.',
+      primaryReason:'Legacy watch guidance should not win.',
+      blocker:'Legacy watch guidance should not win.'
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'attempt',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'valid'},
+    planRealism:{raw_rr:2},
+    storyContextOverride:{
+      structure:{state:'strong'},
+      support:{label:'20MA'},
+      buyerResponse:{semantic:'response_failed'},
+      buyerControl:{state:'none'},
+      confirmation:{state:'follow_through_unknown'},
+      volume:{state:'supportive'},
+      currentPhase:'support_failed'
+    }
+  });
+
+  expect(result.decisionProjection.currentPhase).toBe('support_failed');
+  expect(result.nextActionLabel).toMatch(/repair|reclaim|avoid/i);
+  expect(result.nextActionLabel).not.toMatch(/stronger confirmation|buyers to prove control/i);
+});
+
+test('Review next action uses renewed follow-through guidance before initial confirmation labels', async ({page}) => {
+  await bootApp(page);
+  const result = await resolveReviewActionConflict(page, {
+    ticker:'STALL',
+    verdict:'near_entry',
+    globalVerdict:{
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    simplifiedState:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      actionLabel:'Wait for buyers to prove control before considering an entry.'
+    },
+    reviewSemanticStatus:{
+      nextAction:'Wait for buyers to prove control before considering an entry.',
+      primaryReason:'Legacy initial confirmation guidance should not win.',
+      blocker:'Legacy initial confirmation guidance should not win.'
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'near_20ma',
+      priceabilityState:'priceable',
+      bounceState:'confirmed',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'valid'},
+    planRealism:{raw_rr:2.4},
+    storyContextOverride:{
+      structure:{state:'strong'},
+      support:{label:'20MA'},
+      buyerResponse:{semantic:'response_present'},
+      buyerControl:{state:'confirmed'},
+      confirmation:{state:'follow_through_unconfirmed'},
+      volume:{state:'supportive'},
+      currentPhase:'stalled_after_response'
+    }
+  });
+
+  expect(result.decisionProjection.currentPhase).toBe('stalled_after_response');
+  expect(result.nextActionLabel).toMatch(/follow-through|stronger follow-through/i);
+  expect(result.nextActionLabel).not.toMatch(/buyers to prove control|real buyer response/i);
+});
+
+test('Review next action keeps legacy fallback when semantic action is unknown', async ({page}) => {
+  await bootApp(page);
+  const result = await page.evaluate(() => ({
+    semanticFallback:reviewNextActionFromDecisionSemantics({}, {
+      legacySemanticNextAction:'Legacy semantic fallback should survive.',
+      legacySimplifiedActionLabel:'Legacy simplified fallback should not be needed.'
+    }),
+    simplifiedFallback:reviewNextActionFromDecisionSemantics({}, {
+      legacySemanticNextAction:'',
+      legacySimplifiedActionLabel:'Legacy simplified fallback should survive.'
+    }),
+    genericFallback:reviewNextActionFromDecisionSemantics({}, {
+      legacySemanticNextAction:'',
+      legacySimplifiedActionLabel:''
+    })
+  }));
+
+  expect(result.semanticFallback).toBe('Legacy semantic fallback should survive.');
+  expect(result.simplifiedFallback).toBe('Legacy simplified fallback should survive.');
+  expect(result.genericFallback).toBe('Review setup inputs');
+});
+
+test('Review away-from-support semantic action outranks stale reviewSemanticStatus.nextAction', async ({page}) => {
+  await bootApp(page);
+  const result = await resolveReviewActionConflict(page, {
+    ticker:'AWAY',
+    verdict:'watch',
+    globalVerdict:{
+      structure_eligibility:'alive',
+      viability:'watchlist',
+      viabilityBranchId:'alive_watchlist'
+    },
+    simplifiedState:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      actionLabel:'Wait for stronger confirmation before considering entry.'
+    },
+    reviewSemanticStatus:{
+      nextAction:'Wait for stronger confirmation before considering entry.',
+      primaryReason:'Legacy confirmation guidance should not outrank reset semantics.',
+      blocker:'Legacy confirmation guidance should not outrank reset semantics.'
+    },
+    derivedStates:{
+      structureState:'strong',
+      setupLocationState:'off_level',
+      priceabilityState:'priceable',
+      bounceState:'confirmed',
+      stabilisationState:'clear',
+      volumeState:'supportive'
+    },
+    displayedPlan:{status:'valid'},
+    planRealism:{raw_rr:2.3},
+    storyContextOverride:{
+      structure:{state:'strong'},
+      support:{label:'20MA'},
+      buyerResponse:{semantic:'response_present'},
+      buyerControl:{state:'confirmed'},
+      confirmation:{state:'confirmed'},
+      volume:{state:'supportive'},
+      currentPhase:'away_from_support'
+    }
+  });
+
+  expect(result.decisionProjection.currentPhase).toBe('away_from_support');
+  expect(result.nextActionLabel).toMatch(/reset (?:into|closer to) support|usable pullback into support/i);
+  expect(result.nextActionLabel).not.toMatch(/stronger confirmation before considering entry/i);
+});
+
+test('helper-level Review support-failed semantic action outranks supplied simplified fallback', async ({page}) => {
+  await bootApp(page);
+  const result = await resolveReviewActionConflict(page, {
+    ticker:'FAIL',
+    verdict:'avoid',
+    globalVerdict:{
+      structure_eligibility:'damaged',
+      viability:'reject',
+      viabilityBranchId:'terminal_reject'
+    },
+    simplifiedState:{
+      structureState:'weakening',
+      structureEligibility:'damaged',
+      actionLabel:'Wait for stronger confirmation before considering entry.'
+    },
+    reviewSemanticStatus:{
+      nextAction:'',
+      primaryReason:'Constructive fallback should not survive failed support.',
+      blocker:'Constructive fallback should not survive failed support.'
+    },
+    derivedStates:{
+      structureState:'weakening',
+      setupLocationState:'lost_support',
+      priceabilityState:'unpriceable',
+      bounceState:'failed',
+      stabilisationState:'none',
+      volumeState:'heavy_distribution'
+    },
+    displayedPlan:{status:'missing'},
+    planRealism:{raw_rr:null},
+    storyContextOverride:{
+      structure:{state:'weakening'},
+      support:{label:'20MA'},
+      buyerResponse:{semantic:'response_failed'},
+      buyerControl:{state:'lost'},
+      confirmation:{state:'failed'},
+      volume:{state:'heavy_distribution'},
+      currentPhase:'support_failed'
+    }
+  });
+
+  expect(result.decisionProjection.currentPhase).toBe('support_failed');
+  expect(result.nextActionLabel).toMatch(/repair|reclaim|avoid/i);
+  expect(result.nextActionLabel).not.toMatch(/stronger confirmation before considering entry/i);
+});
+
+test('rehydrated stale Review projection action copy loses to recomputed failed-support semantic action', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, supportFailedScenario());
+  await page.evaluate(() => {
+    const record = getTickerRecord('FAILR');
+    const staleAction = 'Wait for stronger confirmation before considering entry.';
+    const staleSnapshot = projectionSnapshotWithAuthority({
+      ticker:'FAILR',
+      canonicalVerdict:'entry',
+      finalVerdict:'entry',
+      renderedVerdict:'Entry',
+      sourceOfTruthVisualBucket:'entry',
+      visualBucket:'entry',
+      tone:'entry',
+      actionGuidance:staleAction,
+      actionLabel:staleAction,
+      actionShortLabel:staleAction,
+      decisionSummary:'STALE REVIEW PROJECTION SUMMARY DO NOT SHOW'
+    }, record, {
+      authority:{version:1, source:'persisted_test'}
+    });
+    writeSavedReviewAuthority(record, {
+      savedVerdict:'Entry',
+      savedProjectionSnapshot:staleSnapshot
+    }, {
+      clearProjectionWhenNonEntry:false
+    });
+    commitTickerState();
+    if(typeof persistState === 'function') persistState();
+  });
+
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => {
+    if(typeof startupDebugRenderState !== 'function') return false;
+    const ready = startupDebugRenderState();
+    return !!(ready && ready.hydrationComplete === true && ready.riskRefreshComplete === true);
+  }, null, {timeout:30000});
+  const skipButton = page.getByRole('button', {name:'Skip'});
+  if(await skipButton.count()){
+    try{
+      if(await skipButton.isVisible()) await skipButton.click();
+    }catch(_error){}
+  }
+
+  const restoredPath = await page.evaluate(() => {
+    const record = getTickerRecord('FAILR');
+    const storedSnapshot = reviewStoredProjectionSnapshot(record);
+    const restoredProjection = persistedReviewProjectionSnapshot(record, 'restored_review_action_failed_support');
+    const simplified = resolveSimplifiedStateForSurface(record, 'review', {
+      log:false,
+      source:'restored_review_action_failed_support',
+      reason:'restored_review_action_failed_support'
+    });
+    const globalVerdict = resolveGlobalVerdict(record);
+    const derivedStates = analysisDerivedStatesFromRecord(record);
+    return {
+      storedActionGuidance:String(storedSnapshot && (
+        storedSnapshot.actionGuidance
+        || storedSnapshot.actionLabel
+        || storedSnapshot.actionShortLabel
+      ) || '').trim(),
+      storedProjectionVerdict:String(storedSnapshot && (
+        storedSnapshot.canonicalVerdict
+        || storedSnapshot.finalVerdict
+        || storedSnapshot.renderedVerdict
+      ) || '').trim().toLowerCase(),
+      restoredProjectionAvailable:!!restoredProjection,
+      recomputedSimplifiedActionLabel:String(simplified && simplified.actionLabel || '').trim(),
+      canonicalVerdict:String(globalVerdict && (globalVerdict.final_verdict || globalVerdict.finalVerdict) || '').trim().toLowerCase(),
+      structureState:String(derivedStates && derivedStates.structureState || '').trim().toLowerCase()
+    };
+  });
+
+  expect(restoredPath.storedActionGuidance).toBe('Wait for stronger confirmation before considering entry.');
+  expect(restoredPath.storedProjectionVerdict).toBe('entry');
+  expect(restoredPath.restoredProjectionAvailable).toBe(false);
+  expect(restoredPath.canonicalVerdict).toBe('watch');
+  expect(restoredPath.structureState).toBe('weakening');
+
+  await page.evaluate(() => {
+    uiState.activeReviewSourceProjectionSnapshot = null;
+    uiState.activeReviewProjectionSource = 'non_watchlist_direct_resolve';
+    setActiveReviewTicker('FAILR');
+    renderReviewWorkspace({source:'restored_review_action_failed_support'});
+    renderWatchlist({source:'restored_review_action_failed_support'});
+  });
+
+  const state = await extractAppTickerState(page, 'FAILR');
+  const reviewAction = [
+    state.visibleCopy.review.nextActionInline,
+    state.visibleCopy.review.nextActionPrimary
+  ].filter(Boolean).join(' ');
+  expect(reviewAction).toMatch(/repair|reclaim|avoid/i);
+  expect(reviewAction).not.toMatch(/stronger confirmation before considering entry/i);
+  expect(reviewAction).not.toContain('STALE REVIEW PROJECTION SUMMARY DO NOT SHOW');
+
+  const semantics = await extractSemanticAgreement(page, 'FAILR');
+  expect(semantics.reviewProjection.canonicalVerdict).toBe('watch');
+  expect(semantics.trackProjection.canonicalVerdict).toBe('watch');
+  expect(semantics.reviewProjection.currentPhase).toBe('support_failed');
+  expect(semantics.trackProjection.currentPhase).toBe('support_failed');
+  expect(semantics.reviewProjection.blocker).toBe(semantics.trackProjection.blocker);
+  expect(semantics.reviewProjection.actionability).toBe(semantics.trackProjection.actionability);
+});
+
+test('Review and Track keep phase and blocker aligned while next actions differ by role', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, awayFromSupportScenario());
+
+  const semantics = await extractSemanticAgreement(page, 'AWAY');
+  const reviewAction = await page.evaluate(() => {
+    const record = getTickerRecord('AWAY');
+    const globalVerdict = resolveGlobalVerdict(record);
+    const derivedStates = analysisDerivedStatesFromRecord(record);
+    const simplifiedState = resolveSimplifiedStateForSurface(record, 'review', {
+      log:false,
+      source:'review_track_action_parity',
+      reason:'review_track_action_parity'
+    });
+    const displayedPlan = deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency);
+    const semantic = buildReviewSemanticStatus({
+      record,
+      simplifiedState,
+      globalVerdict,
+      derivedStates,
+      displayedPlan,
+      planRealism:{raw_rr:2.2, realistic_rr:2.2}
+    });
+    const resolved = buildResolvedReviewDisplayModel({
+      record,
+      simplifiedState,
+      globalVerdict,
+      reviewSemanticStatus:semantic,
+      derivedStates,
+      displayedPlan,
+      planRealism:{raw_rr:2.2, realistic_rr:2.2}
+    });
+    return String(resolved.nextActionLabel || '');
+  });
+
+  expect(semantics.reviewProjection.currentPhase).toBe(semantics.trackProjection.currentPhase);
+  expect(semantics.reviewProjection.blocker).toBe(semantics.trackProjection.blocker);
+  expect(reviewAction).toMatch(/reset into support|usable pullback into support/i);
+  expect(semantics.trackNextAction).not.toBe('');
+});
+
+test('analysis-enriched story context is shared by Review, Track, and diagnostics', async ({page}) => {
+  await bootApp(page);
+  const seed = watchScenario();
+  await page.evaluate(seedData => {
+    const record = upsertTickerRecord(seedData.ticker);
+    record.meta.companyName = seedData.companyName;
+    record.meta.exchange = 'NASDAQ';
+    record.meta.tradingViewSymbol = `NASDAQ:${seedData.ticker}`;
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.currency = 'USD';
+    record.marketData.price = 52.4;
+    record.marketData.previousClose = 52.1;
+    record.marketData.ma20 = 51.8;
+    record.marketData.ma50 = 49.9;
+    record.marketData.ma200 = 45.2;
+    record.marketData.volume = 1820000;
+    record.marketData.avgVolume = 1640000;
+    record.marketData.history = [
+      {date:'2026-06-27', open:51.7, high:52.8, low:51.2, close:52.4, volume:1820000},
+      {date:'2026-06-26', open:51.8, high:52.0, low:51.0, close:51.6, volume:1710000}
+    ];
+    record.setup.structureState = 'strong';
+    record.setup.structureEligibility = 'alive';
+    record.setup.setupLocationState = 'near_20ma';
+    record.setup.pullbackZone = 'near_20ma';
+    record.setup.priceabilityState = 'priceable';
+    record.setup.bounceState = 'attempt';
+    record.setup.stabilisationState = 'stabilising';
+    record.setup.volumeState = 'supportive';
+    record.setup.trendState = 'strong';
+    record.plan.entry = 53.1;
+    record.plan.stop = 49.2;
+    record.plan.firstTarget = 60.3;
+    record.plan.target = 60.3;
+    record.plan.status = 'valid';
+    record.plan.source = 'manual_review';
+    record.watchlist.inWatchlist = true;
+    record.watchlist.addedAt = '2026-06-29';
+    record.watchlist.expiryAfterTradingDays = 5;
+    record.review.analysisState = {
+      normalized:{
+        canonicalValues:{
+          price:60.4,
+          ma20:52.0,
+          ma50:50.0,
+          ma200:45.2
+        },
+        trustedMarketContext:{
+          recentCandleSequence:[
+            {date:'2026-06-27', open:58.8, high:60.8, low:58.3, close:60.4, volume:2500000},
+            {date:'2026-06-26', open:57.1, high:59.2, low:56.8, close:58.9, volume:2300000},
+            {date:'2026-06-25', open:54.9, high:57.4, low:54.6, close:57.0, volume:2100000}
+          ]
+        }
+      }
+    };
+    state.tickers = [seedData.ticker];
+    setActiveReviewTicker(seedData.ticker);
+    renderReviewWorkspace({source:'analysis_enriched_semantic_contract'});
+    renderWatchlist({source:'analysis_enriched_semantic_contract'});
+  }, seed);
+
+  const result = await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    const globalVerdict = resolveGlobalVerdict(record);
+    const derivedStates = analysisDerivedStatesFromRecord(record);
+    const withoutAnalysis = buildCanonicalStoryContextForRecord(record, {
+      globalVerdict,
+      derivedStates
+    });
+    const withAnalysis = buildCanonicalStoryContextForRecord(record, {
+      analysis:getReviewAnalysisState(record).normalizedAnalysis || {},
+      globalVerdict,
+      derivedStates
+    });
+    const reviewTrack = buildResolvedReviewDisplayModel({
+      record,
+      simplifiedState:resolveSimplifiedStateForSurface(record, 'review', {
+        log:false,
+        source:'analysis_enriched_semantic_contract',
+        reason:'analysis_enriched_semantic_contract'
+      }),
+      globalVerdict,
+      reviewSemanticStatus:buildReviewSemanticStatus({
+        record,
+        simplifiedState:resolveSimplifiedStateForSurface(record, 'review', {
+          log:false,
+          source:'analysis_enriched_semantic_contract',
+          reason:'analysis_enriched_semantic_contract'
+        }),
+        globalVerdict,
+        derivedStates,
+        displayedPlan:deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency),
+        planRealism:{raw_rr:2.0, realistic_rr:2.0}
+      }),
+      derivedStates,
+      displayedPlan:deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency),
+      planRealism:{raw_rr:2.0, realistic_rr:2.0}
+    });
+    const trackPresentation = buildSharedReviewTrackPresentation(record, {
+      surface:'track',
+      simplifiedState:resolveSimplifiedStateForSurface(record, 'track', {
+        log:false,
+        source:'analysis_enriched_semantic_contract',
+        reason:'analysis_enriched_semantic_contract'
+      }),
+      lifecycleSnapshot:watchlistLifecycleSnapshot(record),
+      globalVerdict,
+      source:'analysis_enriched_semantic_contract',
+      reason:'analysis_enriched_semantic_contract'
+    });
+    const diagnostics = buildTrackDiagnosticSnapshot(record);
+    return {
+      withoutAnalysisPhase:String(withoutAnalysis && withoutAnalysis.currentPhase || ''),
+      withAnalysisPhase:String(withAnalysis && withAnalysis.currentPhase || ''),
+      reviewPhase:String(reviewTrack && reviewTrack.decisionProjection && reviewTrack.decisionProjection.currentPhase || ''),
+      trackPhase:String(trackPresentation && trackPresentation.trackSemanticProjection && trackPresentation.trackSemanticProjection.currentPhase || ''),
+      diagnosticsPhase:String(diagnostics && diagnostics.semantics && diagnostics.semantics.currentPhase || ''),
+      reviewOpportunity:String(reviewTrack && reviewTrack.decisionProjection && reviewTrack.decisionProjection.opportunityCondition || ''),
+      trackOpportunity:String(trackPresentation && trackPresentation.trackSemanticProjection && trackPresentation.trackSemanticProjection.opportunityCondition || ''),
+      diagnosticsOpportunity:String(diagnostics && diagnostics.semantics && diagnostics.semantics.opportunityCondition || '')
+    };
+  });
+
+  expect(result.withAnalysisPhase).not.toBe('');
+  expect(result.withoutAnalysisPhase).not.toBe(result.withAnalysisPhase);
+  expect(result.reviewPhase).toBe(result.withAnalysisPhase);
+  expect(result.trackPhase).toBe(result.withAnalysisPhase);
+  expect(result.diagnosticsPhase).toBe(result.withAnalysisPhase);
+  expect(result.reviewOpportunity).toBe(result.trackOpportunity);
+  expect(result.diagnosticsOpportunity).toBe(result.trackOpportunity);
+});
+
+test('reduced-packet semantics stay aligned and unknown-safe', async ({page}) => {
+  await bootApp(page);
+  await page.evaluate(() => {
+    const record = upsertTickerRecord('REDU');
+    record.meta.companyName = 'Reduced Packet plc';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.tradingViewSymbol = 'NASDAQ:REDU';
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.currency = 'USD';
+    record.marketData.price = '';
+    record.marketData.ma20 = '';
+    record.marketData.ma50 = '';
+    record.marketData.ma200 = '';
+    record.setup.structureState = 'strong';
+    record.setup.structureEligibility = 'alive';
+    record.setup.setupLocationState = '';
+    record.setup.pullbackZone = '';
+    record.setup.priceabilityState = '';
+    record.setup.bounceState = '';
+    record.setup.stabilisationState = '';
+    record.setup.volumeState = '';
+    record.setup.trendState = 'strong';
+    record.plan.status = 'missing';
+    record.scan.analysisProjection = {
+      derived_states:{
+        structure_state:'strong',
+        trend_state:'strong'
+      }
+    };
+    record.review.analysisState = {
+      normalized:{
+        deterministicEventPacket:{
+          supportState:{distanceMeasured:false},
+          currentPhase:'',
+          storyEvents:[]
+        }
+      }
+    };
+    record.watchlist.inWatchlist = true;
+    record.watchlist.addedAt = '2026-06-29';
+    state.tickers = ['REDU'];
+    setActiveReviewTicker('REDU');
+    renderReviewWorkspace({source:'reduced_packet_semantic_contract'});
+    renderWatchlist({source:'reduced_packet_semantic_contract'});
+  });
+
+  const result = await extractSemanticAgreement(page, 'REDU');
+  expect(result.reviewProjection.currentPhase).toBe(result.trackProjection.currentPhase);
+  expect(result.reviewProjection.actionability).toBe(result.trackProjection.actionability);
+  expect(result.reviewProjection.supportRelationship).toBe(result.trackProjection.supportRelationship);
+  expect(result.reviewProjection.opportunityCondition).toBe(result.trackProjection.opportunityCondition);
+  expect(result.trackProjection.currentPhase).not.toBe('support_failed');
+  expect(result.trackProjection.supportRelationship).not.toBe('failed_support');
+  expect(result.trackProjection.opportunityCondition).not.toBe('broken');
+  expect(result.diagnosticsSemantics.currentPhase).toBe(result.trackProjection.currentPhase);
+  expect(result.diagnosticsSemantics.supportRelationship).toBe(result.trackProjection.supportRelationship);
 });
 
 test('read-only getter, Review, Track, and diagnostics paths do not stamp or rewrite unstamped plans', async ({page}) => {
@@ -733,6 +1619,268 @@ test('persisted sharedPresentation Entry cannot override live canonical Watch', 
     return String(panel && panel.textContent || '').replace(/\s+/g, ' ').trim();
   });
   expect(entryPanelText).not.toContain('Status: Entry Ready');
+});
+
+test('stale persisted Track prose fields cannot override live recomputed Track copy', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+  await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    record.watchlist.presentation = {
+      sharedPresentation:{
+        canonicalVerdict:'entry',
+        finalVerdict:'entry',
+        visualBucket:'entry',
+        tone:'entry',
+        badgeLabel:'Entry',
+        headline:'Entry Ready',
+        statusText:'Entry Ready',
+        actionLabel:'Execute only if the trigger remains valid.',
+        trackDecisionSummary:'STALE TRACK DECISION SUMMARY DO NOT SHOW',
+        trackPrimaryReason:'STALE TRACK PRIMARY REASON DO NOT SHOW',
+        trackNextAction:'STALE TRACK NEXT ACTION DO NOT SHOW',
+        trackPlanSummary:'STALE TRACK PLAN SUMMARY DO NOT SHOW',
+        trackCurrentPhase:'support_failed',
+        trackActionability:'actionable',
+        trackDecisiveReason:'STALE TRACK DECISIVE REASON DO NOT SHOW',
+        trackBlocker:'STALE TRACK BLOCKER DO NOT SHOW',
+        trackSupportRelationship:'failed_support',
+        trackOpportunityCondition:'broken',
+        trackPlanCondition:'valid'
+      }
+    };
+  });
+
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  const state = await extractAppTickerState(page, 'WATC');
+  const cardText = [
+    state.visibleCopy.track.cardText,
+    state.visibleCopy.track.entryPanel && state.visibleCopy.track.entryPanel.why,
+    state.visibleCopy.track.entryPanel && state.visibleCopy.track.entryPanel.nextAction
+  ].filter(Boolean).join(' ');
+
+  [
+    'STALE TRACK DECISION SUMMARY DO NOT SHOW',
+    'STALE TRACK PRIMARY REASON DO NOT SHOW',
+    'STALE TRACK NEXT ACTION DO NOT SHOW',
+    'STALE TRACK PLAN SUMMARY DO NOT SHOW',
+    'STALE TRACK DECISIVE REASON DO NOT SHOW',
+    'STALE TRACK BLOCKER DO NOT SHOW'
+  ].forEach(staleCopy => {
+    expect(cardText).not.toContain(staleCopy);
+  });
+
+  const runtimePresentation = await extractSemanticAgreement(page, 'WATC');
+
+  expect(runtimePresentation.trackProjection.currentPhase).not.toBe('support_failed');
+  expect(runtimePresentation.trackProjection.actionability).toBe('blocked');
+  expect(runtimePresentation.trackProjection.decisiveReason).not.toContain('STALE TRACK');
+  expect(runtimePresentation.trackProjection.blocker).not.toContain('STALE TRACK');
+  expect(runtimePresentation.trackProjection.supportRelationship).not.toBe('failed_support');
+  expect(runtimePresentation.trackProjection.opportunityCondition).not.toBe('broken');
+  expect(runtimePresentation.trackDecisionSummary).not.toContain('STALE TRACK');
+  expect(runtimePresentation.reviewProjection).toMatchObject(runtimePresentation.trackProjection);
+  expect(runtimePresentation.diagnosticsSemantics).toMatchObject(runtimePresentation.trackProjection);
+});
+
+test('reloaded persisted Track prose fields cannot override live recomputed Track copy', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+  await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    record.watchlist.presentation = {
+      sharedPresentation:{
+        canonicalVerdict:'entry',
+        finalVerdict:'entry',
+        visualBucket:'entry',
+        tone:'entry',
+        badgeLabel:'Entry',
+        headline:'Entry Ready',
+        statusText:'Entry Ready',
+        actionLabel:'Execute only if the trigger remains valid.',
+        trackDecisionSummary:'RELOADED STALE TRACK DECISION SUMMARY DO NOT SHOW',
+        trackPrimaryReason:'RELOADED STALE TRACK PRIMARY REASON DO NOT SHOW',
+        trackNextAction:'RELOADED STALE TRACK NEXT ACTION DO NOT SHOW',
+        trackPlanSummary:'RELOADED STALE TRACK PLAN SUMMARY DO NOT SHOW',
+        trackCurrentPhase:'support_failed',
+        trackActionability:'actionable',
+        trackDecisiveReason:'RELOADED STALE TRACK DECISIVE REASON DO NOT SHOW',
+        trackBlocker:'RELOADED STALE TRACK BLOCKER DO NOT SHOW',
+        trackSupportRelationship:'failed_support',
+        trackOpportunityCondition:'broken',
+        trackPlanCondition:'valid'
+      }
+    };
+    commitTickerState();
+    if(typeof persistState === 'function') persistState();
+  });
+
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => {
+    if(typeof startupDebugRenderState !== 'function') return false;
+    const ready = startupDebugRenderState();
+    return !!(ready && ready.hydrationComplete === true && ready.riskRefreshComplete === true);
+  }, null, {timeout:30000});
+  const skipButton = page.getByRole('button', {name:'Skip'});
+  if(await skipButton.count()){
+    try{
+      if(await skipButton.isVisible()) await skipButton.click();
+    }catch(_error){}
+  }
+
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  const state = await extractAppTickerState(page, 'WATC');
+  const cardText = [
+    state.visibleCopy.track.cardText,
+    state.visibleCopy.track.entryPanel && state.visibleCopy.track.entryPanel.why,
+    state.visibleCopy.track.entryPanel && state.visibleCopy.track.entryPanel.nextAction
+  ].filter(Boolean).join(' ');
+
+  [
+    'RELOADED STALE TRACK DECISION SUMMARY DO NOT SHOW',
+    'RELOADED STALE TRACK PRIMARY REASON DO NOT SHOW',
+    'RELOADED STALE TRACK NEXT ACTION DO NOT SHOW',
+    'RELOADED STALE TRACK PLAN SUMMARY DO NOT SHOW',
+    'RELOADED STALE TRACK DECISIVE REASON DO NOT SHOW',
+    'RELOADED STALE TRACK BLOCKER DO NOT SHOW'
+  ].forEach(staleCopy => {
+    expect(cardText).not.toContain(staleCopy);
+  });
+
+  expect(state.authority.trackPresentation && state.authority.trackPresentation.trackCurrentPhase).not.toBe('support_failed');
+  expect(state.authority.trackPresentation && state.authority.trackPresentation.trackActionability).toBe('blocked');
+  expect(String(state.authority.trackPresentation && state.authority.trackPresentation.trackDecisionSummary || '')).not.toContain('RELOADED STALE TRACK');
+
+  const reloadedSemantics = await extractSemanticAgreement(page, 'WATC');
+  expect(reloadedSemantics.trackProjection.decisiveReason).not.toContain('RELOADED STALE TRACK');
+  expect(reloadedSemantics.trackProjection.blocker).not.toContain('RELOADED STALE TRACK');
+  expect(reloadedSemantics.trackProjection.supportRelationship).not.toBe('failed_support');
+  expect(reloadedSemantics.trackProjection.opportunityCondition).not.toBe('broken');
+  expect(reloadedSemantics.reviewProjection).toMatchObject(reloadedSemantics.trackProjection);
+  expect(reloadedSemantics.diagnosticsSemantics).toMatchObject(reloadedSemantics.trackProjection);
+});
+
+test('restored legacy sharedPresentation without Track-specific fields recomputes canonical semantics safely', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+  await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    record.watchlist.presentation = {
+      sharedPresentation:{
+        canonicalVerdict:'entry',
+        finalVerdict:'entry',
+        visualBucket:'entry',
+        tone:'entry',
+        badgeLabel:'Entry',
+        headline:'STALE LEGACY ENTRY HEADLINE DO NOT SHOW',
+        statusText:'STALE LEGACY ENTRY STATUS DO NOT SHOW',
+        actionLabel:'STALE LEGACY ENTRY ACTION DO NOT SHOW',
+        primaryReason:'STALE LEGACY ENTRY PRIMARY REASON DO NOT SHOW',
+        mainBlocker:'STALE LEGACY ENTRY BLOCKER DO NOT SHOW',
+        planStatus:'valid',
+        planSummary:'STALE LEGACY ENTRY PLAN DO NOT SHOW'
+      }
+    };
+    commitTickerState();
+    if(typeof persistState === 'function') persistState();
+  });
+
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => {
+    if(typeof startupDebugRenderState !== 'function') return false;
+    const ready = startupDebugRenderState();
+    return !!(ready && ready.hydrationComplete === true && ready.riskRefreshComplete === true);
+  }, null, {timeout:30000});
+  const skipButton = page.getByRole('button', {name:'Skip'});
+  if(await skipButton.count()){
+    try{
+      if(await skipButton.isVisible()) await skipButton.click();
+    }catch(_error){}
+  }
+
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  const state = await extractAppTickerState(page, 'WATC');
+  const trackText = state.visibleCopy.track.cardText || '';
+  [
+    'STALE LEGACY ENTRY HEADLINE DO NOT SHOW',
+    'STALE LEGACY ENTRY STATUS DO NOT SHOW',
+    'STALE LEGACY ENTRY ACTION DO NOT SHOW',
+    'STALE LEGACY ENTRY PRIMARY REASON DO NOT SHOW',
+    'STALE LEGACY ENTRY BLOCKER DO NOT SHOW',
+    'STALE LEGACY ENTRY PLAN DO NOT SHOW'
+  ].forEach(staleCopy => {
+    expect(trackText).not.toContain(staleCopy);
+  });
+
+  const semantics = await extractSemanticAgreement(page, 'WATC');
+  expect(semantics.trackProjection.canonicalVerdict).toBe('watch');
+  expect(semantics.reviewProjection).toMatchObject(semantics.trackProjection);
+  expect(semantics.diagnosticsSemantics).toMatchObject(semantics.trackProjection);
+});
+
+test('away-from-support Track wording stays opportunity-specific without weakening language', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, awayFromSupportScenario());
+
+  await openTrackTab(page);
+  await waitForUiTransitionSettle(page);
+
+  const semantics = await extractSemanticAgreement(page, 'AWAY');
+  const combinedCopy = [
+    semantics.reviewDecisionSummary,
+    semantics.trackDecisionSummary,
+    semantics.trackPrimaryReason,
+    semantics.trackNextAction
+  ].join(' ');
+
+  expect(semantics.reviewProjection.currentPhase).toBe('away_from_support');
+  expect(semantics.trackProjection.currentPhase).toBe('away_from_support');
+  expect(semantics.reviewProjection.blocker).toBe(semantics.trackProjection.blocker);
+  expect(['reset_required', 'blocked']).toContain(semantics.reviewProjection.opportunityCondition);
+  expect(semantics.trackProjection.opportunityCondition).toBe(semantics.reviewProjection.opportunityCondition);
+  expect(semantics.trackDecisionSummary).toMatch(/away from support|wait for a reset/i);
+  expect(combinedCopy).not.toMatch(/weakening|repair|stabilising|setup quality fading/i);
+  expect(semantics.diagnosticsSemantics).toMatchObject(semantics.trackProjection);
+});
+
+test('Track diagnostics semantic block matches authoritative projection even when presentation fields are stale or blank', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+  await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    record.watchlist.presentation = {
+      sharedPresentation:{
+        canonicalVerdict:'watch',
+        finalVerdict:'watch',
+        visualBucket:'monitor',
+        tone:'monitor',
+        badgeLabel:'Watch',
+        headline:'',
+        statusText:'',
+        actionLabel:'',
+        trackDecisionSummary:'',
+        trackPrimaryReason:'',
+        trackNextAction:'',
+        trackPlanSummary:'',
+        trackCurrentPhase:'',
+        trackActionability:'',
+        trackDecisiveReason:'',
+        trackBlocker:''
+      }
+    };
+    renderWatchlist({source:'diagnostics_authority_contract'});
+  });
+
+  const semantics = await extractSemanticAgreement(page, 'WATC');
+  expect(semantics.trackProjection.decisiveReason).not.toBe('');
+  expect(semantics.diagnosticsSemantics.authoritySource).toBe('canonical_semantic_projection');
+  expect(semantics.diagnosticsSemantics).toMatchObject(semantics.trackProjection);
 });
 
 test('persisted debug currentState Entry cannot override live canonical Watch', async ({page}) => {
