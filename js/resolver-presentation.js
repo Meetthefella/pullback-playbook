@@ -305,9 +305,9 @@
 
   function decisionSummaryForVerdict(finalVerdict, options = {}, deps = {}){
     const verdict = coerceCanonicalVerdict(finalVerdict, deps);
-    const storyContext = options.storyContext && typeof options.storyContext === 'object' ? options.storyContext : null;
     if(verdict === 'entry') return 'Entry - your plan fits.';
     if(verdict === 'avoid') return 'Avoid - too weak or broken. Leave it alone.';
+    const storyContext = options.storyContext && typeof options.storyContext === 'object' ? options.storyContext : null;
     const structureEligibility = String(options && options.structureEligibility || '').toLowerCase();
     const setupLocationState = String(options && options.setupLocationState || '').toLowerCase();
     const priceabilityState = String(options && options.priceabilityState || '').toLowerCase();
@@ -346,6 +346,29 @@
         authoritativeBlockerText:mainBlocker
       }), '') || '').trim()
       : '';
+    const canonicalPhaseSummary = storyContext && typeof deps.canonicalDecisionSummaryFromStoryContext === 'function'
+      ? String(deps.canonicalDecisionSummaryFromStoryContext({
+        finalVerdict:verdict,
+        storyContext,
+        fallbackSummary:''
+      }) || '').trim()
+      : '';
+    const canonicalPhase = String(storyContext && storyContext.currentPhase || '').trim().toLowerCase();
+    const independentBlockerSummary = (() => {
+      if(setupLocationState === 'volatile') return 'Watch - setup is too volatile to price reliably.';
+      if(priceabilityState === 'unpriceable') return 'Watch - price is too extended to price reliably.';
+      if(hasBlockingPlanStatus && mainBlocker) return mainBlocker;
+      return '';
+    })();
+    if(independentBlockerSummary) return independentBlockerSummary;
+    if(
+      canonicalPhaseSummary
+      && ['away_from_support','extended_from_support','support_failed','stalled_after_response'].includes(canonicalPhase)
+    ){
+      return canonicalPhaseSummary;
+    }
+    const canonicalSummary = canonicalPhaseSummary || semanticSummary;
+    if(canonicalSummary) return canonicalSummary;
     const aliveStructure = structureEligibility === 'alive'
       || (!structureEligibility && ['strong','intact','developing_clean'].includes(structureState));
     const constructiveWaiting = aliveStructure
@@ -356,22 +379,11 @@
       && !viabilityBranchId.includes('low_score')
       && (setupScore === null || setupScore >= 5)
       && !hasBlockingPlanStatus;
-    const canonicalSummary = storyContext && typeof deps.canonicalDecisionSummaryFromStoryContext === 'function'
-      ? String(deps.canonicalDecisionSummaryFromStoryContext({
-        finalVerdict:verdict,
-        storyContext,
-        fallbackSummary:''
-      }) || '').trim()
-      : '';
     if(setupLocationState === 'none' && constructiveWaiting) return 'Watch - waiting for confirmation.';
     if(latePullbackState === 'late') return 'Watch - trend is healthy, but the buyer response is already too far from support to chase.';
     if(setupLocationState === 'extended') return 'Watch - strong trend, but no clean pullback entry yet.';
-    if(setupLocationState === 'volatile') return 'Watch - setup is too volatile to price reliably.';
     if((setupLocationState === 'none' || setupLocationState === 'off_level' || setupLocationState === 'unclear') && (viability === 'low_priority' || viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5) || priceabilityState === 'unpriceable')) return 'Watch - strong trend, but no usable pullback setup yet.';
-    if(priceabilityState === 'unpriceable') return 'Watch - price is too extended to price reliably.';
     if(viabilityBranchId.includes('low_score') || (setupScore !== null && setupScore < 5)) return 'Watch - setup quality has slipped below useful watchlist quality.';
-    if(hasBlockingPlanStatus && mainBlocker) return mainBlocker;
-    if(semanticSummary) return semanticSummary;
     if(structureEligibility === 'damaged') return 'Watch - structure weakening.';
     if(structureEligibility === 'messy') return 'Watch - structure still alive, but messy.';
     if(verdict === 'near_entry') return 'Near Entry - almost ready. Watch for confirmation.';
@@ -404,6 +416,7 @@
   function resolveVisualState(record, context = 'scanner', options = {}, deps = {}){
     const safeRecord = record && typeof record === 'object' ? record : {};
     const derivedStates = options.derivedStates || deps.analysisDerivedStatesFromRecord(safeRecord);
+    const analysis = options.analysis && typeof options.analysis === 'object' ? options.analysis : null;
     const legacyVerdict = typeof deps.resolveGlobalVerdict === 'function' ? deps.resolveGlobalVerdict(safeRecord) : null;
     const effectivePlan = options.effectivePlan || deps.effectivePlanForRecord(safeRecord, {allowScannerFallback:true});
     const displayedPlan = options.displayedPlan || deps.deriveCurrentPlanState(
@@ -595,6 +608,7 @@
     const badge = deps.getBadge(renderedVerdict);
     const storyContext = typeof deps.buildCanonicalStoryContextForRecord === 'function'
       ? deps.buildCanonicalStoryContextForRecord(safeRecord, {
+        analysis:analysis || {},
         globalVerdict:legacyVerdict,
         derivedStates
       })

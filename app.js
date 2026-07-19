@@ -18240,6 +18240,13 @@ function scannerViewBridgeDeps(){
     getBadge,
     resolveGlobalVerdict,
     resolveVisualState,
+    // Scanner canonical reconstruction must use Review's compatibility-aware analysis authority.
+    getAuthoritativeNormalizedAnalysis(record){
+      const analysisState = getReviewAnalysisState(record);
+      return analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+        ? analysisState.normalizedAnalysis
+        : null;
+    },
     normalizeGlobalVerdictKey,
     normalizeVerdict,
     primaryVerdictBadge,
@@ -18464,7 +18471,9 @@ function resolveGlobalVisualState(record, context = 'scanner', options = {}){
 }
 
 function resolveVisualState(record, context = 'scanner', options = {}){
-  return resolveVisualStateImpl(record, context, options, {
+  return resolveVisualStateImpl(record, context, {
+    ...(options && typeof options === 'object' ? options : {})
+  }, {
     resolveGlobalVerdict,
     resolveFinalStateContract,
     analysisDerivedStatesFromRecord,
@@ -24866,7 +24875,8 @@ function sharedDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''
   const currentPhase = String(semantics.currentPhase || '').trim().toLowerCase();
   const dominantStory = String(semantics.dominantStory || '').trim().toLowerCase();
   const buyerControlState = String(semantics.storyContext && semantics.storyContext.buyerControl && semantics.storyContext.buyerControl.state || '').trim().toLowerCase();
-  if(semantics.blockerSummary) return String(semantics.blockerSummary || '').trim();
+  const blockerSummary = String(semantics.blockerSummary || '').trim();
+  if(blockerSummary) return blockerSummary;
   if(verdict === 'entry') return 'Entry - plan is valid and risk defined.';
   if(verdict === 'avoid'){
     if(currentPhase === 'support_failed' || dominantStory === 'failed_support_test' || dominantStory === 'structure_breaking_down'){
@@ -24997,6 +25007,25 @@ function buildDecisionSummary({record = null, finalVerdict, displayedPlan, resol
     && typeof sharedDecisionSummaryFromSemantics === 'function'
     ? sharedDecisionSummaryFromSemantics(semantics, '')
     : '';
+  const setupLocationState = String(derivedStates && derivedStates.setupLocationState || verdictContext.setup_location_state || verdictContext.setupLocationState || '').trim().toLowerCase();
+  const priceabilityState = String(derivedStates && derivedStates.priceabilityState || verdictContext.priceability_state || verdictContext.priceabilityState || '').trim().toLowerCase();
+  const planStatus = String(resolvedContract && resolvedContract.planStatusKey || '').trim().toLowerCase();
+  const canonicalChartSummary = authoritativeStoryContext
+    && typeof canonicalDecisionSummaryFromStoryContext === 'function'
+    ? String(canonicalDecisionSummaryFromStoryContext({
+      finalVerdict:verdict,
+      storyContext:authoritativeStoryContext,
+      fallbackSummary:''
+    }) || '').trim()
+    : '';
+  const independentBlockerSummary = (() => {
+    if(setupLocationState === 'volatile') return 'Watch - setup is too volatile to price reliably.';
+    if(priceabilityState === 'unpriceable') return 'Watch - price is too extended to price reliably.';
+    if(['invalid','missing','rebuild_required','too_wide'].includes(planStatus) && authoritativeBlockerText) return authoritativeBlockerText;
+    return '';
+  })();
+  if(independentBlockerSummary) return independentBlockerSummary;
+  if(canonicalChartSummary) return canonicalChartSummary;
   if(semanticSummary) return semanticSummary;
   const structureState = String(derivedStates && derivedStates.structureState || '').toLowerCase();
   const structuralState = String(resolvedContract && resolvedContract.structuralState || '').toLowerCase();
@@ -25782,6 +25811,34 @@ function isAccepted50MaSupportTestDisplayState({
     && !lost50MaSupport
     && !terminalAvoid
     && !failedSupportTest;
+}
+
+function accepted50MaSupportTestAllowedForStoryContext(storyContext = null){
+  const context = storyContext && typeof storyContext === 'object' ? storyContext : null;
+  if(!context) return true;
+  const currentPhase = String(context.currentPhase || '').trim().toLowerCase();
+  const structureState = String(context.structure && context.structure.state || '').trim().toLowerCase();
+  const support = context.support && typeof context.support === 'object' ? context.support : {};
+  const buyerControlState = String(context.buyerControl && context.buyerControl.state || '').trim().toLowerCase();
+  const confirmationState = String(context.confirmation && (context.confirmation.state || context.confirmation.semantic) || '').trim().toLowerCase();
+  const supportType = String(
+    support.type
+    || support.level
+    || context.recentSupportType
+    || support.label
+    || ''
+  ).trim().toLowerCase();
+  const supportLabel = String(support.label || '').trim().toLowerCase();
+  const supportLooksLike50Ma = supportType.includes('50')
+    || supportLabel.includes('50');
+  if(!supportLooksLike50Ma) return false;
+  if(['away_from_support','extended_from_support','support_failed','stalled_after_response'].includes(currentPhase)) return false;
+  if(['broken','failed','dead','invalid','damaged','weakening','developing_loose'].includes(structureState)) return false;
+  if(buyerControlState === 'confirmed') return false;
+  if(['confirmed','follow_through_confirmed','failed'].includes(confirmationState)) return false;
+  const liveAccepted50MaPhases = new Set(['at_support','responding_from_support']);
+  if(support.currentlyActive === false && !liveAccepted50MaPhases.has(currentPhase)) return false;
+  return liveAccepted50MaPhases.has(currentPhase);
 }
 
 function review50MaSupportTestPresentationCopy(){
@@ -31741,13 +31798,6 @@ function buildResolvedReviewDisplayModel({
   const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
   const realism = planRealism && typeof planRealism === 'object' ? planRealism : {};
   const analysisState = typeof getReviewAnalysisState === 'function' ? getReviewAnalysisState(item) : null;
-  const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
-    record:item,
-    simplifiedState:simplified,
-    globalVerdict:global,
-    derivedStates:derived
-  });
-  const supportTestCopy = accepted50MaSupportTest ? review50MaSupportTestPresentationCopy() : null;
   const semanticPlanMathValid = semantic.planMathValid === true;
   const semanticDraftPlan = semantic.draftPlan === true;
   const semanticPlanActionable = semantic.planActionable === true;
@@ -31772,7 +31822,7 @@ function buildResolvedReviewDisplayModel({
       authoritativeBlockerText:String(semantic.blocker || semantic.primaryReason || diagnosticsMessage || '').trim(),
       analysis:analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
         ? analysisState.normalizedAnalysis
-        : null
+      : null
     })
     : null;
   const authoritativeStoryContext = decisionProjection && decisionProjection.storyContext
@@ -31786,6 +31836,19 @@ function buildResolvedReviewDisplayModel({
         derivedStates:derived
       })
       : null);
+  const accepted50MaSupportTest = isAccepted50MaSupportTestDisplayState({
+    record:item,
+    simplifiedState:simplified,
+    globalVerdict:global,
+    derivedStates:derived
+  });
+  const supportTestCopy = accepted50MaSupportTest
+    && (
+      typeof accepted50MaSupportTestAllowedForStoryContext !== 'function'
+      || accepted50MaSupportTestAllowedForStoryContext(authoritativeStoryContext)
+    )
+    ? review50MaSupportTestPresentationCopy()
+    : null;
   const decisionSemantics = decisionProjection && decisionProjection.semantics
     ? decisionProjection.semantics
     : null;
@@ -31975,6 +32038,7 @@ function resolveCanonicalVisibleVerdictKey(record, options = {}){
 
 function buildCanonicalReviewPresentationModel(record, options = {}){
   const item = normalizeTickerRecordReadOnly(record || {});
+  const analysisState = typeof getReviewAnalysisState === 'function' ? getReviewAnalysisState(item) : null;
   const uiDraftState = options.uiDraftState || (item.review && item.review.draft) || null;
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
   const globalVerdict = options.globalVerdict || resolveGlobalVerdict(item);
@@ -32108,7 +32172,10 @@ function buildCanonicalReviewPresentationModel(record, options = {}){
     resolvedContract,
     derivedStates,
     displayedPlan,
-    setupScore:setupScoreForRecord(item)
+    setupScore:setupScoreForRecord(item),
+    analysis:analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+      ? analysisState.normalizedAnalysis
+      : null
   });
   const reviewLifecycleBiasBucket = (() => {
     const bucket = normalizeVisualBucketForPairing(effectiveSimplifiedState.visualBucket || visualState.visualBucket || 'monitor');
@@ -49170,7 +49237,13 @@ function syncPlanDisplayMeta(options = {}){
     resolvedContract,
     derivedStates,
     displayedPlan,
-    setupScore:setupScoreForRecord(record)
+    setupScore:setupScoreForRecord(record),
+    analysis:(() => {
+      const analysisState = getReviewAnalysisState(record);
+      return analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+        ? analysisState.normalizedAnalysis
+        : null;
+    })()
   });
   const globalVerdict = metaGlobalVerdict;
   const metaDisplayBucket = normalizeVisualBucketForPairing(effectiveMetaSimplifiedState.visualBucket || 'monitor');
@@ -49572,7 +49645,13 @@ function calculate(options = {}){
     resolvedContract,
     derivedStates:plannerDerivedStates,
     displayedPlan,
-    setupScore:setupScoreForRecord(activeRecord)
+    setupScore:setupScoreForRecord(activeRecord),
+    analysis:(() => {
+      const analysisState = getReviewAnalysisState(activeRecord);
+      return analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+        ? analysisState.normalizedAnalysis
+        : null;
+    })()
   }) : {finalVerdict:'watch'};
   const plannerTradeStatusVerdict = {
     ...plannerVisualState,

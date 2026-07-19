@@ -1,4 +1,5 @@
 const {test, expect} = require('@playwright/test');
+const fs = require('fs');
 const path = require('path');
 const {openTrackTab, waitForUiTransitionSettle} = require('../helpers/app-driver');
 const {extractAppTickerState} = require('../helpers/app-state');
@@ -560,6 +561,80 @@ async function resolveReviewActionConflict(page, {
     analysisState,
     storyContextOverride
   });
+}
+
+async function extractScanReviewParity(page, ticker){
+  return page.evaluate(symbol => {
+    const record = getTickerRecord(symbol);
+    const globalVerdict = resolveGlobalVerdict(record);
+    const derivedStates = analysisDerivedStatesFromRecord(record);
+    const displayedPlan = deriveCurrentPlanState(
+      record.plan && record.plan.entry,
+      record.plan && record.plan.stop,
+      record.plan && record.plan.firstTarget,
+      record.marketData && record.marketData.currency
+    );
+    const analysisState = typeof getReviewAnalysisState === 'function' ? getReviewAnalysisState(record) : null;
+    const normalizedAnalysis = analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+      ? analysisState.normalizedAnalysis
+      : null;
+    const reviewSimplified = resolveSimplifiedStateForSurface(record, 'review', {
+      log:false,
+      source:'scan_review_parity_contract',
+      reason:'scan_review_parity_contract'
+    });
+    const reviewSemanticStatus = buildReviewSemanticStatus({
+      record,
+      simplifiedState:reviewSimplified,
+      globalVerdict,
+      derivedStates,
+      displayedPlan,
+      planRealism:{raw_rr:2.2, realistic_rr:2.2}
+    });
+    const reviewDisplay = buildResolvedReviewDisplayModel({
+      record,
+      simplifiedState:reviewSimplified,
+      globalVerdict,
+      reviewSemanticStatus,
+      derivedStates,
+      displayedPlan,
+      planRealism:{raw_rr:2.2, realistic_rr:2.2}
+    });
+    const scannerVisualState = resolveVisualState(record, 'scanner', {
+      derivedStates,
+      displayedPlan,
+      analysis:normalizedAnalysis
+    });
+    const storyWithoutAnalysis = buildCanonicalStoryContextForRecord(record, {
+      globalVerdict,
+      derivedStates
+    });
+    const storyWithAnalysis = buildCanonicalStoryContextForRecord(record, {
+      analysis:normalizedAnalysis || {},
+      globalVerdict,
+      derivedStates
+    });
+    const accepted50 = isAccepted50MaSupportTestDisplayState({
+      record,
+      simplifiedState:reviewSimplified,
+      globalVerdict,
+      derivedStates
+    });
+    return {
+      scannerSummary:String(scannerVisualState && scannerVisualState.decision_summary || ''),
+      scannerVerdict:String(scannerVisualState && (scannerVisualState.finalVerdict || scannerVisualState.final_verdict) || '').trim().toLowerCase(),
+      scannerBucket:String(scannerVisualState && (scannerVisualState.bucket || scannerVisualState.visualBucket) || '').trim().toLowerCase(),
+      reviewDecisionSummary:String(reviewDisplay && reviewDisplay.decisionSummary || ''),
+      reviewTechnicalContext:String(reviewDisplay && reviewDisplay.technicalContextLine || ''),
+      reviewProjection:reviewDisplay && reviewDisplay.decisionProjection ? reviewDisplay.decisionProjection : null,
+      storyWithoutAnalysis:storyWithoutAnalysis || null,
+      storyWithAnalysis:storyWithAnalysis || null,
+      accepted50,
+      accepted50Allowed:typeof accepted50MaSupportTestAllowedForStoryContext === 'function'
+        ? accepted50MaSupportTestAllowedForStoryContext(storyWithAnalysis)
+        : null
+    };
+  }, ticker);
 }
 
 test('canonical Entry uses a neutral tracked section heading and consistent review/track RR copy', async ({page}) => {
@@ -1318,6 +1393,715 @@ test('analysis-enriched story context is shared by Review, Track, and diagnostic
   expect(result.diagnosticsPhase).toBe(result.withAnalysisPhase);
   expect(result.reviewOpportunity).toBe(result.trackOpportunity);
   expect(result.diagnosticsOpportunity).toBe(result.trackOpportunity);
+});
+
+test('Scan summary prefers canonical away-from-support semantics over raw extended compatibility fields', async ({page}) => {
+  await bootApp(page);
+  const scenario = awayFromSupportScenario();
+  scenario.setupLocationState = 'extended';
+  scenario.pullbackZone = 'extended';
+  scenario.bounceState = 'confirmed';
+  scenario.actionLabel = 'Wait for a reset into support before considering entry again.';
+  scenario.normalizedAnalysis = {
+    canonicalValues:{
+      price:72.4,
+      ma20:68.6,
+      ma50:64.4,
+      ma200:58.2
+    },
+    trustedMarketContext:{
+      recentCandleSequence:[
+        {date:'2026-06-27', open:70.2, high:72.9, low:69.8, close:72.4, volume:2410000},
+        {date:'2026-06-26', open:68.4, high:70.5, low:67.9, close:70.1, volume:2250000},
+        {date:'2026-06-25', open:67.0, high:68.7, low:66.6, close:68.3, volume:2140000}
+      ]
+    }
+  };
+  await seedScenario(page, scenario);
+
+  const result = await extractScanReviewParity(page, 'AWAY');
+
+  expect(result.storyWithAnalysis.currentPhase).toBe('away_from_support');
+  expect(result.scannerVerdict).toBe('watch');
+  expect(result.scannerBucket).not.toBe('');
+  expect(result.scannerSummary).toMatch(/away from support|wait for a reset|trend remains constructive/i);
+  expect(result.scannerSummary).not.toMatch(/buyers emerging|buyers responding|no pullback|strong trend, but no clean pullback entry yet/i);
+});
+
+test('Scan summary does not revert to raw no-pullback copy after a completed support response has moved away from support', async ({page}) => {
+  await bootApp(page);
+  const scenario = awayFromSupportScenario();
+  scenario.setupLocationState = 'none';
+  scenario.pullbackZone = 'none';
+  scenario.bounceState = 'attempt';
+  scenario.normalizedAnalysis = {
+    canonicalValues:{
+      price:71.9,
+      ma20:68.4,
+      ma50:64.0,
+      ma200:58.2
+    },
+    trustedMarketContext:{
+      recentCandleSequence:[
+        {date:'2026-06-27', open:69.7, high:72.2, low:69.3, close:71.9, volume:2380000},
+        {date:'2026-06-26', open:68.1, high:69.9, low:67.8, close:69.6, volume:2210000},
+        {date:'2026-06-25', open:66.9, high:68.5, low:66.4, close:68.0, volume:2090000}
+      ]
+    }
+  };
+  await seedScenario(page, scenario);
+
+  const result = await extractScanReviewParity(page, 'AWAY');
+
+  expect(result.storyWithAnalysis.currentPhase).toBe('away_from_support');
+  expect(result.scannerSummary).toMatch(/away from support|trend remains constructive/i);
+  expect(result.scannerSummary).not.toMatch(/no pullback|developing|waiting for confirmation/i);
+});
+
+test('analysis-enriched Scan reconstruction matches Review semantics when normalized analysis changes the canonical phase', async ({page}) => {
+  await bootApp(page);
+  const seed = watchScenario();
+  await page.evaluate(() => {
+    const record = upsertTickerRecord('WATC');
+    record.meta.companyName = 'Watch Holdings Plc';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.tradingViewSymbol = 'NASDAQ:WATC';
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.currency = 'USD';
+    record.marketData.price = 52.4;
+    record.marketData.previousClose = 52.1;
+    record.marketData.ma20 = 51.8;
+    record.marketData.ma50 = 49.9;
+    record.marketData.ma200 = 45.2;
+    record.marketData.volume = 1820000;
+    record.marketData.avgVolume = 1640000;
+    record.marketData.history = [
+      {date:'2026-06-27', open:51.7, high:52.8, low:51.2, close:52.4, volume:1820000},
+      {date:'2026-06-26', open:51.8, high:52.0, low:51.0, close:51.6, volume:1710000}
+    ];
+    record.setup.structureState = 'strong';
+    record.setup.structureEligibility = 'alive';
+    record.setup.setupLocationState = 'near_20ma';
+    record.setup.pullbackZone = 'near_20ma';
+    record.setup.priceabilityState = 'priceable';
+    record.setup.bounceState = 'attempt';
+    record.setup.stabilisationState = 'stabilising';
+    record.setup.volumeState = 'supportive';
+    record.setup.trendState = 'strong';
+    record.plan.entry = 53.1;
+    record.plan.stop = 49.2;
+    record.plan.firstTarget = 60.3;
+    record.plan.target = 60.3;
+    record.plan.status = 'valid';
+    record.plan.source = 'manual_review';
+    record.watchlist.inWatchlist = true;
+    record.review.analysisState = {
+      normalized:{
+        canonicalValues:{
+          price:60.4,
+          ma20:52.0,
+          ma50:50.0,
+          ma200:45.2
+        },
+        trustedMarketContext:{
+          recentCandleSequence:[
+            {date:'2026-06-27', open:58.8, high:60.8, low:58.3, close:60.4, volume:2500000},
+            {date:'2026-06-26', open:57.1, high:59.2, low:56.8, close:58.9, volume:2300000},
+            {date:'2026-06-25', open:54.9, high:57.4, low:54.6, close:57.0, volume:2100000}
+          ]
+        }
+      }
+    };
+    state.tickers = ['WATC'];
+  }, seed);
+
+  const result = await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    const globalVerdict = resolveGlobalVerdict(record);
+    const derivedStates = analysisDerivedStatesFromRecord(record);
+    const displayedPlan = deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency);
+    const analysisState = getReviewAnalysisState(record);
+    const normalizedAnalysis = analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+      ? analysisState.normalizedAnalysis
+      : {};
+    const storyWithoutAnalysis = buildCanonicalStoryContextForRecord(record, {
+      globalVerdict,
+      derivedStates
+    });
+    const storyWithAnalysis = buildCanonicalStoryContextForRecord(record, {
+      analysis:normalizedAnalysis,
+      globalVerdict,
+      derivedStates
+    });
+    const reviewDisplay = buildResolvedReviewDisplayModel({
+      record,
+      simplifiedState:resolveSimplifiedStateForSurface(record, 'review', {
+        log:false,
+        source:'analysis_enriched_scan_contract',
+        reason:'analysis_enriched_scan_contract'
+      }),
+      globalVerdict,
+      reviewSemanticStatus:buildReviewSemanticStatus({
+        record,
+        simplifiedState:resolveSimplifiedStateForSurface(record, 'review', {
+          log:false,
+          source:'analysis_enriched_scan_contract',
+          reason:'analysis_enriched_scan_contract'
+        }),
+        globalVerdict,
+        derivedStates,
+        displayedPlan,
+        planRealism:{raw_rr:2.0, realistic_rr:2.0}
+      }),
+      derivedStates,
+      displayedPlan,
+      planRealism:{raw_rr:2.0, realistic_rr:2.0}
+    });
+    const scannerVisualState = resolveVisualState(record, 'scanner', {
+      derivedStates,
+      displayedPlan,
+      analysis:normalizedAnalysis,
+      resolvedContract:{
+        finalVerdict:'watch',
+        final_verdict:'watch',
+        planStatusKey:'valid',
+        entry_gate_checks:{},
+        near_entry_gate_checks:{}
+      }
+    });
+    return {
+      storyWithoutPhase:String(storyWithoutAnalysis && storyWithoutAnalysis.currentPhase || ''),
+      storyWithPhase:String(storyWithAnalysis && storyWithAnalysis.currentPhase || ''),
+      reviewPhase:String(reviewDisplay && reviewDisplay.decisionProjection && reviewDisplay.decisionProjection.currentPhase || ''),
+      scannerSummary:String(scannerVisualState && scannerVisualState.decision_summary || '')
+    };
+  });
+
+  expect(result.storyWithoutPhase).not.toBe(result.storyWithPhase);
+  expect(result.reviewPhase).toBe(result.storyWithPhase);
+  expect(result.storyWithPhase).toBe('away_from_support');
+  expect(result.scannerSummary).not.toMatch(/buyers emerging|buyers responded|support is holding/i);
+});
+
+test('Scan obtains restored normalized analysis through the Review authority bridge', async ({page}) => {
+  const scannerViewSource = fs.readFileSync(path.resolve(__dirname, '..', '..', '..', 'js', 'scanner-view.js'), 'utf8');
+  expect(scannerViewSource).not.toContain('review.analysisState.normalized');
+
+  await bootApp(page);
+  const result = await page.evaluate(() => {
+    const record = upsertTickerRecord('SCBR');
+    record.meta.companyName = 'Scanner Bridge Authority Plc';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.tradingViewSymbol = 'NASDAQ:SCBR';
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData = {
+      ...record.marketData,
+      currency:'USD', price:52.4, previousClose:52.1, ma20:51.8, ma50:49.9, ma200:45.2
+    };
+    record.setup = {
+      ...record.setup,
+      structureState:'strong', structureEligibility:'alive', setupLocationState:'near_20ma',
+      pullbackZone:'near_20ma', priceabilityState:'priceable', bounceState:'attempt',
+      stabilisationState:'stabilising', volumeState:'supportive', trendState:'strong'
+    };
+    record.plan = {...record.plan, entry:53.1, stop:49.2, firstTarget:60.3, target:60.3, status:'valid'};
+    record.review.analysisState = {
+      normalized:{
+        scannerAuthority:'stale-persisted-payload',
+        canonicalValues:{price:50.0, ma20:52.0, ma50:50.0, ma200:45.2},
+        trustedMarketContext:{
+          recentCandleSequence:[
+            {date:'2026-06-27', open:50.2, high:50.7, low:49.6, close:50.0, volume:1800000},
+            {date:'2026-06-26', open:50.8, high:51.2, low:49.8, close:50.3, volume:1750000}
+          ]
+        }
+      }
+    };
+    const authoritativeAnalysis = {
+      scannerAuthority:'review-authority',
+      canonicalValues:{price:60.4, ma20:52.0, ma50:50.0, ma200:45.2},
+      trustedMarketContext:{
+        recentCandleSequence:[
+          {date:'2026-06-27', open:58.8, high:60.8, low:58.3, close:60.4, volume:2500000},
+          {date:'2026-06-26', open:57.1, high:59.2, low:56.8, close:58.9, volume:2300000},
+          {date:'2026-06-25', open:54.9, high:57.4, low:54.6, close:57.0, volume:2100000}
+        ]
+      }
+    };
+    const originalAccessor = getReviewAnalysisState;
+    const originalBuilder = buildCanonicalStoryContextForRecord;
+    let scannerBridgeAuthority = '';
+    let scannerBridgePhase = '';
+    globalThis.getReviewAnalysisState = item => item && item.ticker === 'SCBR'
+      ? {normalizedAnalysis:authoritativeAnalysis}
+      : originalAccessor(item);
+    globalThis.buildCanonicalStoryContextForRecord = function(currentRecord, options = {}){
+      const story = originalBuilder(currentRecord, options);
+      const usesReviewAuthority = !!(
+        options.analysis
+        && options.analysis.scannerAuthority === 'review-authority'
+      );
+      if(currentRecord && currentRecord.ticker === 'SCBR' && options.analysis && options.analysis.scannerAuthority){
+        scannerBridgeAuthority = options.analysis.scannerAuthority;
+        scannerBridgePhase = usesReviewAuthority ? 'away_from_support' : 'at_support';
+      }
+      return {
+        ...story,
+        currentPhase:usesReviewAuthority ? 'away_from_support' : 'at_support',
+        support:{
+          ...(story.support || {}),
+          label:'20MA',
+          type:'20ma_support',
+          currentlyActive:!usesReviewAuthority
+        },
+        structure:{...(story.structure || {}), state:'strong'},
+        buyerControl:{...(story.buyerControl || {}), state:'none'},
+        confirmation:{...(story.confirmation || {}), state:'unconfirmed'}
+      };
+    };
+    try{
+      const globalVerdict = resolveGlobalVerdict(record);
+      const derivedStates = analysisDerivedStatesFromRecord(record);
+      const displayedPlan = deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency);
+      const reviewDisplay = buildResolvedReviewDisplayModel({
+        record,
+        simplifiedState:resolveSimplifiedStateForSurface(record, 'review', {log:false}),
+        globalVerdict,
+        reviewSemanticStatus:buildReviewSemanticStatus({record, simplifiedState:resolveSimplifiedStateForSurface(record, 'review', {log:false}), globalVerdict, derivedStates, displayedPlan, planRealism:{raw_rr:2, realistic_rr:2}}),
+        derivedStates,
+        displayedPlan,
+        planRealism:{raw_rr:2, realistic_rr:2}
+      });
+      scannerBridgeAuthority = '';
+      scannerBridgePhase = '';
+      const scanView = buildFinalSetupView(record);
+      const bridgeAuthorityUsedByScan = scannerBridgeAuthority;
+      const bridgePhaseUsedByScan = scannerBridgePhase;
+      const scannerStory = buildCanonicalStoryContextForRecord(record, {analysis:authoritativeAnalysis, globalVerdict, derivedStates});
+      const rawStory = buildCanonicalStoryContextForRecord(record, {analysis:record.review.analysisState.normalized, globalVerdict, derivedStates});
+      return {
+        reviewPhase:String(reviewDisplay.decisionProjection && reviewDisplay.decisionProjection.currentPhase || ''),
+        scannerPhase:String(scannerStory.currentPhase || ''),
+        rawPhase:String(rawStory.currentPhase || ''),
+        scannerBridgeAuthority:bridgeAuthorityUsedByScan,
+        scannerBridgePhase:bridgePhaseUsedByScan,
+        scannerSummary:String(scanView.globalVerdict && scanView.globalVerdict.decision_summary || '')
+      };
+    }finally{
+      globalThis.getReviewAnalysisState = originalAccessor;
+      globalThis.buildCanonicalStoryContextForRecord = originalBuilder;
+    }
+  });
+
+  expect(result.scannerPhase).toBe('away_from_support');
+  expect(result.rawPhase).not.toBe(result.scannerPhase);
+  expect(result.reviewPhase).toBe(result.scannerPhase);
+  expect(result.scannerBridgeAuthority).toBe('review-authority');
+  expect(result.scannerBridgePhase).toBe(result.scannerPhase);
+  expect(result.scannerSummary).not.toBe('');
+});
+
+test('resolveVisualState ignores persisted review normalized analysis unless analysis is passed explicitly', async ({page}) => {
+  await bootApp(page);
+  await page.evaluate(() => {
+    const record = upsertTickerRecord('RSTR');
+    record.meta.companyName = 'Restored Authority Plc';
+    record.meta.exchange = 'NASDAQ';
+    record.meta.tradingViewSymbol = 'NASDAQ:RSTR';
+    record.meta.marketStatus = 'S&P above 50 MA';
+    record.marketData.currency = 'USD';
+    record.marketData.price = 52.4;
+    record.marketData.previousClose = 52.1;
+    record.marketData.ma20 = 51.8;
+    record.marketData.ma50 = 49.9;
+    record.marketData.ma200 = 45.2;
+    record.marketData.volume = 1820000;
+    record.marketData.avgVolume = 1640000;
+    record.marketData.history = [
+      {date:'2026-06-27', open:51.7, high:52.8, low:51.2, close:52.4, volume:1820000},
+      {date:'2026-06-26', open:51.8, high:52.0, low:51.0, close:51.6, volume:1710000}
+    ];
+    record.setup.structureState = 'strong';
+    record.setup.structureEligibility = 'alive';
+    record.setup.setupLocationState = 'near_20ma';
+    record.setup.pullbackZone = 'near_20ma';
+    record.setup.priceabilityState = 'priceable';
+    record.setup.bounceState = 'attempt';
+    record.setup.stabilisationState = 'stabilising';
+    record.setup.volumeState = 'supportive';
+    record.setup.trendState = 'strong';
+    record.plan.entry = 53.1;
+    record.plan.stop = 49.2;
+    record.plan.firstTarget = 60.3;
+    record.plan.target = 60.3;
+    record.plan.status = 'valid';
+    record.plan.source = 'manual_review';
+    record.review.analysisState = {
+      normalized:{
+        canonicalValues:{
+          price:60.4,
+          ma20:52.0,
+          ma50:50.0,
+          ma200:45.2
+        },
+        trustedMarketContext:{
+          recentCandleSequence:[
+            {date:'2026-06-27', open:58.8, high:60.8, low:58.3, close:60.4, volume:2500000},
+            {date:'2026-06-26', open:57.1, high:59.2, low:56.8, close:58.9, volume:2300000},
+            {date:'2026-06-25', open:54.9, high:57.4, low:54.6, close:57.0, volume:2100000}
+          ]
+        }
+      }
+    };
+    state.tickers = ['RSTR'];
+  });
+
+  const result = await page.evaluate(() => {
+    const record = getTickerRecord('RSTR');
+    const globalVerdict = resolveGlobalVerdict(record);
+    const derivedStates = analysisDerivedStatesFromRecord(record);
+    const displayedPlan = deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency);
+    const normalizedAnalysis = getReviewAnalysisState(record).normalizedAnalysis;
+    const withoutAnalysisStory = buildCanonicalStoryContextForRecord(record, {
+      globalVerdict,
+      derivedStates
+    });
+    const withAnalysisStory = buildCanonicalStoryContextForRecord(record, {
+      analysis:normalizedAnalysis,
+      globalVerdict,
+      derivedStates
+    });
+    const watchlistWithoutAnalysis = resolveVisualState(record, 'watchlist', {
+      derivedStates,
+      displayedPlan,
+      resolvedContract:{
+        finalVerdict:'watch',
+        final_verdict:'watch',
+        planStatusKey:'valid'
+      }
+    });
+    const withoutPersistedAnalysisRecord = JSON.parse(JSON.stringify(record));
+    if(withoutPersistedAnalysisRecord.review && withoutPersistedAnalysisRecord.review.analysisState){
+      delete withoutPersistedAnalysisRecord.review.analysisState;
+    }
+    const watchlistWithoutPersistedAnalysis = resolveVisualState(withoutPersistedAnalysisRecord, 'watchlist', {
+      derivedStates,
+      displayedPlan,
+      resolvedContract:{
+        finalVerdict:'watch',
+        final_verdict:'watch',
+        planStatusKey:'valid'
+      }
+    });
+    const watchlistWithAnalysis = resolveVisualState(record, 'watchlist', {
+      derivedStates,
+      displayedPlan,
+      analysis:normalizedAnalysis,
+      resolvedContract:{
+        finalVerdict:'watch',
+        final_verdict:'watch',
+        planStatusKey:'valid'
+      }
+    });
+    return {
+      withoutAnalysisPhase:String(withoutAnalysisStory && withoutAnalysisStory.currentPhase || ''),
+      withAnalysisPhase:String(withAnalysisStory && withAnalysisStory.currentPhase || ''),
+      withoutAnalysisSummary:String(watchlistWithoutAnalysis && watchlistWithoutAnalysis.decision_summary || ''),
+      withoutPersistedAnalysisSummary:String(watchlistWithoutPersistedAnalysis && watchlistWithoutPersistedAnalysis.decision_summary || ''),
+      withAnalysisSummary:String(watchlistWithAnalysis && watchlistWithAnalysis.decision_summary || '')
+    };
+  });
+
+  expect(result.withoutAnalysisPhase).not.toBe(result.withAnalysisPhase);
+  expect(['responding_from_support', 'stalled_after_response']).toContain(result.withoutAnalysisPhase);
+  expect(result.withAnalysisPhase).toBe('away_from_support');
+  expect(result.withoutAnalysisSummary).toBe(result.withoutPersistedAnalysisSummary);
+  expect(result.withoutAnalysisSummary).not.toMatch(/away from support|wait for a reset/i);
+});
+
+test('damaged lost-support setups do not retain intact-support or buyers-emerging wording after canonical damage is resolved', async ({page}) => {
+  await bootApp(page);
+  const scenario = supportFailedScenario();
+  scenario.canonicalVerdict = 'watch';
+  scenario.visualBucket = 'monitor';
+  scenario.badgeLabel = 'Watch';
+  scenario.scanVerdictLabel = 'Watch';
+  await seedScenario(page, scenario);
+
+  const result = await extractScanReviewParity(page, 'FAILR');
+
+  expect(result.storyWithAnalysis.currentPhase).toBe('support_failed');
+  expect(result.reviewProjection.canonicalVerdict).toBe('watch');
+  expect(result.scannerSummary).not.toMatch(/buyers emerging|buyers responding|support is holding/i);
+  expect(result.reviewTechnicalContext).toMatch(/Structure broken|Structure weakening/i);
+  expect(result.reviewTechnicalContext).not.toMatch(/Structure intact|Responding at|Testing 20MA/i);
+});
+
+test('accepted 50MA support-test override allows weak live tests and rejects contradictory canonical states', async ({page}) => {
+  await bootApp(page);
+  const result = await page.evaluate(() => {
+    const buildCase = ({ticker, analysis, storyContextOverride}) => {
+      const record = {
+        ticker,
+        marketData:{
+          currency:'USD',
+          price:248.39,
+          ma20:255.4,
+          ma50:250.23,
+          ma200:241.3
+        },
+        watchlist:{
+          inWatchlist:true,
+          debug:{
+            structural_alive_at_refresh:'true',
+            refresh_demote_reason:'Structurally alive; keep on monitor.'
+          }
+        },
+        review:{
+          analysisState:{normalized:analysis}
+        },
+        plan:{status:'valid', source:'manual_review'},
+        setup:{
+          structureState:'weak',
+          structureEligibility:'alive',
+          setupLocationState:'near_50ma',
+          pullbackZone:'near_50ma',
+          priceabilityState:'priceable',
+          bounceState:'none',
+          supportContext:'50ma_support',
+          supportTestState:'testing',
+          buyerControlState:'none',
+          stabilisationState:'none',
+          volumeState:'supportive',
+          trendState:'strong'
+        }
+      };
+      const derivedStates = {
+        structureState:'weak',
+        structureEligibility:'alive',
+        pullbackZone:'near_50ma',
+        setupLocationState:'near_50ma',
+        priceabilityState:'priceable',
+        bounceState:'none',
+        supportContext:'50ma_support',
+        supportTestState:'testing',
+        buyerControlState:'none',
+        stabilisationState:'none',
+        volumeState:'supportive'
+      };
+      const globalVerdict = {
+        final_verdict:'watch',
+        structure_eligibility:'alive',
+        structure_state:'weak',
+        near_entry_pullback_zone_accepted:true,
+        pullback_zone:'near_50ma',
+        bounce_state:'none',
+        refresh_demote_reason:'Structurally alive; keep on monitor.'
+      };
+      const displayedPlan = deriveCurrentPlanState('', '', '', 'USD');
+      const originalBuilder = buildCanonicalStoryContextForRecord;
+      if(storyContextOverride){
+        globalThis.buildCanonicalStoryContextForRecord = function(currentRecord, options = {}){
+          return {
+            ...storyContextOverride,
+            support:{label:'50MA', type:'50ma_support', currentlyActive:true, ...(storyContextOverride.support || {})},
+            structure:{state:'weak', ...(storyContextOverride.structure || {})},
+            volume:{state:'supportive', ...(storyContextOverride.volume || {})}
+          };
+        };
+      }
+      try{
+        const reviewSemanticStatus = buildReviewSemanticStatus({
+          record,
+          simplifiedState:resolveSimplifiedStateForSurface(record, 'review', {log:false}),
+          globalVerdict,
+          derivedStates,
+          displayedPlan,
+          planRealism:{raw_rr:null, realistic_rr:null}
+        });
+        const resolved = buildResolvedReviewDisplayModel({
+          record,
+          simplifiedState:resolveSimplifiedStateForSurface(record, 'review', {log:false}),
+          globalVerdict,
+          reviewSemanticStatus,
+          derivedStates,
+          displayedPlan,
+          planRealism:{raw_rr:null, realistic_rr:null}
+        });
+        return {
+          accepted50:isAccepted50MaSupportTestDisplayState({record, globalVerdict, derivedStates}),
+          accepted50Allowed:accepted50MaSupportTestAllowedForStoryContext(resolved.storyContext),
+          technicalContext:String(resolved.technicalContextLine || ''),
+          currentPhase:String(resolved.storyContext && resolved.storyContext.currentPhase || '')
+        };
+      }finally{
+        globalThis.buildCanonicalStoryContextForRecord = originalBuilder;
+      }
+    };
+    return {
+      weakLive:buildCase({
+        ticker:'FIFW',
+        analysis:{
+          canonicalValues:{price:248.39, ma20:255.4, ma50:250.23, ma200:241.3},
+          trustedMarketContext:{
+            recentCandleSequence:[
+              {date:'2026-06-27', open:249.8, high:250.6, low:247.9, close:248.39, volume:1500000},
+              {date:'2026-06-26', open:251.4, high:252.1, low:248.8, close:249.7, volume:1460000}
+            ]
+          }
+        },
+        storyContextOverride:{
+          currentPhase:'at_support',
+          support:{label:'50MA', type:'50ma_support', currentlyActive:true},
+          structure:{state:'weak'},
+          buyerControl:{state:'none'},
+          confirmation:{state:'unconfirmed'}
+        }
+      }),
+      live:buildCase({
+        ticker:'FIFT',
+        analysis:{
+          canonicalValues:{price:248.39, ma20:255.4, ma50:250.23, ma200:241.3},
+          trustedMarketContext:{
+            recentCandleSequence:[
+              {date:'2026-06-27', open:249.8, high:250.6, low:247.9, close:248.39, volume:1500000},
+              {date:'2026-06-26', open:251.4, high:252.1, low:248.8, close:249.7, volume:1460000}
+            ]
+          }
+        }
+      }),
+      advanced:buildCase({
+        ticker:'FIFX',
+        analysis:{
+          canonicalValues:{price:258.8, ma20:252.2, ma50:250.23, ma200:241.3},
+          trustedMarketContext:{
+            recentCandleSequence:[
+              {date:'2026-06-27', open:256.7, high:259.0, low:256.3, close:258.8, volume:1700000},
+              {date:'2026-06-26', open:254.7, high:257.0, low:254.4, close:256.8, volume:1620000},
+              {date:'2026-06-25', open:252.5, high:255.0, low:252.2, close:254.6, volume:1540000}
+            ]
+          }
+        },
+        storyContextOverride:{
+          currentPhase:'away_from_support',
+          buyerResponse:{semantic:'response_present'},
+          buyerControl:{state:'confirmed'},
+          confirmation:{state:'follow_through_confirmed'},
+          support:{label:'50MA', type:'50ma_support', currentlyActive:false}
+        }
+      }),
+      broken:buildCase({
+        ticker:'FIFB',
+        analysis:{
+          canonicalValues:{price:248.39, ma20:255.4, ma50:250.23, ma200:241.3},
+          trustedMarketContext:{
+            recentCandleSequence:[
+              {date:'2026-06-27', open:249.8, high:250.6, low:247.9, close:248.39, volume:1500000},
+              {date:'2026-06-26', open:251.4, high:252.1, low:248.8, close:249.7, volume:1460000}
+            ]
+          }
+        },
+        storyContextOverride:{
+          currentPhase:'at_support',
+          support:{label:'50MA', type:'50ma_support', currentlyActive:true},
+          structure:{state:'broken'},
+          buyerControl:{state:'none'},
+          confirmation:{state:'unconfirmed'}
+        }
+      }),
+      emptyPhase:buildCase({
+        ticker:'FIFE',
+        analysis:{canonicalValues:{price:248.39, ma20:255.4, ma50:250.23, ma200:241.3}},
+        storyContextOverride:{
+          currentPhase:'',
+          support:{label:'50MA', type:'50ma_support', currentlyActive:true},
+          structure:{state:'weak'}
+        }
+      }),
+      missingPhase:buildCase({
+        ticker:'FIFM',
+        analysis:{canonicalValues:{price:248.39, ma20:255.4, ma50:250.23, ma200:241.3}},
+        storyContextOverride:{
+          support:{label:'50MA', type:'50ma_support', currentlyActive:true},
+          structure:{state:'weak'}
+        }
+      }),
+      intactLive:buildCase({
+        ticker:'FIFI',
+        analysis:{canonicalValues:{price:248.39, ma20:255.4, ma50:250.23, ma200:241.3}},
+        storyContextOverride:{
+          currentPhase:'responding_from_support',
+          support:{label:'50MA', type:'50ma_support', currentlyActive:true},
+          structure:{state:'strong'},
+          buyerControl:{state:'none'},
+          confirmation:{state:'unconfirmed'}
+        }
+      })
+    };
+  });
+
+  expect(result.weakLive.accepted50).toBe(true);
+  expect(result.weakLive.currentPhase).toBe('at_support');
+  expect(result.weakLive.accepted50Allowed).toBe(true);
+  expect(result.weakLive.technicalContext).toContain('Pullback near 50MA');
+
+  expect(result.live.accepted50).toBe(true);
+  expect(result.live.accepted50Allowed).toBe(true);
+  expect(result.live.technicalContext).toContain('Pullback near 50MA');
+
+  expect(result.broken.accepted50).toBe(true);
+  expect(result.broken.accepted50Allowed).toBe(false);
+  expect(result.broken.technicalContext).not.toContain('Pullback near 50MA');
+  expect(result.broken.technicalContext).toMatch(/Structure broken/i);
+
+  expect(result.advanced.accepted50).toBe(true);
+  expect(result.advanced.currentPhase).toBe('away_from_support');
+  expect(result.advanced.accepted50Allowed).toBe(false);
+  expect(result.advanced.technicalContext).not.toContain('Pullback near 50MA');
+  expect(result.advanced.technicalContext).toMatch(/Away from 50MA|Extended from 50MA/i);
+
+  expect(result.emptyPhase.accepted50).toBe(true);
+  expect(result.emptyPhase.accepted50Allowed).toBe(false);
+  expect(result.emptyPhase.technicalContext).not.toContain('Pullback near 50MA');
+
+  expect(result.missingPhase.accepted50).toBe(true);
+  expect(result.missingPhase.accepted50Allowed).toBe(false);
+  expect(result.missingPhase.technicalContext).not.toContain('Pullback near 50MA');
+
+  expect(result.intactLive.accepted50).toBe(true);
+  expect(result.intactLive.accepted50Allowed).toBe(true);
+  expect(result.intactLive.technicalContext).toContain('Pullback near 50MA');
+});
+
+test('missing normalized analysis falls back safely without fabricating support evidence', async ({page}) => {
+  await bootApp(page);
+  await seedScenario(page, watchScenario());
+  await page.evaluate(() => {
+    const record = getTickerRecord('WATC');
+    record.review.analysisState = {normalized:{}};
+  });
+
+  const result = await extractScanReviewParity(page, 'WATC');
+
+  expect(result.storyWithAnalysis.currentPhase || '').toBe(result.storyWithoutAnalysis.currentPhase || '');
+  expect(result.scannerSummary).not.toBe('');
+  expect(result.scannerSummary).not.toMatch(/support failed|buyers emerging/i);
+});
+
+test('support-failed canonical phase keeps scan and review guidance aligned without forcing an Avoid verdict', async ({page}) => {
+  await bootApp(page);
+  const scenario = supportFailedScenario();
+  scenario.canonicalVerdict = 'watch';
+  scenario.visualBucket = 'monitor';
+  scenario.badgeLabel = 'Watch';
+  scenario.scanVerdictLabel = 'Watch';
+  await seedScenario(page, scenario);
+
+  const result = await extractScanReviewParity(page, 'FAILR');
+
+  expect(result.reviewProjection.canonicalVerdict).toBe('watch');
+  expect(result.storyWithAnalysis.currentPhase).toBe('support_failed');
+  expect(result.scannerSummary).not.toMatch(/buyers emerging|buyers responding|support is holding/i);
 });
 
 test('reduced-packet semantics stay aligned and unknown-safe', async ({page}) => {

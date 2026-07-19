@@ -4548,11 +4548,11 @@ function runSimplifiedPipelineAssertions(){
       return {currentPhase:'responding_from_support'};
     }
   });
-  if(!/setup quality|usable pullback/i.test(String(lowScoreSupportStoryVisual.decision_summary || ''))){
-    throw new Error('Low-score Watch card summary must preserve quality-driven blocker copy.');
+  if(!/support is holding|buyers still need to prove control/i.test(String(lowScoreSupportStoryVisual.decision_summary || ''))){
+    throw new Error('Low-score Watch card summary must now prefer the canonical chart-confirmation copy when no independent blocker exists.');
   }
-  if(/buyers still need to prove control|support is holding/i.test(String(lowScoreSupportStoryVisual.decision_summary || ''))){
-    throw new Error('Low-score Watch card summary must not be replaced by canonical chart-confirmation copy.');
+  if(/setup quality has slipped below useful watchlist quality/i.test(String(lowScoreSupportStoryVisual.decision_summary || ''))){
+    throw new Error('Low-score Watch card summary must not let low-score quality copy hide the canonical chart story by itself.');
   }
 
   const invalidPlanSupportStoryVisual = resolverPresentation.resolveVisualState({
@@ -10966,8 +10966,8 @@ function runReviewPricedButNotReadyAssertions(){
       buyerControl:{state:'emerging'}
     }
   });
-  if(!/setup quality|usable pullback/i.test(String(lowScoreDecisionSummary || '')) || /support is holding|buyers still need to prove control/i.test(String(lowScoreDecisionSummary || ''))){
-    throw new Error('buildDecisionSummary must preserve the low-score blocker ahead of canonical chart-story copy.');
+  if(!/support is holding|buyers still need to prove control/i.test(String(lowScoreDecisionSummary || '')) || /setup quality has slipped below useful watchlist quality/i.test(String(lowScoreDecisionSummary || ''))){
+    throw new Error('buildDecisionSummary must prefer the canonical chart-story explanation when low-score is not an independent blocker.');
   }
 
   const invalidPlanDecisionSummary = sandbox.buildDecisionSummary({
@@ -11102,8 +11102,8 @@ function runReviewPricedButNotReadyAssertions(){
       buyerControl:{state:'none'}
     }
   });
-  if(!/setup quality|usable pullback/i.test(String(awayFromSupportLowScoreDecisionSummary || ''))){
-    throw new Error('Low-score blockers must still beat away-from-support summaries.');
+  if(!/away from support|constructive rebound|wait for a reset/i.test(String(awayFromSupportLowScoreDecisionSummary || ''))){
+    throw new Error('Low-score alone must not beat away-from-support canonical summaries.');
   }
 
   const originalBuildCanonicalStoryContextForRecord = sandbox.buildCanonicalStoryContextForRecord;

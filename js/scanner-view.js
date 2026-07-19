@@ -37,6 +37,15 @@
     return labels.noneLabel || 'No buyer control';
   }
 
+  function authoritativeNormalizedAnalysisForRecord(record, deps = {}){
+    const normalized = typeof deps.getAuthoritativeNormalizedAnalysis === 'function'
+      ? deps.getAuthoritativeNormalizedAnalysis(record)
+      : null;
+    return normalized && typeof normalized === 'object' && Object.keys(normalized).length
+      ? normalized
+      : null;
+  }
+
   function getRankedDisplayBucket(record, deps = {}){
     return buildFinalSetupView(record, {}, deps).bucket;
   }
@@ -484,7 +493,8 @@
     }, deps);
     const visualState = deps.resolveVisualState(view.item, 'scanner', {
       derivedStates,
-      displayedPlan:view.displayedPlan
+      displayedPlan:view.displayedPlan,
+      analysis:authoritativeNormalizedAnalysisForRecord(view.item, deps)
     });
     const scannerVerdict = deps.normalizeGlobalVerdictKey(visualState.finalVerdict || visualState.final_verdict);
     const globalBadge = visualState.badge || deps.getBadge(scannerVerdict);
@@ -609,7 +619,9 @@
 
   function rankedDecisionBucketForView(view, deps = {}){
     const item = view && view.item ? view.item : view;
-    const visualState = deps.resolveVisualState(item, 'scanner');
+    const visualState = deps.resolveVisualState(item, 'scanner', {
+      analysis:authoritativeNormalizedAnalysisForRecord(item, deps)
+    });
     return visualState.bucket || deps.getBucket(visualState.finalVerdict || visualState.final_verdict);
   }
 
