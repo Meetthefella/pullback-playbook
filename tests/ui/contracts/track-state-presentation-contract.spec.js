@@ -1519,6 +1519,7 @@ test('completed continuation supersedes stale support-era fields across Scan and
   expect(result.reviewProjection.currentPhase).toBe('extended_from_support');
   expect(result.scannerSummary).toMatch(/away from support|already away from support|wait for a reset/i);
   expect(result.scannerSummary).not.toMatch(/developing|no pullback|buyers emerging|buyers responding/i);
+  expect(result.scannerTechnicalSummary).toBe('Structure intact | Extended from 20-day average | Buyer control confirmed');
   expect(result.reviewTechnicalContext).toMatch(/extended from 20-day average|away from 20-day average/i);
   expect(result.reviewTechnicalContext).not.toMatch(/stalled after|follow-through stalled|buyers emerging/i);
 });
@@ -1587,6 +1588,35 @@ test('terminal structural damage retains historical response without presenting 
   expect(result.scannerTechnicalSummary).not.toMatch(/buyers emerging|developing|extended/i);
   expect(result.trackPrimaryReason).not.toMatch(/trend is still healthy/i);
   expect(result.trackNextAction).toMatch(/chart to repair/i);
+});
+
+test('Scan canonical technical projector covers active, stalled, away, extended, and terminal phases', async ({page}) => {
+  await bootApp(page);
+  const labels = await page.evaluate(() => {
+    const context = ({phase, structure = 'intact', support = '20-day average', buyer = 'none', confirmation = 'follow_through_unknown'}) => ({
+      currentPhase:phase,
+      structure:{state:structure},
+      support:{label:support, type:'20ma'},
+      buyerResponse:{semantic:buyer === 'emerging' ? 'response_present' : 'response_unknown'},
+      buyerControl:{state:buyer},
+      confirmation:{semantic:confirmation, state:confirmation === 'follow_through_confirmed' ? 'confirmed' : 'unconfirmed'}
+    });
+    return {
+      extended:canonicalScanTechnicalSummaryFromStoryContext(context({phase:'extended_from_support', buyer:'confirmed', confirmation:'follow_through_confirmed'})),
+      away:canonicalScanTechnicalSummaryFromStoryContext(context({phase:'away_from_support', buyer:'confirmed', confirmation:'follow_through_confirmed'})),
+      stalled:canonicalScanTechnicalSummaryFromStoryContext(context({phase:'stalled_after_response', buyer:'emerging', confirmation:'follow_through_unconfirmed'})),
+      responding:canonicalScanTechnicalSummaryFromStoryContext(context({phase:'responding_from_support', buyer:'emerging', confirmation:'follow_through_unconfirmed'})),
+      terminal:canonicalScanTechnicalSummaryFromStoryContext(context({phase:'repairing_structure', structure:'broken'})),
+      unknown:canonicalScanTechnicalSummaryFromStoryContext(context({phase:'', structure:'unknown'}))
+    };
+  });
+
+  expect(labels.extended).toBe('Structure intact | Extended from 20-day average | Buyer control confirmed');
+  expect(labels.away).toBe('Structure intact | Away from 20-day average | Buyer control confirmed');
+  expect(labels.stalled).toBe('Structure intact | Stalled after 20-day average | Follow-through stalled');
+  expect(labels.responding).toBe('Structure intact | Responding at 20-day average | Buyers responding');
+  expect(labels.terminal).toBe('Structure broken | Structure repairing | Buyer control failed');
+  expect(labels.unknown).toBe('');
 });
 
 test('analysis-enriched Scan reconstruction matches Review semantics when normalized analysis changes the canonical phase', async ({page}) => {

@@ -19297,6 +19297,36 @@ function compactReasonLineForView(view, maxParts = 3){
   return parts.slice(0, maxParts).join(' | ');
 }
 
+function canonicalScanTechnicalSummaryFromStoryContext(storyContext = {}){
+  const currentPhase = String(storyContext && storyContext.currentPhase || '').trim().toLowerCase();
+  const canonicalStructureState = String(storyContext && storyContext.structure && storyContext.structure.state || '').trim().toLowerCase();
+  const recognizedPhases = new Set([
+    'near_support',
+    'at_support',
+    'responding_from_support',
+    'away_from_support',
+    'extended_from_support',
+    'stalled_after_response',
+    'support_failed',
+    'repairing_structure',
+    'current_location_unresolved'
+  ]);
+  if(!recognizedPhases.has(currentPhase) || !canonicalStructureState || canonicalStructureState === 'unknown') return '';
+  if(canonicalStructureState === 'broken' || ['support_failed', 'repairing_structure'].includes(currentPhase)){
+    const supportLabel = String(storyContext && storyContext.support && storyContext.support.label || 'support').trim() || 'support';
+    const locationLabel = currentPhase === 'support_failed' ? `${supportLabel} failed` : 'Structure repairing';
+    return ['Structure broken', locationLabel, 'Buyer control failed'].join(' | ');
+  }
+  const structureLabel = canonicalReviewTechnicalStructureLabelFromStoryContext(storyContext);
+  const supportLabel = String(storyContext && storyContext.support && storyContext.support.label || 'support').trim() || 'support';
+  const locationLabel = currentPhase === 'near_support'
+    ? `Near ${supportLabel}`
+    : canonicalReviewTechnicalPullbackLabelFromStoryContext(storyContext);
+  const buyerLabel = canonicalReviewTechnicalBuyerLabelFromStoryContext(storyContext);
+  if([structureLabel, locationLabel, buyerLabel].some(label => !label || /n\/a|unclear/i.test(label))) return '';
+  return [structureLabel, locationLabel, buyerLabel].join(' | ');
+}
+
 function scanCardTechnicalSummaryForView(view){
   const item = view && view.item ? view.item : {};
   const derived = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
@@ -19311,13 +19341,8 @@ function scanCardTechnicalSummaryForView(view){
         : undefined
     })
     : null;
-  const currentPhase = String(storyContext && storyContext.currentPhase || '').trim().toLowerCase();
-  const canonicalStructureState = String(storyContext && storyContext.structure && storyContext.structure.state || '').trim().toLowerCase();
-  if(canonicalStructureState === 'broken' || ['support_failed', 'repairing_structure'].includes(currentPhase)){
-    const supportLabel = String(storyContext && storyContext.support && storyContext.support.label || 'support').trim() || 'support';
-    const locationLabel = currentPhase === 'support_failed' ? `${supportLabel} failed` : 'Structure repairing';
-    return ['Structure broken', locationLabel, 'Buyer control failed'].join(' | ');
-  }
+  const canonicalSummary = canonicalScanTechnicalSummaryFromStoryContext(storyContext);
+  if(canonicalSummary) return canonicalSummary;
   const structureBadge = shortlistStructureBadgeForView(view);
   const structureLabel = structureBadge && structureBadge.label
     ? structureBadge.label
