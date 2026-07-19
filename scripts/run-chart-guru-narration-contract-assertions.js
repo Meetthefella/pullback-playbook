@@ -83,18 +83,97 @@ const stalled = hooks.buildCanonicalNarrationContract({
   currentPhase:'stalled_after_response', dominantEventLabel:'Response stalled', eventSequence:['support_test','buyers_responded','rebound_stalled'],
   supportState:{interaction:'held'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed', evidenceFactIds:['support','stall']
 }, {structure:'intact', nextRequiredEvent:'follow_through'});
+stalled.support = {type:'50ma', label:'50-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'};
 const invalidRendererOutput = {
   chartStory:'Price is away from support after a strong extension.', whyItMatters:'It matters.', setupLocation:'Away from support.',
   learningPoint:'A lesson.', whatNext:'Watch for a new pullback reset.'
 };
 const rendererErrors = hooks.validateNarrationProseAgainstContract(invalidRendererOutput, stalled).errors;
-assert.ok(rendererErrors.includes('unsupported_away_or_extension_language'), 'stalled response must reject away/extension wording');
+assert.ok(rendererErrors.includes('unsupported_away_from_active_support'), 'stalled response must reject away/extension wording');
 assert.ok(rendererErrors.includes('stalled_response_reset_instruction'), 'stalled response must reject reset instructions');
+
+const kdpContradictions = [
+  'Price is away from the 50-day average.', 'Price is not sitting near a support area.', 'Price is currently off support.',
+  'Wait for price to return to the 50-day average.', 'The chart needs a fresh pullback into the 50-day average.',
+  'There is no active support test right now.', 'The setup is extended from its support area.'
+];
+for(const sentence of kdpContradictions){
+  const response = {chartStory:'The response from support has stalled.', whyItMatters:'Buyers still need proof.', setupLocation:sentence, learningPoint:'An early response needs follow-through.', whatNext:'Watch for buyers to follow through.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, stalled).ok, false, `KDP contradiction must fail: ${sentence}`);
+}
+for(const phase of ['at_support','responding_from_support','stalled_after_response']){
+  const activePhaseContract = {...stalled, phase, support:{...stalled.support}};
+  const response = {chartStory:phase === 'at_support' ? 'Price is testing support.' : (phase === 'responding_from_support' ? 'Price is responding from support.' : 'The response from support has stalled.'), whyItMatters:'The location needs proof.', setupLocation:'Price is not sitting near a support area.', learningPoint:'Support needs confirmation.', whatNext:phase === 'at_support' ? 'Watch for support to hold.' : 'Watch for buyers to follow through.'};
+  assert.ok(hooks.validateNarrationProseAgainstContract(response, activePhaseContract).errors.includes('unsupported_not_near_active_support'), `${phase}: active support contradiction must never be permissive`);
+}
+for(const futureAlias of ['near_support','support_holding','support_reacting']){
+  const futurePhaseContract = {...stalled, phase:futureAlias};
+  assert.ok(hooks.validateCanonicalNarrationContract(futurePhaseContract).errors.includes('phase_unknown'), `${futureAlias}: a new phase must fail closed until explicitly modelled`);
+}
+for(const sentence of [
+  'Price is holding around the 50-day average, but the rebound has stalled.',
+  'Buyers responded at the 50-day average, but they have not yet produced convincing follow-through.',
+  'Support is still active, although buyer control remains incomplete.',
+  'Price is below the 20-day average while still testing the 50-day average.'
+]){
+  const response = {chartStory:'The response from support has stalled.', whyItMatters:'Buyers still need proof.', setupLocation:sentence, learningPoint:'An early response needs follow-through.', whatNext:'Watch for buyers to follow through.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, stalled).ok, true, `KDP faithful wording must pass: ${sentence}`);
+}
+for(const sentence of ['Price is off the 50-day average.', 'Price is off the 50MA.', 'Price is extended from the 50-day average.', 'Price is detached from the 50MA.', 'Price has moved clear of the 50-day average.']){
+  const response = {chartStory:'The response from support has stalled.', whyItMatters:'Buyers still need proof.', setupLocation:sentence, learningPoint:'An early response needs follow-through.', whatNext:'Watch for buyers to follow through.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, stalled).ok, false, `active 50MA named contradiction must fail: ${sentence}`);
+}
+for(const sentence of ['Price is below the 20-day average while testing the 50-day average.', 'Price has moved away from the 20-day average but remains around the 50-day average.', 'Price is holding near the 50-day average despite remaining below the 20-day average.']){
+  const response = {chartStory:'The response from support has stalled.', whyItMatters:'Buyers still need proof.', setupLocation:sentence, learningPoint:'An early response needs follow-through.', whatNext:'Watch for buyers to follow through.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, stalled).ok, true, `unrelated 20MA wording must remain valid for active 50MA: ${sentence}`);
+}
+
+const amat = {...stalled, phase:'responding_from_support', support:{type:'20ma', label:'20-day average', interaction:'testing', currentlyActive:true, semantic:'active_testing_support'}, followThrough:'unconfirmed'};
+for(const sentence of ['Price is away from the 20-day average.', 'Price is not near support.', 'Buyers have not responded.', 'Wait for a pullback to the 20-day average.']){
+  const response = {chartStory:'Price is responding from support.', whyItMatters:'The response needs proof.', setupLocation:sentence, learningPoint:'Early responses need confirmation.', whatNext:'Watch for buyers to follow through.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, amat).ok, false, `AMAT contradiction must fail: ${sentence}`);
+}
+for(const sentence of ['Price is reacting around the 20-day average, but buyers still need to confirm control.', 'The first buyer response is visible, although follow-through is not confirmed.']){
+  const response = {chartStory:'Price is responding from support.', whyItMatters:'The response needs proof.', setupLocation:sentence, learningPoint:'Early responses need confirmation.', whatNext:'Watch for buyers to follow through.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, amat).ok, true, `AMAT faithful wording must pass: ${sentence}`);
+}
+for(const sentence of ['Price is off the 20-day average.', 'Price is off the 20MA.', 'Price is extended from the 20-day average.', 'Price is stretched away from the 20MA.', 'Price is no longer near the 20-day average.']){
+  const response = {chartStory:'Price is responding from support.', whyItMatters:'The response needs proof.', setupLocation:sentence, learningPoint:'Early responses need confirmation.', whatNext:'Watch for buyers to follow through.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, amat).ok, false, `active 20MA named contradiction must fail: ${sentence}`);
+}
+for(const sentence of ['Price is above the 50-day average while testing the 20-day average.', 'Price remains well above the 50-day average and is reacting around the 20-day average.']){
+  const response = {chartStory:'Price is responding from support.', whyItMatters:'The response needs proof.', setupLocation:sentence, learningPoint:'Early responses need confirmation.', whatNext:'Watch for buyers to follow through.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, amat).ok, true, `unrelated 50MA wording must remain valid for active 20MA: ${sentence}`);
+}
+
+for(const phase of ['away_from_support','extended_from_support']){
+  const contract = {...stalled, phase, support:{type:'50ma', label:'50-day average', interaction:'not_tested', currentlyActive:false, semantic:'off_support'}, nextRequiredEvent:phase === 'away_from_support' ? 'clearer_support' : 'pullback_or_reset'};
+  const response = {chartStory:phase === 'away_from_support' ? 'Price is away from support.' : 'Price is extended from support.', whyItMatters:'Location needs to improve.', setupLocation:'Price is not at an active support test.', learningPoint:'Location matters.', whatNext:phase === 'away_from_support' ? 'Watch for a clearer support area.' : 'Watch for a calmer pullback or reset.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, contract).ok, true, `${phase} must allow legitimate away language`);
+}
+
+(async () => {
+  const valid = {chartStory:'The response from support has stalled.', whyItMatters:'Buyers still need proof.', setupLocation:'Price is holding around the 50-day average.', learningPoint:'An early response needs follow-through.', whatNext:'Watch for buyers to follow through.'};
+  let requests = 0;
+  const retried = await hooks.renderCanonicalNarrationWithRetry(stalled, async () => (++requests === 1 ? invalidRendererOutput : valid));
+  assert.strictEqual(requests, 2, 'a contradictory first renderer response must trigger exactly one retry');
+  assert.strictEqual(retried.source, 'retry', 'the valid retry must be used');
+  assert.ok(retried.errors.some(code => code.startsWith('first:unsupported_away_from_active_support')), 'first-response contradiction diagnostics must be retained');
+  requests = 0;
+  const namedOff = {...valid, setupLocation:'Price is off the 50-day average.'};
+  const namedRetry = await hooks.renderCanonicalNarrationWithRetry(stalled, async () => (++requests === 1 ? namedOff : valid));
+  assert.strictEqual(requests, 2, 'named active-support contradiction must trigger exactly one retry');
+  assert.strictEqual(namedRetry.source, 'retry', 'a valid retry must replace named off-support prose');
+  assert.ok(namedRetry.errors.includes('first:unsupported_away_from_active_support'), 'named off-support wording must retain the active-support diagnostic');
+  requests = 0;
+  const fallback = await hooks.renderCanonicalNarrationWithRetry(stalled, async () => { requests += 1; return invalidRendererOutput; });
+  assert.strictEqual(requests, 2, 'two contradictory responses must make exactly two renderer calls');
+  assert.strictEqual(fallback.source, 'deterministic_fallback', 'an invalid retry must use deterministic fallback');
+  console.log('run-chart-guru-narration-contract-assertions: ok');
+})().catch(error => { console.error(error); process.exitCode = 1; });
 
 const impossible = hooks.buildCanonicalNarrationContract({currentPhase:'support_failed', supportState:{interaction:'held'}, buyerControlState:'confirmed', confirmationSemantic:'follow_through_confirmed'}, {structure:'broken', nextRequiredEvent:'repair'});
 assert.ok(hooks.validateCanonicalNarrationContract(impossible).errors.length > 0, 'impossible canonical states must be rejected before rendering');
 
 const incompatibleVersion = {...stalled, version:'chart-guru-narration-contract-v999'};
 assert.ok(hooks.validateCanonicalNarrationContract(incompatibleVersion).errors.includes('unsupported_contract_version'), 'unsupported contract versions must fail validation rather than render silently');
-
-console.log('run-chart-guru-narration-contract-assertions: ok');

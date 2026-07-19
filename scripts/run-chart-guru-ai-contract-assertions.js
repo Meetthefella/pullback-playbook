@@ -27,7 +27,7 @@ function buildHealthyContract(){
   return hooks.buildCanonicalNarrationContract({
     currentPhase:'responding_from_support', dominantEventLabel:'Early response from support',
     eventSequence:['support_test','buyers_responded'], evidenceFactIds:['support_test'],
-    supportState:{interaction:'testing',label:'20-day average'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed'
+    supportState:{type:'20ma', interaction:'testing', label:'20-day average', currentlyActive:true, semantic:'active_testing_support'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed'
   }, {structureState:'strong', trendState:'acceptable', volumeState:'expanding', market:'supportive', verdict:'watch', nextRequiredEvent:'follow_through'});
 }
 
@@ -40,6 +40,7 @@ function verifyRendererBoundary(){
   assert.deepStrictEqual(Object.keys(promptContract).sort(), rendererFields, 'renderer prompt must contain only the canonical narration allow-list');
   assert.ok(prompt.includes(contract.version), 'renderer prompt must include the contract version');
   assert.ok(!/verification|imageAnalysis|traderInterpretation|diagnostics/i.test(prompt), 'legacy interpretation, image, verification, and diagnostic inputs must be absent from renderer prompt');
+  assert.deepStrictEqual(promptContract.support, contract.support, 'the supplied canonical support authority must reach the renderer unchanged');
   const instructions = hooks.buildProductionChartGuruFinalInstructions();
   assert.ok(instructions.includes('contract is the sole authority'), 'renderer instructions must retain contract authority rules');
   assert.ok(instructions.includes('Do not issue buy/sell advice'), 'renderer instructions must retain observation-only guard');
@@ -49,9 +50,10 @@ function verifyClientDerivedStateMapping(){
   const buildClientContract = clientContractBuilder();
   const contract = buildClientContract({
     currentPhase:'responding_from_support', dominantEventLabel:'Early response', eventSequence:['support_test'],
-    evidenceFactIds:['support'], supportState:{interaction:'testing'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed'
+    evidenceFactIds:['support'], supportState:{type:'50ma', label:'50-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed'
   }, {structureState:'developing_clean', trendState:'strong', volumeState:'expanding', marketStatus:'S&P above 50 MA'});
   assert.deepStrictEqual(JSON.parse(JSON.stringify({structure:contract.structure, trend:contract.trend, volume:contract.volume})), {structure:'intact', trend:'healthy', volume:'constructive'}, 'client contract must preserve realistic deriveSetupStates semantics instead of degrading them to unknown');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(contract.support)), {type:'50ma', label:'50-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'}, 'client contract must retain complete active support authority');
 }
 
 function verifyRetryFallbackContract(){
@@ -63,7 +65,15 @@ function verifyRetryFallbackContract(){
   assert.strictEqual(hooks.validateNarrationProseAgainstContract(fallback, contract).ok, true, 'rejected renderer output must have a faithful deterministic fallback path');
 }
 
+function verifyServerPreservesSuppliedContract(){
+  const contract = buildHealthyContract();
+  const selected = hooks.selectCanonicalNarrationContractForRenderer(contract, {currentPhase:'away_from_support'});
+  assert.strictEqual(selected, contract, 'the server renderer boundary must retain the exact supplied contract object');
+  assert.deepStrictEqual(selected.support, contract.support, 'the server must not normalize or downgrade supplied support authority');
+}
+
 verifyRendererBoundary();
 verifyClientDerivedStateMapping();
 verifyRetryFallbackContract();
+verifyServerPreservesSuppliedContract();
 console.log('run-chart-guru-ai-contract-assertions: ok');

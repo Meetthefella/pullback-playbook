@@ -464,8 +464,10 @@ function normalizeDeterministicEventPacket(value = {}){
     storyEvents:normalizeStringSequence(source.storyEvents),
     supportState:supportState && Object.keys(supportState).length ? {
       level:normaliseString(supportState.level, ''),
+      type:normaliseString(supportState.type, ''),
       label:normaliseString(supportState.label, ''),
       interaction:normaliseString(supportState.interaction, ''),
+      semantic:normaliseString(supportState.semantic, ''),
       currentlyActive:supportState.currentlyActive === true
         ? true
         : (supportState.currentlyActive === false ? false : null),
@@ -520,19 +522,8 @@ function narrationVolumeState(value = ''){
 }
 
 function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
-  if(safeObject(eventPacket).version === CHART_GURU_NARRATION_CONTRACT_VERSION){
-    const supplied = safeObject(eventPacket);
-    const rebuilt = buildCanonicalNarrationContract({
-      currentPhase:supplied.phase,
-      dominantEventLabel:supplied.dominantEvent,
-      eventSequence:supplied.eventSequence,
-      evidenceFactIds:supplied.evidenceFactIds,
-      supportState:supplied.support,
-      buyerControlState:supplied.buyerControl,
-      confirmationSemantic:supplied.followThrough ? `follow_through_${supplied.followThrough}` : ''
-    }, {...safeObject(source), structure:supplied.structure, trend:supplied.trend, volume:supplied.volume, market:supplied.market, dominantBlocker:supplied.dominantBlocker, nextRequiredEvent:supplied.nextRequiredEvent, verdict:supplied.verdict});
-    return rebuilt;
-  }
+  // Compatibility adapter for pre-contract payloads only. A supplied v1 contract is
+  // deliberately never rebuilt here; the renderer consumes it as client authority.
   const packet = normalizeDeterministicEventPacket(eventPacket);
   const extra = safeObject(source);
   const supportState = safeObject(packet.supportState);
@@ -564,7 +555,14 @@ function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
     dominantEvent:packet.dominantEventLabel || 'Market event in progress',
     eventSequence:packet.eventSequence,
     structure,
-    support:{interaction:support, label:packet.recentStorySupportLabel || supportState.label || ''},
+    support:{
+      type:normalizeNarrationEnum(supportState.type || supportState.level, new Set(['20ma','50ma','200ma'])),
+      label:packet.recentStorySupportLabel || supportState.label || '',
+      interaction:support,
+      currentlyActive:supportState.currentlyActive === true ? true : (supportState.currentlyActive === false ? false : null),
+      semantic:normalizeNarrationEnum(supportState.semantic, new Set(['active_testing_support','active_held_support','failed_support','off_support']),
+        supportState.currentlyActive === true && support === 'held' ? 'active_held_support' : (supportState.currentlyActive === true && support === 'testing' ? 'active_testing_support' : (support === 'failed' ? 'failed_support' : 'unknown')))
+    },
     buyerControl,
     followThrough,
     trend:narrationTrendState(extra.trend || extra.trendState) !== 'unknown' ? narrationTrendState(extra.trend || extra.trendState) : (structure === 'intact' ? 'healthy' : (structure === 'broken' ? 'broken' : 'unknown')),
@@ -577,11 +575,24 @@ function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
   };
 }
 
+function selectCanonicalNarrationContractForRenderer(suppliedContract, legacyEventPacket = {}, legacySource = {}){
+  const supplied = safeObject(suppliedContract);
+  // Preserve the exact supplied object: validation may reject it, but no server
+  // compatibility helper may rewrite its phase or support authority.
+  if(Object.keys(supplied).length) return supplied;
+  return buildCanonicalNarrationContract(legacyEventPacket, legacySource);
+}
+
 function validateCanonicalNarrationContract(contract = {}){
   const value = safeObject(contract);
   const errors = [];
   if(value.version !== CHART_GURU_NARRATION_CONTRACT_VERSION) errors.push('unsupported_contract_version');
   if(!NARRATION_ENUMS.phase.has(value.phase)) errors.push('phase_unknown');
+  const support = safeObject(value.support);
+  if(!NARRATION_ENUMS.support.has(support.interaction)) errors.push('support_interaction_unknown');
+  if(!['20ma','50ma','200ma','unknown'].includes(normaliseString(support.type, 'unknown'))) errors.push('support_type_unknown');
+  if(!['active_testing_support','active_held_support','failed_support','off_support','unknown'].includes(normaliseString(support.semantic, 'unknown'))) errors.push('support_semantic_unknown');
+  if(support.currentlyActive !== true && support.currentlyActive !== false && support.currentlyActive !== null && support.currentlyActive !== undefined) errors.push('support_currently_active_invalid');
   if(value.phase === 'stalled_after_response' && (value.followThrough === 'confirmed' || value.buyerControl === 'confirmed')) errors.push('stalled_response_confirmed_conflict');
   if(value.phase === 'support_failed' && (value.support && value.support.interaction === 'held' || value.followThrough === 'confirmed')) errors.push('support_failed_conflict');
   if(['extended_from_support','away_from_support'].includes(value.phase) && value.support && ['testing','held'].includes(value.support.interaction)) errors.push('away_phase_active_support_conflict');
@@ -623,10 +634,51 @@ function deterministicNarrationFallback(contract = {}){
   };
 }
 
+function activeSupportAliases(support = {}){
+  const source = safeObject(support);
+  const type = normaliseString(source.type, '').trim().toLowerCase();
+  const label = normaliseString(source.label, '').trim().toLowerCase().replace(/^near\s+(?:the\s+)?/, '');
+  const aliases = new Set(label ? [label] : []);
+  const typeAliases = {
+    '20ma':['20-day average','20 day average','20ma','20 ma'],
+    '50ma':['50-day average','50 day average','50ma','50 ma'],
+    '200ma':['200-day average','200 day average','200ma','200 ma']
+  };
+  (typeAliases[type] || []).forEach(alias => aliases.add(alias));
+  return [...aliases]
+    .map(alias => alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[ -]+/g, '[ -]+'))
+    .filter(Boolean);
+}
+
+function namedActiveSupportContradictionCode(text = '', support = {}){
+  const aliases = activeSupportAliases(support);
+  if(!aliases.length) return '';
+  const target = `(?:the\\s+)?(?:${aliases.join('|')})`;
+  const value = String(text || '');
+  if(new RegExp(`\\b(?:away from|off)\\s+${target}\\b`, 'i').test(value)) return 'unsupported_away_from_active_support';
+  if(new RegExp(`\\b(?:no longer|not)\\s+(?:sitting\\s+)?near\\s+${target}\\b`, 'i').test(value)) return 'unsupported_not_near_active_support';
+  if(new RegExp(`\\b(?:extended from|extended away from|stretched from|stretched away from|detached from|moved clear of)\\s+${target}\\b`, 'i').test(value)) return 'unsupported_extension_language';
+  if(new RegExp(`\\b(?:above|below)\\s+${target}\\b[^.]*\\b(?:away from|off|clear of|no longer near)\\b`, 'i').test(value)) return 'unsupported_away_from_active_support';
+  return '';
+}
+
 function validateNarrationProseAgainstContract(response = {}, contract = {}){
   const prose = normalizeFlatStringFields(response, FINAL_PROSE_REQUIRED_FIELDS);
   const text = Object.values(prose).join(' ').toLowerCase();
   const errors = [];
+  const support = safeObject(contract.support);
+  const activeSupport = support.currentlyActive === true
+    || ['active_testing_support','active_held_support'].includes(normaliseString(support.semantic, ''))
+    || (['at_support','responding_from_support','stalled_after_response'].includes(contract.phase)
+      && ['testing','held'].includes(support.interaction));
+  const supportAliases = activeSupportAliases(support);
+  const namedActiveSupport = supportAliases.length ? new RegExp(`(?:the\\s+)?(?:${supportAliases.join('|')})`, 'i') : null;
+  const hasActiveSupportContext = () => {
+    if(!activeSupport) return true;
+    return /\b(?:support|active|held|holding|testing|reacting around|responding at|responding from)\b/i.test(text)
+      || /\bsupport\s+(?:is\s+)?(?:still\s+)?(?:active|held|holding|being tested)\b/i.test(text)
+      || !!(namedActiveSupport && namedActiveSupport.test(text));
+  };
   if(FINAL_PROSE_REQUIRED_FIELDS.some(key => !prose[key].trim())) errors.push('missing_section');
   const phaseWords = {
     at_support:/support/, responding_from_support:/support|respond/, stalled_after_response:/stalled|follow-through|follow through/,
@@ -634,14 +686,44 @@ function validateNarrationProseAgainstContract(response = {}, contract = {}){
     support_failed:/support.*fail|failed support/, repairing_structure:/repair|damage/, current_location_unresolved:/location.*clear|clear.*location/
   };
   if(phaseWords[contract.phase] && !phaseWords[contract.phase].test(prose.chartStory.toLowerCase())) errors.push('chart_story_phase_missing');
-  if(!['extended_from_support','away_from_support'].includes(contract.phase) && /away from support|extended from support|extension/.test(text)) errors.push('unsupported_away_or_extension_language');
-  if(contract.buyerControl !== 'confirmed' && /buyers? (are |have )?(in )?control|control has returned/.test(text)) errors.push('unsupported_buyer_control_language');
+  if(activeSupport){
+    const genericAway = /\b(?:away from|off)\s+(?:the\s+)?(?:active\s+)?support(?:\s+(?:area|level))?\b/i.test(text);
+    const namedContradiction = namedActiveSupportContradictionCode(text, support);
+    if(genericAway) errors.push('unsupported_away_from_active_support');
+    if(namedContradiction) errors.push(namedContradiction);
+    if(/\b(?:not\s+(?:sitting\s+)?near|not\s+at)\s+(?:an?\s+)?support(?:\s+(?:area|level))?\b/i.test(text)) errors.push('unsupported_not_near_active_support');
+    const namedTarget = supportAliases.length ? `(?:the\\s+)?(?:${supportAliases.join('|')})` : '';
+    const returnToNamedSupport = namedTarget && new RegExp(`\\b(?:wait for price to |needs? to |must |first )?(?:return|pull back|pullback|fresh pullback)(?:\\s+back)?(?:\\s+into|\\s+to|\\s+toward)?\\s+${namedTarget}\\b`, 'i').test(text);
+    if(/\b(?:return|pull back|pullback|fresh pullback)\s+(?:back\s+)?(?:to|into)\s+(?:the\s+)?(?:active\s+)?support(?:\s+(?:area|level))?\b/i.test(text) || returnToNamedSupport) errors.push('unsupported_return_to_active_support');
+    if(/\b(?:there is|there's|no|not)\s+(?:an?\s+)?(?:active\s+)?support\s+(?:test|testing|interaction)\b/i.test(text)) errors.push('unsupported_no_support_test');
+    if(/\b(?:extended from|extension from|extended away from)\s+(?:its\s+)?support\b/i.test(text)) errors.push('unsupported_extension_language');
+    if(!hasActiveSupportContext()) errors.push('active_support_context_missing');
+  } else if(!['extended_from_support','away_from_support'].includes(contract.phase) && /\b(?:away from|extended from|extension)\s+(?:the\s+)?support\b/i.test(text)) {
+    errors.push('unsupported_extension_language');
+  }
+  if(contract.buyerControl !== 'confirmed' && /\bbuyers?\s+(?:are|have)\s+(?:in\s+)?control\b|\bcontrol has returned\b/.test(text)) errors.push('unsupported_buyer_control_language');
   if(contract.structure === 'broken' && /support (is |has )?holding|held support/.test(text)) errors.push('broken_structure_support_holding_language');
   if(contract.followThrough === 'stalled' && /improving rebound|rebound is improving/.test(text)) errors.push('stalled_follow_through_improvement_language');
   if(contract.phase === 'stalled_after_response' && /new pullback|reset|pull back again/.test(prose.whatNext.toLowerCase())) errors.push('stalled_response_reset_instruction');
+  if(contract.phase === 'responding_from_support' && /\b(?:buyers? (?:have )?(?:not|haven't|did not|didn't) respond(?:ed)?|no buyer response)\b/i.test(text)) errors.push('unsupported_buyer_response_denial');
   const nextPatterns = {follow_through:/follow-through|follow through|another firm close/,repair:/repair|rebuild/,pullback_or_reset:/pullback|reset/,clearer_support:/clearer support|support area/,support_hold:/support.*hold|hold.*support/};
   if(nextPatterns[contract.nextRequiredEvent] && !nextPatterns[contract.nextRequiredEvent].test(prose.whatNext.toLowerCase())) errors.push('next_required_event_missing');
   return {ok:errors.length === 0, errors};
+}
+
+async function renderCanonicalNarrationWithRetry(contract, requestRenderer){
+  const finalPrompt = buildProductionChartGuruFinalPrompt(contract);
+  const errors = [];
+  const first = await requestRenderer(finalPrompt, 'chart_guru_final_prose');
+  const firstValidation = validateNarrationProseAgainstContract(first, contract);
+  if(firstValidation.ok) return {prose:first, source:'openai', errors};
+  errors.push(...firstValidation.errors.map(code => `first:${code}`));
+  const retryPrompt = `${finalPrompt}\n\nCorrect only these failed contract constraints: ${firstValidation.errors.join(', ')}.`;
+  const retry = await requestRenderer(retryPrompt, 'chart_guru_final_prose_retry');
+  const retryValidation = validateNarrationProseAgainstContract(retry, contract);
+  if(retryValidation.ok) return {prose:retry, source:'retry', errors};
+  errors.push(...retryValidation.errors.map(code => `retry:${code}`));
+  return {prose:deterministicNarrationFallback(contract), source:'deterministic_fallback', errors};
 }
 
 function normalizeTraderInterpretation(value = {}, eventPacket = {}){
@@ -1276,20 +1358,18 @@ function buildProductionChartGuruFinalInstructions(){
     'chartStory should usually be two short sentences. Sentence 1: what just happened. Sentence 2: what that means now. Use a third short sentence only when a secondary event is essential.',
     'chartStory first sentence must lead with the dominant event itself, not a generic recap of the broader trend.',
     'Do not write chartStory as a chopped-up list of short fragments or as one long essay sentence.',
-    'If buyerResponseSemantic is response_absent, make it clear that buyers have not shown enough yet and do not imply a bounce is underway or confirmed.',
-    'If buyerResponseSemantic is response_present, acknowledge that buyers are responding, but do not imply control has been regained unless confirmationSemantic supports it.',
-    'If confirmationSemantic is follow_through_unconfirmed, whatNext must ask for proof or follow-through rather than implying confirmation already happened.',
+    'When buyerControl is none, do not imply a buyer response. When it is emerging, acknowledge the response without calling it confirmed control.',
+    'When followThrough is unconfirmed or stalled, whatNext must ask for proof or follow-through rather than implying confirmation already happened.',
     'For constructive pullback cases near support with buyers still absent or weak and follow-through unconfirmed, prefer phrases like "buyers still need to step in", "buyers have not followed through yet", "the bounce still needs proof", or "the pullback is worth watching, but it is not ready yet".',
     'For failed-bounce cases, whatNext must ask for a new stronger buyer response, a stronger reclaim of the 20-day average, or buyers producing a better bounce and holding it. Do not say "confirmed bounce" or "confirmation of the bounce" because the original bounce already failed.',
-    'If supportSemantic is support_present, setupLocation must describe active interaction with support.',
-    'If supportSemantic is support_failed, setupLocation must describe the lost support and the need for repair.',
+    'When support.currentlyActive is true, setupLocation must describe the named active interaction. When support.interaction is failed, describe the lost support and the need for repair.',
     'If the setup is fading in quality, chartStory must lead with that deterioration rather than generic prior trend context.',
     'learningPoint should be one or two short sentences. Teach one reusable lesson that comes directly from the dominant event. Do not give generic advice like "be cautious", "wait for confirmation", or "look for clear signals".',
     'learningPoint should explain the lesson of the current event, not repeat chartStory and not turn into whatNext.',
     'Do not start learningPoint with "watch", "look for", or "wait for". That belongs in whatNext, not in the lesson.',
-    'Avoid vague chartStory wording like "potential setup", "useful area", or "promising chart" when the trader interpretation gives a more concrete event such as a pullback, support test, failed bounce, or fading quality.',
-    'If supportLabel is present in the tutor input, preserve it in plain English instead of replacing it with vague location wording.',
-    'If supportLabel is empty, stay honest. Do not invent a moving average or named support zone.',
+    'Avoid vague chartStory wording like "potential setup", "useful area", or "promising chart" when dominantEvent gives a more concrete event such as a pullback, support test, failed bounce, or fading quality.',
+    'If support.label is present, preserve it in plain English instead of replacing it with vague location wording.',
+    'If support.label is empty, stay honest. Do not invent a moving average or named support zone.',
     'Compact semantic-state examples:',
     '- support present + response absent + confirmation unconfirmed: "Price has reached an important support area, but buyers have not pushed back yet. The location is useful, but the chart still needs a clear response."',
     '- support present + response present + confirmation unconfirmed: "Buyers have started to respond at support, but the bounce still needs to hold. The first reaction is encouraging, not confirmed."',
@@ -1314,7 +1394,7 @@ function buildProductionChartGuruFinalInstructions(){
     'For GEV-style early cases with a named support label, prefer that label directly: "Price is only starting to pull back toward the 20-day average, so the chart has not reached a clear decision point yet."',
     'Avoid generic lesson wording like "it is important to", "it is crucial to", "always look for", "be cautious", or "before making any decisions".',
     'Each section should sound like a calm spoken explanation, not like generated commentary.',
-    'In chartStory, begin with the clearest observable behaviour from the trader interpretation before explaining what it means.',
+    'In chartStory, begin with the clearest observable behaviour from the canonical contract before explaining what it means.',
     'In whyItMatters, explain why traders care in plain language.',
     'In setupLocation, describe where the setup sits in simple chart terms without drifting into abstract commentary.',
     'In learningPoint, teach naturally by explaining what traders want to see, not by lecturing.',
@@ -1362,12 +1442,12 @@ function normalizeRecentStoryStep(step = ''){
     .slice(0, 80);
 }
 
-function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, structuredFacts = {}){
+function buildTwoStepChartCoach(finalResponse = {}, canonicalNarrationContract = {}, structuredFacts = {}){
   const prose = normalizeFlatStringFields(finalResponse, FINAL_PROSE_REQUIRED_FIELDS);
   const facts = safeObject(structuredFacts);
   const eventPacket = normalizeDeterministicEventPacket(facts.deterministicEventPacket || facts.eventPacket);
-  const interpretation = normalizeTraderInterpretation(traderInterpretation, eventPacket);
-  const eventSequence = interpretation.eventSequence.map(step => normalizeRecentStoryStep(step)).filter(Boolean);
+  const contract = safeObject(canonicalNarrationContract);
+  const eventSequence = normalizeStringSequence(contract.eventSequence).map(step => normalizeRecentStoryStep(step)).filter(Boolean);
   const evidenceFactIds = [...new Set([
     'openai_two_step_narrative',
     ...eventPacket.evidenceFactIds
@@ -1398,18 +1478,18 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
       text:prose.chartStory,
       evidenceFactIds:evidenceFactIds.slice(),
       confidence:Number.isFinite(Number(eventPacket.confidence)) ? Number(eventPacket.confidence) : 0.82,
-      rankReason:eventPacket.rankReason || interpretation.dominantEvent || interpretation.whatChanged || 'two_step_chart_guru'
+      rankReason:eventPacket.rankReason || contract.dominantEvent || 'canonical_narration'
     },
     recentStory:{
       key:recentStoryKey,
       bias:String(eventPacket.recentStoryBias || 'educational').trim(),
       toneMode:String(eventPacket.recentStoryToneMode || 'openai_two_step').trim(),
-      confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'deterministic_event_packet_plus_trader_interpretation').trim(),
-      trendLabel:String(interpretation.dominantEvent || eventPacket.recentStoryTrendLabel || '').trim(),
+      confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'canonical_narration_contract').trim(),
+      trendLabel:String(contract.dominantEvent || eventPacket.recentStoryTrendLabel || '').trim(),
       supportLabel:String(prose.setupLocation || eventPacket.recentStorySupportLabel || '').trim(),
-      supportSemantic:String(interpretation.supportSemantic || eventPacket.supportSemantic || '').trim(),
-      buyerResponseSemantic:String(interpretation.buyerResponseSemantic || eventPacket.buyerResponseSemantic || '').trim(),
-      confirmationSemantic:String(interpretation.confirmationSemantic || eventPacket.confirmationSemantic || '').trim(),
+      supportSemantic:String(safeObject(contract.support).semantic || eventPacket.supportSemantic || '').trim(),
+      buyerResponseSemantic:String(contract.buyerControl || '').trim(),
+      confirmationSemantic:String(contract.followThrough || '').trim(),
       steps:eventSequence,
       stepDetails:storyStepDetails,
       evidenceFactIds:evidenceFactIds.slice()
@@ -1425,7 +1505,7 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
     diagnostics:{
       meta:{
         deterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
-        interpretationPromptVersion:CHART_GURU_INTERPRETATION_PROMPT_VERSION,
+        interpretationPromptVersion:'none',
         finalPromptVersion:CHART_GURU_FINAL_PROMPT_VERSION,
         renderVersion:CHART_GURU_RENDER_VERSION,
         narrationSource:'openai_narrator'
@@ -1440,10 +1520,10 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
         primaryStoryKey,
         storyKey:recentStoryKey,
         toneMode:String(eventPacket.recentStoryToneMode || 'openai_two_step').trim(),
-        confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'deterministic_event_packet_plus_trader_interpretation').trim(),
-        supportSemantic:String(interpretation.supportSemantic || eventPacket.supportSemantic || '').trim(),
-        buyerResponseSemantic:String(interpretation.buyerResponseSemantic || eventPacket.buyerResponseSemantic || '').trim(),
-        confirmationSemantic:String(interpretation.confirmationSemantic || eventPacket.confirmationSemantic || '').trim(),
+        confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'canonical_narration_contract').trim(),
+        supportSemantic:String(safeObject(contract.support).semantic || eventPacket.supportSemantic || '').trim(),
+        buyerResponseSemantic:String(contract.buyerControl || '').trim(),
+        confirmationSemantic:String(contract.followThrough || '').trim(),
         steps:eventSequence.slice(),
         stepDetails:storyStepDetails.map(detail => ({
           key:detail.key,
@@ -1456,12 +1536,11 @@ function buildTwoStepChartCoach(finalResponse = {}, traderInterpretation = {}, s
   };
 }
 
-function mergeTwoStepNarrativeIntoAnalysis(analysis = {}, finalResponse = {}, traderInterpretation = {}, structuredFacts = {}){
+function mergeTwoStepNarrativeIntoAnalysis(analysis = {}, finalResponse = {}, canonicalNarrationContract = {}, structuredFacts = {}){
   const base = analysis && typeof analysis === 'object' ? analysis : {};
   const prose = normalizeFlatStringFields(finalResponse, FINAL_PROSE_REQUIRED_FIELDS);
   const eventPacket = normalizeDeterministicEventPacket(safeObject(structuredFacts).deterministicEventPacket);
-  const interpretation = normalizeTraderInterpretation(traderInterpretation, eventPacket);
-  const chartCoach = buildTwoStepChartCoach(prose, interpretation, structuredFacts);
+  const chartCoach = buildTwoStepChartCoach(prose, canonicalNarrationContract, structuredFacts);
   return {
     ...base,
     coach_summary:prose.chartStory || base.coach_summary || '',
@@ -1486,21 +1565,6 @@ function mergeTwoStepNarrativeIntoAnalysis(analysis = {}, finalResponse = {}, tr
       whatNext:prose.whatNext
     },
     deterministicEventPacket:eventPacket,
-    traderInterpretation:{
-      dominantEventKey:interpretation.dominantEventKey,
-      dominantEvent:interpretation.dominantEvent,
-      supportSemantic:interpretation.supportSemantic,
-      buyerResponseSemantic:interpretation.buyerResponseSemantic,
-      confirmationSemantic:interpretation.confirmationSemantic,
-      whatChanged:interpretation.whatChanged,
-      eventSequence:interpretation.eventSequence.slice(),
-      traderInterpretation:interpretation.traderInterpretation,
-      currentRisk:interpretation.currentRisk,
-      nextSignal:interpretation.nextSignal,
-      traderRead:interpretation.traderRead,
-      riskToWatch:interpretation.riskToWatch,
-      nextUsefulSignal:interpretation.nextUsefulSignal
-    },
     chartGuruOpenAiFallbackReason:''
   };
 }
@@ -2287,13 +2351,13 @@ exports.handler = async function handler(event){
   try{
     const structuredFacts = buildProductionStructuredFacts(payload, analysis);
     analysis.deterministicEventPacket = structuredFacts.deterministicEventPacket;
-    const canonicalNarrationContract = buildCanonicalNarrationContract(payload.canonicalNarrationContract || structuredFacts.deterministicEventPacket, {
+    const canonicalNarrationContract = selectCanonicalNarrationContractForRenderer(payload.canonicalNarrationContract, structuredFacts.deterministicEventPacket, {
       structure:payload.structureState,
       trend:payload.trendState,
       volume:payload.volumeState,
       market:/below/i.test(String(payload.marketStatus || '')) ? 'weak' : 'supportive',
       verdict:analysis.verdict,
-      nextChartNeed:payload.canonicalNarrationContract && payload.canonicalNarrationContract.nextRequiredEvent || (structuredFacts.deterministicEventPacket.currentPhase === 'support_failed' ? 'repair' : '')
+      nextChartNeed:structuredFacts.deterministicEventPacket.currentPhase === 'support_failed' ? 'repair' : ''
     });
     const contractValidation = validateCanonicalNarrationContract(canonicalNarrationContract);
     analysis.canonicalNarrationContract = canonicalNarrationContract;
@@ -2301,19 +2365,14 @@ exports.handler = async function handler(event){
     let prose = null;
     let narrationSource = 'deterministic_fallback';
     if(contractValidation.ok){
-      const finalPrompt = buildProductionChartGuruFinalPrompt(canonicalNarrationContract);
       try{
-        const first = await sendStrictSchemaOpenAiRequest(apiKey, model, buildProductionChartGuruFinalInstructions(), finalPrompt, 'chart_guru_final_prose', FINAL_PROSE_SCHEMA, 700);
-        const firstValidation = validateNarrationProseAgainstContract(first.parsed, canonicalNarrationContract);
-        if(firstValidation.ok){ prose = first.parsed; narrationSource = 'openai'; }
-        else {
-          narrationErrors.push(...firstValidation.errors.map(code => `first:${code}`));
-          const retryPrompt = `${finalPrompt}\n\nCorrect only these failed contract constraints: ${firstValidation.errors.join(', ')}.`;
-          const retry = await sendStrictSchemaOpenAiRequest(apiKey, model, buildProductionChartGuruFinalInstructions(), retryPrompt, 'chart_guru_final_prose_retry', FINAL_PROSE_SCHEMA, 700);
-          const retryValidation = validateNarrationProseAgainstContract(retry.parsed, canonicalNarrationContract);
-          if(retryValidation.ok){ prose = retry.parsed; narrationSource = 'retry'; }
-          else narrationErrors.push(...retryValidation.errors.map(code => `retry:${code}`));
-        }
+        const rendered = await renderCanonicalNarrationWithRetry(canonicalNarrationContract, async (prompt, requestName) => {
+          const response = await sendStrictSchemaOpenAiRequest(apiKey, model, buildProductionChartGuruFinalInstructions(), prompt, requestName, FINAL_PROSE_SCHEMA, 700);
+          return response.parsed;
+        });
+        prose = rendered.prose;
+        narrationSource = rendered.source;
+        narrationErrors.push(...rendered.errors);
       }catch(err){ narrationErrors.push(`request:${String(err && err.stage || 'failed')}`); }
     }
     if(!prose) prose = deterministicNarrationFallback(canonicalNarrationContract);
@@ -2331,7 +2390,11 @@ exports.handler = async function handler(event){
       status:Number.isFinite(Number(err && err.status)) ? Number(err.status) : null,
       raw:err && Object.prototype.hasOwnProperty.call(err, 'raw') ? err.raw : null
     });
-    const contract = buildCanonicalNarrationContract(analysis.deterministicEventPacket, {structure:payload.structureState, trend:payload.trendState, volume:payload.volumeState});
+    const contract = selectCanonicalNarrationContractForRenderer(
+      payload.canonicalNarrationContract,
+      analysis.deterministicEventPacket,
+      {structure:payload.structureState, trend:payload.trendState, volume:payload.volumeState}
+    );
     const prose = deterministicNarrationFallback(contract);
     analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, contract, {deterministicEventPacket:analysis.deterministicEventPacket});
     delete analysis.traderInterpretation;
@@ -2367,10 +2430,12 @@ exports.__test = {
   buildProductionAnalysisInstructionLines,
   normalizeDeterministicEventPacket,
   buildCanonicalNarrationContract,
+  selectCanonicalNarrationContractForRenderer,
   validateCanonicalNarrationContract,
   buildCanonicalNarrationRendererInput,
   deterministicNarrationFallback,
   validateNarrationProseAgainstContract,
+  renderCanonicalNarrationWithRetry,
   normalizeTraderInterpretation,
   buildChartGuruNarrationDiagnostics,
   buildProductionStructuredFacts,

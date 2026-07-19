@@ -37299,8 +37299,10 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
   };
   const supportState = narrativeSupportState ? {
     level:String(narrativeSupportState.level || '').trim(),
+    type:String(narrativeSupportState.type || '').trim(),
     label:String(narrativeSupportState.label || '').trim(),
     interaction:String(narrativeSupportState.interaction || '').trim(),
+    semantic:String(narrativeSupportState.semantic || '').trim(),
     currentlyActive:narrativeSupportState.currentlyActive === true
       ? true
       : (narrativeSupportState.currentlyActive === false ? false : null),
@@ -37369,7 +37371,22 @@ function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
     dominantEvent:String(packet.dominantEventLabel || 'Market event in progress').trim(),
     eventSequence:Array.isArray(packet.eventSequence) ? packet.eventSequence.map(value => String(value || '').trim()).filter(Boolean) : [],
     structure,
-    support:{interaction:allowed(packet.supportState && packet.supportState.interaction, ['testing','held','failed','not_tested'], packet.supportSemantic === 'support_failed' ? 'failed' : 'unknown'),label:String(packet.recentStorySupportLabel || packet.supportState && packet.supportState.label || '').trim()},
+    support:{
+      type:allowed(packet.supportState && (packet.supportState.type || packet.supportState.level), ['20ma','50ma','200ma'], 'unknown'),
+      label:String(packet.recentStorySupportLabel || packet.supportState && packet.supportState.label || '').trim(),
+      interaction:allowed(packet.supportState && packet.supportState.interaction, ['testing','held','failed','not_tested'], packet.supportSemantic === 'support_failed' ? 'failed' : 'unknown'),
+      currentlyActive:packet.supportState && packet.supportState.currentlyActive === true
+        ? true
+        : (packet.supportState && packet.supportState.currentlyActive === false ? false : null),
+      semantic:allowed(packet.supportState && packet.supportState.semantic, ['active_testing_support','active_held_support','failed_support','off_support'], (() => {
+        const interaction = String(packet.supportState && packet.supportState.interaction || '').trim().toLowerCase();
+        if(packet.supportState && packet.supportState.currentlyActive === true && interaction === 'held') return 'active_held_support';
+        if(packet.supportState && packet.supportState.currentlyActive === true && interaction === 'testing') return 'active_testing_support';
+        if(interaction === 'failed' || packet.supportSemantic === 'support_failed') return 'failed_support';
+        if(packet.supportState && packet.supportState.currentlyActive === false || packet.supportSemantic === 'support_absent') return 'off_support';
+        return 'unknown';
+      })())
+    },
     buyerControl:allowed(packet.buyerControlState, ['none','emerging','confirmed'], packet.buyerResponseSemantic === 'response_present' ? 'emerging' : 'none'),
     followThrough:allowed(String(packet.confirmationSemantic || '').replace('follow_through_', ''), ['not_started','unconfirmed','stalled','confirmed','failed']),
     trend:narrationTrendState(context.trendState) !== 'unknown' ? narrationTrendState(context.trendState) : (structure === 'intact' ? 'healthy' : (structure === 'broken' ? 'broken' : 'unknown')),
