@@ -614,6 +614,18 @@ async function extractScanReviewParity(page, ticker){
       globalVerdict,
       derivedStates
     });
+    const trackPresentation = buildSharedReviewTrackPresentation(record, {
+      surface:'track',
+      simplifiedState:resolveSimplifiedStateForSurface(record, 'track', {
+        log:false,
+        source:'scan_review_parity_contract',
+        reason:'scan_review_parity_contract'
+      }),
+      lifecycleSnapshot:watchlistLifecycleSnapshot(record),
+      globalVerdict,
+      source:'scan_review_parity_contract',
+      reason:'scan_review_parity_contract'
+    });
     const accepted50 = isAccepted50MaSupportTestDisplayState({
       record,
       simplifiedState:reviewSimplified,
@@ -627,6 +639,12 @@ async function extractScanReviewParity(page, ticker){
       reviewDecisionSummary:String(reviewDisplay && reviewDisplay.decisionSummary || ''),
       reviewTechnicalContext:String(reviewDisplay && reviewDisplay.technicalContextLine || ''),
       reviewProjection:reviewDisplay && reviewDisplay.decisionProjection ? reviewDisplay.decisionProjection : null,
+      scannerTechnicalSummary:scanCardTechnicalSummaryForView({item:record, setupStates:derivedStates}),
+      trackPrimaryReason:String(trackPresentation && trackPresentation.trackPrimaryReason || ''),
+      trackNextAction:String(trackPresentation && trackPresentation.trackNextAction || ''),
+      trackProjection:trackPresentation && trackPresentation.trackSemanticProjection
+        ? trackPresentation.trackSemanticProjection
+        : null,
       storyWithoutAnalysis:storyWithoutAnalysis || null,
       storyWithAnalysis:storyWithAnalysis || null,
       accepted50,
@@ -1456,6 +1474,119 @@ test('Scan summary does not revert to raw no-pullback copy after a completed sup
   expect(result.storyWithAnalysis.currentPhase).toBe('away_from_support');
   expect(result.scannerSummary).toMatch(/away from support|trend remains constructive/i);
   expect(result.scannerSummary).not.toMatch(/no pullback|developing|waiting for confirmation/i);
+});
+
+test('completed continuation supersedes stale support-era fields across Scan and Review Technical Context', async ({page}) => {
+  await bootApp(page);
+  const scenario = awayFromSupportScenario();
+  scenario.setupLocationState = 'off_level';
+  scenario.pullbackZone = 'none';
+  scenario.bounceState = 'attempt';
+  scenario.stabilisationState = 'none';
+  scenario.supportContext = '';
+  scenario.supportTestState = 'not_tested';
+  scenario.buyerControlState = 'none';
+  scenario.normalizedAnalysis = {
+    canonicalValues:{price:288.3, ma20:273.251, ma50:269.7692, ma200:250, volume:2945750},
+    trustedMarketContext:{
+      recentCandleSequence:[
+        {date:'2026-07-14', open:288.3, high:288.3, low:288.3, close:288.3, volume:2945750},
+        {date:'2026-07-13', open:289.13, high:289.13, low:289.13, close:289.13, volume:2276868},
+        {date:'2026-07-10', open:286.96, high:286.96, low:286.96, close:286.96, volume:1876200},
+        {date:'2026-07-09', open:285.04, high:285.04, low:285.04, close:285.04, volume:2025716}
+      ]
+    }
+  };
+  await seedScenario(page, scenario);
+  await page.evaluate(() => {
+    const record = getTickerRecord('AWAY');
+    Object.assign(record.scan.analysisProjection.derived_states, {
+      evaluation_scan_type:'20MA',
+      candle_evidence_up_closes_after_low:3,
+      candle_evidence_higher_low_hold:'yes',
+      candle_evidence_downside_momentum_slowing:'yes'
+    });
+  });
+
+  const result = await extractScanReviewParity(page, 'AWAY');
+
+  expect(result.storyWithAnalysis.support.distanceMeasured).toBe(true);
+  expect(result.storyWithAnalysis.support.distancePct).toBeGreaterThan(0.05);
+  expect(result.storyWithAnalysis.buyerResponse.semantic).toBe('response_present');
+  expect(result.storyWithAnalysis.buyerControl.state).toBe('confirmed');
+  expect(result.storyWithAnalysis.confirmation.semantic).toBe('follow_through_confirmed');
+  expect(result.storyWithAnalysis.currentPhase).toBe('extended_from_support');
+  expect(result.reviewProjection.currentPhase).toBe('extended_from_support');
+  expect(result.scannerSummary).toMatch(/away from support|already away from support|wait for a reset/i);
+  expect(result.scannerSummary).not.toMatch(/developing|no pullback|buyers emerging|buyers responding/i);
+  expect(result.reviewTechnicalContext).toMatch(/extended from 20-day average|away from 20-day average/i);
+  expect(result.reviewTechnicalContext).not.toMatch(/stalled after|follow-through stalled|buyers emerging/i);
+});
+
+test('terminal structural damage retains historical response without presenting current buyer control', async ({page}) => {
+  await bootApp(page);
+  const scenario = watchScenario();
+  Object.assign(scenario, {
+    ticker:'CATX',
+    companyName:'Terminal Damage Plc',
+    canonicalVerdict:'watch',
+    visualBucket:'diminishing',
+    badgeLabel:'Watch',
+    actionLabel:'Wait for stronger confirmation before considering entry.',
+    scanVerdictLabel:'Watch',
+    price:880.28,
+    previousClose:878.4,
+    ma20:968.989,
+    ma50:928.9992,
+    ma200:720.0148,
+    structureState:'broken',
+    structureEligibility:'broken',
+    setupLocationState:'extended',
+    pullbackZone:'extended',
+    priceabilityState:'provisional',
+    bounceState:'attempt',
+    stabilisationState:'none',
+    volumeState:'constructive',
+    trendState:'weak',
+    supportContext:'20ma',
+    supportTestState:'not_tested',
+    buyerControlState:'none',
+    normalizedAnalysis:{
+      canonicalValues:{price:880.28, ma20:968.989, ma50:928.9992, ma200:720.0148},
+      trustedMarketContext:{
+        recentCandleSequence:[
+          {date:'2026-07-14', open:874.2, high:884.4, low:870.1, close:880.28, volume:3377169},
+          {date:'2026-07-13', open:890.0, high:893.1, low:875.3, close:878.4, volume:3510000}
+        ]
+      }
+    }
+  });
+  await seedScenario(page, scenario);
+  await page.evaluate(() => {
+    const record = getTickerRecord('CATX');
+    Object.assign(record.scan.analysisProjection.derived_states, {
+      bounce_state:'attempt',
+      setup_location_state:'extended',
+      pullback_zone:'extended',
+      candle_evidence_up_closes_after_low:1,
+      candle_evidence_reclaimed_prior_day_high:'yes'
+    });
+    record.scan.analysisProjection.bounce_state = 'attempt';
+  });
+
+  const result = await extractScanReviewParity(page, 'CATX');
+
+  expect(result.storyWithAnalysis.buyerResponse.semantic).toBe('response_present');
+  expect(result.storyWithAnalysis.storyEvents).toContain('buyers_responded');
+  expect(result.storyWithAnalysis.buyerControl.state).toBe('none');
+  expect(result.storyWithAnalysis.confirmation.semantic).toBe('follow_through_failed');
+  expect(['support_failed', 'repairing_structure']).toContain(result.storyWithAnalysis.currentPhase);
+  expect(result.reviewProjection.currentPhase).toBe(result.storyWithAnalysis.currentPhase);
+  expect(result.trackProjection.currentPhase).toBe(result.storyWithAnalysis.currentPhase);
+  expect(result.scannerTechnicalSummary).toMatch(/structure broken.*(failed|repairing).*buyer control failed/i);
+  expect(result.scannerTechnicalSummary).not.toMatch(/buyers emerging|developing|extended/i);
+  expect(result.trackPrimaryReason).not.toMatch(/trend is still healthy/i);
+  expect(result.trackNextAction).toMatch(/chart to repair/i);
 });
 
 test('analysis-enriched Scan reconstruction matches Review semantics when normalized analysis changes the canonical phase', async ({page}) => {

@@ -855,6 +855,66 @@ function runDeterministicCandleFallbackRegression(){
   assert.ok(!/Support is reacting|Buyers emerging|buyer control is not convincing yet/i.test(extendedReviewRead.text), 'Review prose must not fall back to stale active-support wording once the rebound is extended.');
   assert.strictEqual(extendedReviewRead.selectedSummarySource, 'deterministic_chart_coach', 'Fresh deterministic fallback should keep the generated deterministic source.');
 
+  const completedContinuationRecord = {
+    marketData:{price:288.3, ma20:273.251, ma50:269.7692, ma200:250},
+    _globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      support_context:'none',
+      support_test_state:'not_tested',
+      buyer_control_state:'none',
+      bounce_state:'attempt',
+      stabilisation_state:'none',
+      pullback_zone:'none',
+      setup_location_state:'off_level'
+    },
+    _derivedStates:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      setupLocationState:'off_level',
+      pullbackZone:'none',
+      bounceState:'attempt',
+      stabilisationState:'none',
+      volumeState:'expanding',
+      supportContext:'none',
+      supportTestState:'not_tested',
+      buyerControlState:'none',
+      evaluationScanType:'20MA',
+      candleEvidenceUpClosesAfterLow:3,
+      candleEvidenceHigherLowHold:true,
+      candleEvidenceDownsideMomentumSlowing:true
+    }
+  };
+  const completedContinuationAnalysis = {
+    canonicalValues:{price:288.3, ma20:273.251, ma50:269.7692, ma200:250, volume:2945750},
+    trustedMarketContext:{
+      avgVolume30d:2605426,
+      recentCandleSequence:[
+        {date:'2026-07-14', open:288.3, high:288.3, low:288.3, close:288.3, volume:2945750},
+        {date:'2026-07-13', open:289.13, high:289.13, low:289.13, close:289.13, volume:2276868},
+        {date:'2026-07-10', open:286.96, high:286.96, low:286.96, close:286.96, volume:1876200},
+        {date:'2026-07-09', open:285.04, high:285.04, low:285.04, close:285.04, volume:2025716}
+      ]
+    }
+  };
+  const completedContinuationStory = sandbox.buildCanonicalStoryContextForRecord(completedContinuationRecord, {
+    globalVerdict:completedContinuationRecord._globalVerdict,
+    derivedStates:completedContinuationRecord._derivedStates,
+    analysis:completedContinuationAnalysis
+  });
+  assert.ok(Math.abs(completedContinuationStory.support.distancePct - ((288.3 - 273.251) / 273.251)) < 0.0001, 'Completed continuation must retain the measured distance from 20MA.');
+  assert.strictEqual(completedContinuationStory.support.type, '20ma', 'Completed continuation must retain its historical 20MA support type.');
+  assert.strictEqual(completedContinuationStory.buyerResponse.semantic, 'response_present', 'Completed continuation must preserve the historical buyer response.');
+  assert.strictEqual(completedContinuationStory.buyerControl.state, 'confirmed', 'Multiple continuation closes must confirm buyer control even when raw scanner state remains attempt.');
+  assert.strictEqual(completedContinuationStory.confirmation.semantic, 'follow_through_confirmed', 'Multiple continuation closes must confirm follow-through.');
+  assert.strictEqual(completedContinuationStory.currentPhase, 'extended_from_support', 'Material distance after confirmed continuation must supersede stale support-era state.');
+  assert.ok(completedContinuationStory.storyEvents.includes('buyers_responded') && completedContinuationStory.storyEvents.includes('rebound_extended'), 'The story must retain both historical support response and current extension.');
+  const completedContinuationRead = sandbox.finalDisplayedAnalysisChartRead(completedContinuationRecord, completedContinuationAnalysis);
+  assert.ok(/extended away|no longer an active support test|well beyond|moved well beyond/i.test(completedContinuationRead.text), 'Review prose must project the completed-extension phase rather than stale early-response fields.');
+  assert.ok(!/support is reacting|buyers emerging|follow-through stalled/i.test(completedContinuationRead.text), 'Completed extension must not render active-support or stalled-response language.');
+  assert.strictEqual(completedContinuationRecord._globalVerdict.final_verdict, 'watch', 'Completed continuation must not alter the existing Watch verdict.');
+
   const activeSupportRecord = {
     marketData:{price:201.2, ma20:200.4, ma50:195.8, ma200:180},
     _globalVerdict:{

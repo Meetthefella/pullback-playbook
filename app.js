@@ -10185,8 +10185,14 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       ? trackDecisionSummaryFromSemantics(trackDecisionSemantics, headline || '')
       : (headline || '')
   ).trim();
-  const trackPrimaryReason = resolvedPrimaryReason;
-  const trackNextAction = String(nextAction || '').trim();
+  const terminalTrackPhase = String(trackDecisionSemantics && trackDecisionSemantics.currentPhase || '').trim().toLowerCase();
+  const terminalTrackState = ['support_failed', 'repairing_structure'].includes(terminalTrackPhase);
+  const trackPrimaryReason = terminalTrackState
+    ? String(trackDecisionSemantics && (trackDecisionSemantics.blockerSummary || trackDecisionSemantics.decisiveReason) || resolvedPrimaryReason).trim()
+    : resolvedPrimaryReason;
+  const trackNextAction = terminalTrackState
+    ? 'Wait for the chart to repair before considering a new pullback entry.'
+    : String(nextAction || '').trim();
   const trackPlanSummary = String(
     (trackRenderModel && trackRenderModel.planSummary)
     || (effectiveCanonicalVerdict === 'entry'
@@ -19294,6 +19300,24 @@ function compactReasonLineForView(view, maxParts = 3){
 function scanCardTechnicalSummaryForView(view){
   const item = view && view.item ? view.item : {};
   const derived = view && view.setupStates ? view.setupStates : analysisDerivedStatesFromRecord(item);
+  const globalVerdict = typeof resolveGlobalVerdict === 'function' ? resolveGlobalVerdict(item) : {};
+  const analysisState = typeof getReviewAnalysisState === 'function' ? getReviewAnalysisState(item) : null;
+  const storyContext = typeof buildCanonicalStoryContextForRecord === 'function'
+    ? buildCanonicalStoryContextForRecord(item, {
+      globalVerdict,
+      derivedStates:derived,
+      analysis:analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
+        ? analysisState.normalizedAnalysis
+        : undefined
+    })
+    : null;
+  const currentPhase = String(storyContext && storyContext.currentPhase || '').trim().toLowerCase();
+  const canonicalStructureState = String(storyContext && storyContext.structure && storyContext.structure.state || '').trim().toLowerCase();
+  if(canonicalStructureState === 'broken' || ['support_failed', 'repairing_structure'].includes(currentPhase)){
+    const supportLabel = String(storyContext && storyContext.support && storyContext.support.label || 'support').trim() || 'support';
+    const locationLabel = currentPhase === 'support_failed' ? `${supportLabel} failed` : 'Structure repairing';
+    return ['Structure broken', locationLabel, 'Buyer control failed'].join(' | ');
+  }
   const structureBadge = shortlistStructureBadgeForView(view);
   const structureLabel = structureBadge && structureBadge.label
     ? structureBadge.label
@@ -24465,6 +24489,15 @@ function buildCanonicalStoryContextForRecord(record = {}, options = {}){
     buyerControlState,
     bounceState,
     stabilisationState,
+    reclaimConfirmed:derivedStates.candleEvidenceReclaimedPriorDayHigh === true
+      || derivedStates.candleEvidenceReclaimRangeMeaningful === true,
+    candleEvidenceUpClosesAfterLow:derivedStates.candleEvidenceUpClosesAfterLow,
+    candleEvidenceReclaimedPriorDayHigh:derivedStates.candleEvidenceReclaimedPriorDayHigh === true,
+    candleEvidenceDownsideMomentumSlowing:derivedStates.candleEvidenceDownsideMomentumSlowing === true,
+    candleEvidenceTighterRanges:derivedStates.candleEvidenceTighterRanges === true,
+    candleEvidenceSmallerBodies:derivedStates.candleEvidenceSmallerBodies === true,
+    candleEvidenceHigherLowHold:derivedStates.candleEvidenceHigherLowHold === true,
+    candleEvidenceReclaimRangeMeaningful:derivedStates.candleEvidenceReclaimRangeMeaningful === true,
     evaluationScanType,
     recentSupportType:chartGuruResolvedSupportType({
       ...globalVerdict,
@@ -27263,15 +27296,36 @@ function buildCanonicalChartStoryContext(context = {}){
   const supportTestState = String(context.supportTestState || '').trim().toLowerCase();
   const buyerResponsePresent = chartGuruBuyerResponsePresent(context);
   const recentSupportResponsePresent = chartGuruRecentSupportResponsePresent(context);
+  const terminalCurrentFailure = context.structureBroken === true || context.failedBounce === true || supportTestState === 'failed';
+  const confirmedContinuationEvidence = !!(
+    context.followThroughConfirmed === true
+    || buyerControlState === 'confirmed'
+    || (
+      recentSupportResponsePresent
+      && supportDistanceMeasured
+      && supportDistancePct >= 0.035
+      && (
+        Number(context.candleEvidenceUpClosesAfterLow) >= 2
+        || (
+          context.candleEvidenceReclaimedPriorDayHigh === true
+          && context.candleEvidenceHigherLowHold === true
+        )
+        || context.candleEvidenceReclaimRangeMeaningful === true
+      )
+    )
+  );
   const supportContextRecognized = !!(
     supportType
     || (supportContext && supportContext !== 'none')
   );
   const supportInteraction = (() => {
-    if(['failed', 'held', 'testing', 'not_tested'].includes(supportTestState)) return supportTestState;
+    if(supportTestState === 'failed') return 'failed';
+    if(supportTestState === 'held') return 'held';
+    if(confirmedContinuationEvidence) return 'held';
+    if(['testing', 'not_tested'].includes(supportTestState)) return supportTestState;
     if(context.failedBounce === true || context.structureBroken === true) return 'failed';
     if(!supportContextRecognized) return 'not_tested';
-    if(context.followThroughConfirmed === true || buyerControlState === 'confirmed' || recentSupportResponsePresent) return 'held';
+    if(recentSupportResponsePresent) return 'held';
     if(
       context.pullbackNear20 === true
       || context.pullbackNear50 === true
@@ -27294,8 +27348,7 @@ function buildCanonicalChartStoryContext(context = {}){
     && supportDistancePct >= 0.035
     && recentSupportResponsePresent
     && (
-      buyerControlState === 'confirmed'
-      || context.followThroughConfirmed === true
+      confirmedContinuationEvidence
       || context.candleEvidenceReclaimedPriorDayHigh === true
       || context.candleEvidenceReclaimRangeMeaningful === true
       || Number(context.candleEvidenceUpClosesAfterLow) >= 2
@@ -27327,9 +27380,11 @@ function buildCanonicalChartStoryContext(context = {}){
       || context.weakVolume === true
     )
   );
-  const buyerControlSemantic = buyerControlState === 'confirmed'
+  const buyerControlSemantic = terminalCurrentFailure
+    ? 'none'
+    : (buyerControlState === 'confirmed'
     ? 'confirmed'
-    : (buyerResponsePresent ? 'emerging' : 'none');
+    : (confirmedContinuationEvidence ? 'confirmed' : (buyerResponsePresent ? 'emerging' : 'none')));
   const volumeState = String(context.volumeParticipation || chartGuruVolumeParticipationLabel(context) || '').trim().toLowerCase() || 'constructive';
   const pullbackQuality = context.failedBounce === true
     || context.structureBroken === true
@@ -27374,7 +27429,8 @@ function buildCanonicalChartStoryContext(context = {}){
     return 'response_unknown';
   })();
   const confirmationSemantic = (() => {
-    if(context.followThroughConfirmed === true || buyerControlState === 'confirmed') return 'follow_through_confirmed';
+    if(terminalCurrentFailure) return 'follow_through_failed';
+    if(confirmedContinuationEvidence) return 'follow_through_confirmed';
     if(context.failedBounce === true) return 'follow_through_failed';
     if(supportInteraction === 'failed' && !buyerResponsePresent) return 'follow_through_failed';
     if(buyerResponsePresent) return 'follow_through_unconfirmed';
