@@ -23,6 +23,7 @@
     "test:unit:resolver": "node tests/unit/run-unit-suite.js resolver",
     "test:unit:contracts": "node tests/unit/run-unit-suite.js contracts",
     "test:unit:chart-guru-ai": "node scripts/run-chart-guru-ai-contract-assertions.js",
+    "test:unit:chart-guru-narration": "node scripts/run-chart-guru-narration-contract-assertions.js",
     "test:unit:pullback-authority": "node tests/unit/run-unit-suite.js pullback-authority",
     "test:unit:persistence": "node tests/unit/run-unit-suite.js persistence",
     "test:unit:execution": "node tests/unit/run-unit-suite.js execution",

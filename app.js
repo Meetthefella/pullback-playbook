@@ -37167,6 +37167,7 @@ function buildAnalysisPayload(card){
     target:safeCard.target || '',
     trustedMarketContext,
     deterministicEventPacket:deterministicAuthority.eventPacket,
+    canonicalNarrationContract:deterministicAuthority.canonicalNarrationContract || null,
     marketData:safeCard.marketData ? {
       price:safeCard.price,
       sma20:safeCard.sma20,
@@ -37351,6 +37352,36 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
   };
 }
 
+function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
+  const packet = eventPacket && typeof eventPacket === 'object' ? eventPacket : {};
+  const allowed = (value, values, fallback = 'unknown') => values.includes(String(value || '').trim().toLowerCase()) ? String(value || '').trim().toLowerCase() : fallback;
+  const narrationStructureState = value => ({strong:'intact',intact:'intact',developing_clean:'intact',developing:'intact',weak:'weakening',weakening:'weakening',broken:'broken'})[String(value || '').trim().toLowerCase()] || 'unknown';
+  const narrationTrendState = value => ({strong:'healthy',healthy:'healthy',acceptable:'healthy',weak:'weak',broken:'broken'})[String(value || '').trim().toLowerCase()] || 'unknown';
+  const narrationVolumeState = value => ({expanding:'constructive',constructive:'constructive',contracting:'light',diminishing:'light',light:'light',average:'mixed',normal:'mixed',mixed:'mixed',weak:'weak',heavy:'heavy'})[String(value || '').trim().toLowerCase()] || 'unknown';
+  const phase = allowed(packet.currentPhase, ['at_support','responding_from_support','stalled_after_response','extended_from_support','away_from_support','support_failed','repairing_structure','current_location_unresolved']);
+  const nextByPhase = {at_support:'support_hold',responding_from_support:'follow_through',stalled_after_response:'follow_through',extended_from_support:'pullback_or_reset',away_from_support:'clearer_support',support_failed:'repair',repairing_structure:'repair',current_location_unresolved:'clearer_support'};
+  const structure = narrationStructureState(context.structureState) !== 'unknown'
+    ? narrationStructureState(context.structureState)
+    : (packet.dominantEventKey === 'structure_breaking_down' ? 'broken' : 'unknown');
+  return {
+    version:'chart-guru-narration-contract-v1',
+    phase,
+    dominantEvent:String(packet.dominantEventLabel || 'Market event in progress').trim(),
+    eventSequence:Array.isArray(packet.eventSequence) ? packet.eventSequence.map(value => String(value || '').trim()).filter(Boolean) : [],
+    structure,
+    support:{interaction:allowed(packet.supportState && packet.supportState.interaction, ['testing','held','failed','not_tested'], packet.supportSemantic === 'support_failed' ? 'failed' : 'unknown'),label:String(packet.recentStorySupportLabel || packet.supportState && packet.supportState.label || '').trim()},
+    buyerControl:allowed(packet.buyerControlState, ['none','emerging','confirmed'], packet.buyerResponseSemantic === 'response_present' ? 'emerging' : 'none'),
+    followThrough:allowed(String(packet.confirmationSemantic || '').replace('follow_through_', ''), ['not_started','unconfirmed','stalled','confirmed','failed']),
+    trend:narrationTrendState(context.trendState) !== 'unknown' ? narrationTrendState(context.trendState) : (structure === 'intact' ? 'healthy' : (structure === 'broken' ? 'broken' : 'unknown')),
+    volume:narrationVolumeState(context.volumeState),
+    market:/below/i.test(String(context.marketStatus || '')) ? 'weak' : 'supportive',
+    dominantBlocker:nextByPhase[phase] === 'clearer_support' ? 'location' : (nextByPhase[phase] || 'unknown'),
+    nextRequiredEvent:nextByPhase[phase] || 'unknown',
+    verdict:allowed(context.verdict, ['watch','near_entry','entry','avoid']),
+    evidenceFactIds:Array.isArray(packet.evidenceFactIds) ? packet.evidenceFactIds.map(value => String(value || '').trim()).filter(Boolean) : []
+  };
+}
+
 function buildChartGuruDeterministicAuthorityPayload(card, options = {}){
   const safeCard = normalizeCard(card);
   const marketData = safeCard.marketData && typeof safeCard.marketData === 'object' ? safeCard.marketData : {};
@@ -37426,8 +37457,15 @@ function buildChartGuruDeterministicAuthorityPayload(card, options = {}){
       candleEvidenceReclaimRangeMeaningful:String(derivedStates.candle_evidence_reclaim_range_meaningful || '').trim().toLowerCase() === 'yes'
     }
   });
+  const eventPacket = buildDeterministicEventPacketFromChartCoach(deterministicChartCoach);
   return {
-    eventPacket:buildDeterministicEventPacketFromChartCoach(deterministicChartCoach)
+    eventPacket,
+    canonicalNarrationContract:buildCanonicalNarrationContract(eventPacket, {
+      structureState:derivedStates.structure_state,
+      trendState:derivedStates.trend_state,
+      volumeState:derivedStates.volume_state,
+      marketStatus:state.marketStatus
+    })
   };
 }
 
@@ -37627,6 +37665,7 @@ function normalizeAnalysisResponse(raw){
   const candleStructureAnalysis = normalizeObject(raw.candleStructureAnalysis || raw.candle_structure_analysis) || {};
   const tradePlanCommentary = normalizeObject(raw.tradePlanCommentary || raw.trade_plan_commentary) || {};
   const deterministicEventPacket = normalizeDeterministicEventPacket(raw.deterministicEventPacket || raw.deterministic_event_packet);
+  const canonicalNarrationContract = normalizeObject(raw.canonicalNarrationContract || raw.canonical_narration_contract);
   const traderInterpretation = normalizeTraderInterpretation(raw.traderInterpretation || raw.trader_interpretation);
   const chartCoach = normalizeChartCoach(raw.chartGuru || raw.chart_guru || raw.chartCoach || raw.chart_coach);
   const confidenceWarnings = Array.isArray(raw.confidenceWarnings || raw.confidence_warnings)
@@ -37737,6 +37776,9 @@ function normalizeAnalysisResponse(raw){
       || deterministicEventPacket.recentStoryKey
       || deterministicEventPacket.eventSequence.length
     ) ? deterministicEventPacket : null,
+    canonicalNarrationContract:canonicalNarrationContract && String(canonicalNarrationContract.version || '').trim()
+      ? canonicalNarrationContract
+      : null,
     traderInterpretation:(
       traderInterpretation.dominantEvent
       || traderInterpretation.dominantEventKey

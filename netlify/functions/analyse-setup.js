@@ -13,7 +13,9 @@ const CHART_GURU_PRIMARY_STORY_ICON = '🧭';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
 const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
 const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
-const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
+const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v3';
+const CHART_GURU_NARRATION_CONTRACT_VERSION = 'chart-guru-narration-contract-v1';
+const CANONICAL_NARRATION_RENDERER_FIELDS = ['version','phase','dominantEvent','eventSequence','structure','support','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'];
 const INTERPRETATION_REQUIRED_FIELDS = [
   'dominantEvent',
   'dominantEventKey',
@@ -486,6 +488,160 @@ function normalizeDeterministicEventPacket(value = {}){
       }).filter(detail => detail.key)
       : []
   };
+}
+
+const NARRATION_ENUMS = {
+  phase:new Set(['at_support','responding_from_support','stalled_after_response','extended_from_support','away_from_support','support_failed','repairing_structure','current_location_unresolved']),
+  structure:new Set(['intact','weakening','broken','unknown']),
+  support:new Set(['testing','held','failed','not_tested','unknown']),
+  buyerControl:new Set(['none','emerging','confirmed','unknown']),
+  followThrough:new Set(['not_started','unconfirmed','stalled','confirmed','failed','unknown']),
+  trend:new Set(['healthy','weak','broken','unknown']),
+  volume:new Set(['constructive','weak','heavy','light','mixed','unknown']),
+  market:new Set(['supportive','neutral','weak','unknown']),
+  blocker:new Set(['none','follow_through','support_hold','repair','pullback_or_reset','location','structure','unknown']),
+  nextRequiredEvent:new Set(['none','support_hold','follow_through','repair','pullback_or_reset','clearer_support','unknown']),
+  verdict:new Set(['watch','near_entry','entry','avoid','unknown'])
+};
+
+function normalizeNarrationEnum(value, values, fallback = 'unknown'){
+  const normalized = normaliseString(value, '').trim().toLowerCase();
+  return values.has(normalized) ? normalized : fallback;
+}
+
+function narrationStructureState(value = ''){
+  return ({strong:'intact',intact:'intact',developing_clean:'intact',developing:'intact',weak:'weakening',weakening:'weakening',broken:'broken'})[normaliseString(value, '').trim().toLowerCase()] || 'unknown';
+}
+function narrationTrendState(value = ''){
+  return ({strong:'healthy',healthy:'healthy',acceptable:'healthy',weak:'weak',broken:'broken'})[normaliseString(value, '').trim().toLowerCase()] || 'unknown';
+}
+function narrationVolumeState(value = ''){
+  return ({expanding:'constructive',constructive:'constructive',contracting:'light',diminishing:'light',light:'light',average:'mixed',normal:'mixed',mixed:'mixed',weak:'weak',heavy:'heavy'})[normaliseString(value, '').trim().toLowerCase()] || 'unknown';
+}
+
+function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
+  if(safeObject(eventPacket).version === CHART_GURU_NARRATION_CONTRACT_VERSION){
+    const supplied = safeObject(eventPacket);
+    const rebuilt = buildCanonicalNarrationContract({
+      currentPhase:supplied.phase,
+      dominantEventLabel:supplied.dominantEvent,
+      eventSequence:supplied.eventSequence,
+      evidenceFactIds:supplied.evidenceFactIds,
+      supportState:supplied.support,
+      buyerControlState:supplied.buyerControl,
+      confirmationSemantic:supplied.followThrough ? `follow_through_${supplied.followThrough}` : ''
+    }, {...safeObject(source), structure:supplied.structure, trend:supplied.trend, volume:supplied.volume, market:supplied.market, dominantBlocker:supplied.dominantBlocker, nextRequiredEvent:supplied.nextRequiredEvent, verdict:supplied.verdict});
+    return rebuilt;
+  }
+  const packet = normalizeDeterministicEventPacket(eventPacket);
+  const extra = safeObject(source);
+  const supportState = safeObject(packet.supportState);
+  const inferredPhase = packet.supportSemantic === 'support_failed'
+    ? 'support_failed'
+    : (packet.supportSemantic === 'support_absent'
+      ? 'away_from_support'
+      : (packet.buyerResponseSemantic === 'response_present' ? 'responding_from_support' : (packet.supportSemantic === 'support_present' ? 'at_support' : 'current_location_unresolved')));
+  const phase = normalizeNarrationEnum(packet.currentPhase, NARRATION_ENUMS.phase, inferredPhase);
+  const mappedStructure = narrationStructureState(extra.structure || extra.structureState);
+  const structure = mappedStructure !== 'unknown' ? mappedStructure : (packet.dominantEventKey === 'structure_breaking_down' ? 'broken' : 'unknown');
+  const support = normalizeNarrationEnum(supportState.interaction, NARRATION_ENUMS.support,
+    packet.supportSemantic === 'support_failed' ? 'failed' : (packet.supportSemantic === 'support_present' ? 'testing' : 'unknown'));
+  const buyerControl = normalizeNarrationEnum(packet.buyerControlState, NARRATION_ENUMS.buyerControl,
+    packet.buyerResponseSemantic === 'response_present' ? 'emerging' : 'none');
+  const followThrough = normalizeNarrationEnum(packet.confirmationSemantic
+    .replace('follow_through_', ''), NARRATION_ENUMS.followThrough,
+    packet.buyerResponseSemantic === 'response_present' ? 'unconfirmed' : 'unknown');
+  const nextFromPhase = {
+    at_support:'support_hold', responding_from_support:'follow_through', stalled_after_response:'follow_through',
+    extended_from_support:'pullback_or_reset', away_from_support:'clearer_support', support_failed:'repair',
+    repairing_structure:'repair', current_location_unresolved:'clearer_support'
+  };
+  const nextRequiredEvent = normalizeNarrationEnum(extra.nextRequiredEvent || extra.nextChartNeed, NARRATION_ENUMS.nextRequiredEvent,
+    nextFromPhase[phase] || 'unknown');
+  return {
+    version:CHART_GURU_NARRATION_CONTRACT_VERSION,
+    phase,
+    dominantEvent:packet.dominantEventLabel || 'Market event in progress',
+    eventSequence:packet.eventSequence,
+    structure,
+    support:{interaction:support, label:packet.recentStorySupportLabel || supportState.label || ''},
+    buyerControl,
+    followThrough,
+    trend:narrationTrendState(extra.trend || extra.trendState) !== 'unknown' ? narrationTrendState(extra.trend || extra.trendState) : (structure === 'intact' ? 'healthy' : (structure === 'broken' ? 'broken' : 'unknown')),
+    volume:narrationVolumeState(extra.volume || extra.volumeState),
+    market:normalizeNarrationEnum(extra.market, NARRATION_ENUMS.market),
+    dominantBlocker:normalizeNarrationEnum(extra.dominantBlocker, NARRATION_ENUMS.blocker, nextRequiredEvent === 'none' ? 'none' : (nextRequiredEvent === 'unknown' ? 'unknown' : nextRequiredEvent === 'clearer_support' ? 'location' : nextRequiredEvent)),
+    nextRequiredEvent,
+    verdict:normalizeNarrationEnum(extra.verdict, NARRATION_ENUMS.verdict),
+    evidenceFactIds:packet.evidenceFactIds
+  };
+}
+
+function validateCanonicalNarrationContract(contract = {}){
+  const value = safeObject(contract);
+  const errors = [];
+  if(value.version !== CHART_GURU_NARRATION_CONTRACT_VERSION) errors.push('unsupported_contract_version');
+  if(!NARRATION_ENUMS.phase.has(value.phase)) errors.push('phase_unknown');
+  if(value.phase === 'stalled_after_response' && (value.followThrough === 'confirmed' || value.buyerControl === 'confirmed')) errors.push('stalled_response_confirmed_conflict');
+  if(value.phase === 'support_failed' && (value.support && value.support.interaction === 'held' || value.followThrough === 'confirmed')) errors.push('support_failed_conflict');
+  if(['extended_from_support','away_from_support'].includes(value.phase) && value.support && ['testing','held'].includes(value.support.interaction)) errors.push('away_phase_active_support_conflict');
+  if(value.structure === 'broken' && (value.support && value.support.interaction === 'held' || value.buyerControl === 'confirmed')) errors.push('broken_structure_recovery_conflict');
+  const expectedNext = {stalled_after_response:'follow_through',support_failed:'repair',repairing_structure:'repair',extended_from_support:'pullback_or_reset',away_from_support:'clearer_support'};
+  if(expectedNext[value.phase] && value.nextRequiredEvent !== expectedNext[value.phase]) errors.push('phase_next_event_mismatch');
+  return {ok:errors.length === 0, errors};
+}
+
+function buildCanonicalNarrationRendererInput(contract = {}){
+  const source = safeObject(contract);
+  return CANONICAL_NARRATION_RENDERER_FIELDS.reduce((input, key) => {
+    input[key] = source[key];
+    return input;
+  }, {});
+}
+
+function deterministicNarrationFallback(contract = {}){
+  const phase = contract.phase || 'current_location_unresolved';
+  const next = contract.nextRequiredEvent || 'clearer_support';
+  const location = contract.support && contract.support.label ? ` near the ${contract.support.label}` : '';
+  const stories = {
+    at_support:`Price is testing support${location}. Buyers have not proved that the level will hold yet.`,
+    responding_from_support:`Price is responding from support${location}. Buyers are showing an early response, but it still needs backing up.`,
+    stalled_after_response:`The response from support has stalled. Buyers have not taken control, so the first lift needs follow-through.`,
+    extended_from_support:`Price has moved well away from the earlier support test. The next useful reference is a calmer pullback or reset.`,
+    away_from_support:`Price is away from a clear support test. The chart needs a clearer location before the next decision point.`,
+    support_failed:`Support has failed. The chart needs repair before any improvement can be trusted.`,
+    repairing_structure:`The chart is repairing damaged structure. Buyers still need to rebuild control.`,
+    current_location_unresolved:`The current location is not clear enough to frame a support story. More location evidence is needed.`
+  };
+  const nextText = {support_hold:'Watch for support to hold.',follow_through:'Watch for buyers to follow through with another firm close.',repair:'Watch for price to repair the damaged structure.',pullback_or_reset:'Watch for a calmer pullback or reset.',clearer_support:'Watch for price to reach a clearer support area.',none:'No additional event is required yet.',unknown:'Watch for a clearer next chart event.'};
+  return {
+    chartStory:stories[phase] || stories.current_location_unresolved,
+    whyItMatters: phase === 'support_failed' || phase === 'repairing_structure' ? 'This matters because damaged structure makes the next move harder to trust.' : 'This matters because the phase shows whether buyers have actually earned control.',
+    setupLocation: ['extended_from_support','away_from_support'].includes(phase) ? 'Price is not at an active support test now.' : (phase === 'support_failed' ? 'The earlier support area has failed, so location must be rebuilt.' : `The relevant location is the current support context${location}.`),
+    learningPoint: phase === 'stalled_after_response' ? 'An early response is not the same as follow-through.' : 'The location matters, but the next price response is what confirms the story.',
+    whatNext:nextText[next] || nextText.unknown
+  };
+}
+
+function validateNarrationProseAgainstContract(response = {}, contract = {}){
+  const prose = normalizeFlatStringFields(response, FINAL_PROSE_REQUIRED_FIELDS);
+  const text = Object.values(prose).join(' ').toLowerCase();
+  const errors = [];
+  if(FINAL_PROSE_REQUIRED_FIELDS.some(key => !prose[key].trim())) errors.push('missing_section');
+  const phaseWords = {
+    at_support:/support/, responding_from_support:/support|respond/, stalled_after_response:/stalled|follow-through|follow through/,
+    extended_from_support:/extended|away from/, away_from_support:/away from|clearer support/,
+    support_failed:/support.*fail|failed support/, repairing_structure:/repair|damage/, current_location_unresolved:/location.*clear|clear.*location/
+  };
+  if(phaseWords[contract.phase] && !phaseWords[contract.phase].test(prose.chartStory.toLowerCase())) errors.push('chart_story_phase_missing');
+  if(!['extended_from_support','away_from_support'].includes(contract.phase) && /away from support|extended from support|extension/.test(text)) errors.push('unsupported_away_or_extension_language');
+  if(contract.buyerControl !== 'confirmed' && /buyers? (are |have )?(in )?control|control has returned/.test(text)) errors.push('unsupported_buyer_control_language');
+  if(contract.structure === 'broken' && /support (is |has )?holding|held support/.test(text)) errors.push('broken_structure_support_holding_language');
+  if(contract.followThrough === 'stalled' && /improving rebound|rebound is improving/.test(text)) errors.push('stalled_follow_through_improvement_language');
+  if(contract.phase === 'stalled_after_response' && /new pullback|reset|pull back again/.test(prose.whatNext.toLowerCase())) errors.push('stalled_response_reset_instruction');
+  const nextPatterns = {follow_through:/follow-through|follow through|another firm close/,repair:/repair|rebuild/,pullback_or_reset:/pullback|reset/,clearer_support:/clearer support|support area/,support_hold:/support.*hold|hold.*support/};
+  if(nextPatterns[contract.nextRequiredEvent] && !nextPatterns[contract.nextRequiredEvent].test(prose.whatNext.toLowerCase())) errors.push('next_required_event_missing');
+  return {ok:errors.length === 0, errors};
 }
 
 function normalizeTraderInterpretation(value = {}, eventPacket = {}){
@@ -1105,13 +1261,17 @@ function buildProductionChartGuruFinalInstructions(){
   return [
     'You are the Chart Guru tutor layer.',
     'Use plain English for a novice retail trader.',
-    'Translate the supplied trader interpretation into beginner-friendly teaching copy.',
+    'Render only the supplied canonical narration contract into beginner-friendly teaching copy.',
     'Do not inspect raw chart evidence.',
     'Do not classify the event or invent new chart facts.',
     'Do not issue buy/sell advice or app verdicts.',
-    'Use supportSemantic, buyerResponseSemantic, and confirmationSemantic as fixed meaning constraints from the trader interpretation.',
-    'Preserve support-location meaning from the trader interpretation. Do not rewrite a near-support rebound as price being away from support.',
-    'If supportSemantic is support_failed while buyerResponseSemantic is response_present and confirmationSemantic is not follow_through_confirmed, explain that support already failed, buyers are trying to stabilise, and control has not been regained.',
+    'The contract is the sole authority. Never infer a different phase, support state, buyer control, follow-through, or next event.',
+    'chartStory must open by naming the supplied phase in plain English and must not substitute another phase.',
+    'whyItMatters explains only the supplied phase. setupLocation describes only the supplied support context. learningPoint teaches the phase-specific reusable principle. whatNext translates only nextRequiredEvent.',
+    'Do not use away-from-support or extension wording unless phase is away_from_support or extended_from_support.',
+    'Do not say buyers are in control unless buyerControl is confirmed. Do not say support is holding when structure is broken. Do not describe improvement when followThrough is stalled.',
+    'For stalled_after_response, do not ask for a reset or new pullback; require follow-through only.',
+    'Preserve the contract support location. Do not rewrite a near-support response as price being away from support.',
     'Section jobs are fixed. chartStory: observable behaviour first, then what it means. whyItMatters: why traders care now, without repeating the story. setupLocation: where price sits relative to support or resistance in plain English. learningPoint: one practical lesson. whatNext: one concrete observable signal.',
     'chartStory should usually be two short sentences. Sentence 1: what just happened. Sentence 2: what that means now. Use a third short sentence only when a secondary event is essential.',
     'chartStory first sentence must lead with the dominant event itself, not a generic recap of the broader trend.',
@@ -1166,10 +1326,10 @@ function buildProductionChartGuruFinalInstructions(){
   ].join('\n');
 }
 
-function buildProductionChartGuruFinalPrompt(traderInterpretation, originalPrompt = ''){
+function buildProductionChartGuruFinalPrompt(canonicalNarrationContract, originalPrompt = ''){
   return [
-    'Trader interpretation to translate into Chart Guru teaching prose:',
-    JSON.stringify(safeObject(traderInterpretation), null, 2)
+    'Canonical narration contract to render into Chart Guru teaching prose:',
+    JSON.stringify(buildCanonicalNarrationRendererInput(canonicalNarrationContract), null, 2)
   ].join('\n');
 }
 
@@ -2126,95 +2286,59 @@ exports.handler = async function handler(event){
 
   try{
     const structuredFacts = buildProductionStructuredFacts(payload, analysis);
-    let normalizedInterpretation = null;
     analysis.deterministicEventPacket = structuredFacts.deterministicEventPacket;
-    const allowedPriceMentions = Array.from(collectAllowedNumericMentions(structuredFacts));
-    const interpretationPrompt = buildProductionChartGuruInterpretationPrompt(structuredFacts, tightenedPrompt);
-    const interpretationResult = await sendStrictSchemaOpenAiRequest(
-      apiKey,
-      model,
-      buildProductionChartGuruInterpretationInstructions(),
-      interpretationPrompt,
-      'chart_guru_trader_interpretation',
-      TRADER_INTERPRETATION_SCHEMA,
-      500
-    );
-    const interpretationValidation = validateTraderInterpretationResponse(
-      interpretationResult.parsed,
-      structuredFacts.deterministicEventPacket,
-      structuredFacts
-    );
-    if(!interpretationValidation.ok){
-      console.error('Chart Guru trader interpretation validation failed; falling back to deterministic Chart Guru', {
-        model,
-        ticker: String(payload.ticker || ''),
-        errors: interpretationValidation.errors
-      });
-      analysis.chartGuruOpenAiFallbackReason = 'interpretation_validation_failed';
-      analysis.chartGuruOpenAiValidationErrors = interpretationValidation.errors.slice();
-      analysis.chartCoach = buildEmptyChartCoach(['interpretation_validation_failed']);
-      return jsonResponse(200, {
-        ok:true,
-        model,
-        analysis
-      });
+    const canonicalNarrationContract = buildCanonicalNarrationContract(payload.canonicalNarrationContract || structuredFacts.deterministicEventPacket, {
+      structure:payload.structureState,
+      trend:payload.trendState,
+      volume:payload.volumeState,
+      market:/below/i.test(String(payload.marketStatus || '')) ? 'weak' : 'supportive',
+      verdict:analysis.verdict,
+      nextChartNeed:payload.canonicalNarrationContract && payload.canonicalNarrationContract.nextRequiredEvent || (structuredFacts.deterministicEventPacket.currentPhase === 'support_failed' ? 'repair' : '')
+    });
+    const contractValidation = validateCanonicalNarrationContract(canonicalNarrationContract);
+    analysis.canonicalNarrationContract = canonicalNarrationContract;
+    const narrationErrors = contractValidation.errors.slice();
+    let prose = null;
+    let narrationSource = 'deterministic_fallback';
+    if(contractValidation.ok){
+      const finalPrompt = buildProductionChartGuruFinalPrompt(canonicalNarrationContract);
+      try{
+        const first = await sendStrictSchemaOpenAiRequest(apiKey, model, buildProductionChartGuruFinalInstructions(), finalPrompt, 'chart_guru_final_prose', FINAL_PROSE_SCHEMA, 700);
+        const firstValidation = validateNarrationProseAgainstContract(first.parsed, canonicalNarrationContract);
+        if(firstValidation.ok){ prose = first.parsed; narrationSource = 'openai'; }
+        else {
+          narrationErrors.push(...firstValidation.errors.map(code => `first:${code}`));
+          const retryPrompt = `${finalPrompt}\n\nCorrect only these failed contract constraints: ${firstValidation.errors.join(', ')}.`;
+          const retry = await sendStrictSchemaOpenAiRequest(apiKey, model, buildProductionChartGuruFinalInstructions(), retryPrompt, 'chart_guru_final_prose_retry', FINAL_PROSE_SCHEMA, 700);
+          const retryValidation = validateNarrationProseAgainstContract(retry.parsed, canonicalNarrationContract);
+          if(retryValidation.ok){ prose = retry.parsed; narrationSource = 'retry'; }
+          else narrationErrors.push(...retryValidation.errors.map(code => `retry:${code}`));
+        }
+      }catch(err){ narrationErrors.push(`request:${String(err && err.stage || 'failed')}`); }
     }
-    normalizedInterpretation = normalizeTraderInterpretation(
-      interpretationResult.parsed,
-      structuredFacts.deterministicEventPacket
-    );
-    analysis.traderInterpretation = normalizedInterpretation;
-
-    const finalPrompt = buildProductionChartGuruFinalPrompt(interpretationResult.parsed, tightenedPrompt);
-    const finalResult = await sendStrictSchemaOpenAiRequest(
-      apiKey,
-      model,
-      buildProductionChartGuruFinalInstructions(),
-      finalPrompt,
-      'chart_guru_final_prose',
-      FINAL_PROSE_SCHEMA,
-      700
-    );
-    const finalValidation = validateFinalProseResponse(
-      finalResult.parsed,
-      allowedPriceMentions,
-      structuredFacts.deterministicEventPacket,
-      structuredFacts
-    );
-    if(!finalValidation.ok){
-      console.error('Chart Guru final prose validation failed; falling back to deterministic Chart Guru', {
-        model,
-        ticker: String(payload.ticker || ''),
-        errors: finalValidation.errors
-      });
-      analysis.chartGuruOpenAiFallbackReason = 'final_prose_validation_failed';
-      analysis.chartGuruOpenAiValidationErrors = finalValidation.errors.slice();
-      analysis.chartCoach = buildEmptyChartCoach(['final_prose_validation_failed']);
-      return jsonResponse(200, {
-        ok:true,
-        model,
-        analysis
-      });
-    }
-
-    analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, finalResult.parsed, interpretationResult.parsed, structuredFacts);
+    if(!prose) prose = deterministicNarrationFallback(canonicalNarrationContract);
+    analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, canonicalNarrationContract, structuredFacts);
+    delete analysis.traderInterpretation;
+    analysis.canonicalNarrationContract = canonicalNarrationContract;
+    analysis.chartCoach.diagnostics = analysis.chartCoach.diagnostics || {};
+    analysis.chartCoach.diagnostics.narration = {contractVersion:canonicalNarrationContract.version, validationOutcome:contractValidation.ok ? (narrationErrors.length ? 'recovered' : 'valid') : 'invalid_contract', proseSource:narrationSource, validationErrors:narrationErrors};
+    analysis.chartCoach.source = narrationSource === 'deterministic_fallback' ? 'deterministic_fallback' : 'openai_canonical_narration';
   }catch(err){
-    const stage = String(err && err.stage || '');
-    const failureReason = /chart_guru_trader_interpretation/i.test(stage)
-      ? (/parsed as json/i.test(String(err && err.message || '')) ? 'interpretation_json_parse_failed' : 'interpretation_request_failed')
-      : (/chart_guru_final_prose/i.test(stage)
-        ? (/parsed as json/i.test(String(err && err.message || '')) ? 'final_prose_json_parse_failed' : 'final_prose_request_failed')
-        : 'chart_guru_pipeline_failed');
-    console.error('Chart Guru two-step pipeline failed; falling back to deterministic Chart Guru', {
+    console.error('Chart Guru canonical narration pipeline failed', {
       model,
       ticker:String(payload.ticker || ''),
       message:String(err && err.message || 'Unknown error'),
       status:Number.isFinite(Number(err && err.status)) ? Number(err.status) : null,
       raw:err && Object.prototype.hasOwnProperty.call(err, 'raw') ? err.raw : null
     });
-    analysis.chartGuruOpenAiFallbackReason = failureReason;
-    analysis.chartGuruOpenAiError = String(err && err.message || 'Chart Guru two-step pipeline failed.');
-    analysis.chartCoach = buildEmptyChartCoach([failureReason]);
+    const contract = buildCanonicalNarrationContract(analysis.deterministicEventPacket, {structure:payload.structureState, trend:payload.trendState, volume:payload.volumeState});
+    const prose = deterministicNarrationFallback(contract);
+    analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, contract, {deterministicEventPacket:analysis.deterministicEventPacket});
+    delete analysis.traderInterpretation;
+    analysis.canonicalNarrationContract = contract;
+    analysis.chartCoach.diagnostics = analysis.chartCoach.diagnostics || {};
+    analysis.chartCoach.diagnostics.narration = {contractVersion:contract.version, validationOutcome:'pipeline_error', proseSource:'deterministic_fallback', validationErrors:['pipeline_error']};
+    analysis.chartCoach.source = 'deterministic_fallback';
     return jsonResponse(200, {
       ok:true,
       model,
@@ -2242,6 +2366,11 @@ exports.__test = {
   buildVerificationOnlyContent,
   buildProductionAnalysisInstructionLines,
   normalizeDeterministicEventPacket,
+  buildCanonicalNarrationContract,
+  validateCanonicalNarrationContract,
+  buildCanonicalNarrationRendererInput,
+  deterministicNarrationFallback,
+  validateNarrationProseAgainstContract,
   normalizeTraderInterpretation,
   buildChartGuruNarrationDiagnostics,
   buildProductionStructuredFacts,

@@ -39,3 +39,7 @@ node_modules/
 analysis-*.json
 
 .codex-local/
+
+# Generated deployment staging bundles
+.deploy-stage-*/
+.deploy-stage-*.zip
