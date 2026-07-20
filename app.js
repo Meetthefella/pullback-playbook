@@ -24488,6 +24488,16 @@ function buildCanonicalStoryContextForRecord(record = {}, options = {}){
   const bounceState = String(derivedStates.bounceState || globalVerdict.bounce_state || globalVerdict.bounceState || '').trim().toLowerCase();
   const stabilisationState = String(derivedStates.stabilisationState || globalVerdict.stabilisation_state || globalVerdict.stabilisationState || '').trim().toLowerCase();
   const evaluationScanType = String(derivedStates.evaluationScanType || globalVerdict.evaluation_scan_type || globalVerdict.evaluationScanType || '').trim();
+  const canonicalPullback = options.canonicalPullback && typeof options.canonicalPullback === 'object'
+    ? options.canonicalPullback
+    : (typeof resolveCanonicalPullbackState === 'function' ? resolveCanonicalPullbackState({record:item, globalVerdict, derivedStates}) : {});
+  const chartGuruResolverContext = chartGuruExplicitResolverSupportContext(item, globalVerdict);
+  const supportAuthority = chartGuruSupportAuthority(chartGuruResolverContext, derivedStates, canonicalPullback);
+  const authoritativeSupportActive = supportAuthority.authoritative && supportAuthority.supportCurrentlyActive;
+  const resolvedPullbackZone = authoritativeSupportActive
+    ? (supportAuthority.supportType === '50ma' ? 'near_50ma' : 'near_20ma')
+    : pullbackZone;
+  const resolvedSetupLocationState = authoritativeSupportActive ? 'usable_pullback' : setupLocationState;
   return buildCanonicalChartStoryContext({
     ...facts,
     latestDirection:facts.latestDirection,
@@ -24498,20 +24508,23 @@ function buildCanonicalStoryContextForRecord(record = {}, options = {}){
     structureBroken:['broken', 'failed', 'dead', 'invalid'].includes(structureState)
       || structureEligibility === 'broken',
     structureWeakening:structureState === 'weakening' || structureEligibility === 'damaged',
-    pullbackNear20:pullbackZone === 'near_20ma',
-    pullbackNear50:pullbackZone === 'near_50ma',
-    recentlyLeftSupportZone:['left_support_zone', 'off_level'].includes(pullbackZone)
-      || ['off_level', 'lost_support'].includes(setupLocationState),
-    offLevelWithoutStructureDamage:setupLocationState === 'off_level' && !['broken', 'failed', 'dead', 'invalid'].includes(structureState),
+    pullbackNear20:resolvedPullbackZone === 'near_20ma',
+    pullbackNear50:resolvedPullbackZone === 'near_50ma',
+    recentlyLeftSupportZone:!authoritativeSupportActive && (
+      ['left_support_zone', 'off_level'].includes(resolvedPullbackZone)
+      || ['off_level', 'lost_support'].includes(resolvedSetupLocationState)
+    ),
+    offLevelWithoutStructureDamage:!authoritativeSupportActive && resolvedSetupLocationState === 'off_level' && !['broken', 'failed', 'dead', 'invalid'].includes(structureState),
     weakVolume:volumeState === 'weak',
     activeVolume:['expanding', 'supportive', 'strong'].includes(volumeState),
     volumeParticipation:canonicalVolumeParticipationForState(volumeState),
     actionable:normalizeGlobalVerdictKey(globalVerdict.final_verdict || globalVerdict.finalVerdict || 'watch') === 'entry',
-    extendedAfterRun:setupLocationState === 'extended' || pullbackZone === 'extended',
-    historicalExtendedAfterRun:setupLocationState === 'extended' || pullbackZone === 'extended',
-    supportContext,
-    supportTestState,
-    buyerControlState,
+    extendedAfterRun:!authoritativeSupportActive && (resolvedSetupLocationState === 'extended' || resolvedPullbackZone === 'extended'),
+    historicalExtendedAfterRun:!authoritativeSupportActive && (resolvedSetupLocationState === 'extended' || resolvedPullbackZone === 'extended'),
+    supportContext:supportAuthority.authoritative ? supportAuthority.supportContext : supportContext,
+    supportTestState:supportAuthority.authoritative ? supportAuthority.supportTestState : supportTestState,
+    buyerControlState:supportAuthority.authoritative ? supportAuthority.buyerControlState : buyerControlState,
+    authoritativeCurrentPhase:supportAuthority.authoritative ? supportAuthority.currentPhase : '',
     bounceState,
     stabilisationState,
     reclaimConfirmed:derivedStates.candleEvidenceReclaimedPriorDayHigh === true
@@ -24525,12 +24538,12 @@ function buildCanonicalStoryContextForRecord(record = {}, options = {}){
     candleEvidenceReclaimRangeMeaningful:derivedStates.candleEvidenceReclaimRangeMeaningful === true,
     evaluationScanType,
     recentSupportType:chartGuruResolvedSupportType({
-      ...globalVerdict,
-      supportContext,
-      supportTestState,
+      ...chartGuruResolverContext,
+      supportContext:supportAuthority.authoritative ? supportAuthority.supportContext : supportContext,
+      supportTestState:supportAuthority.authoritative ? supportAuthority.supportTestState : supportTestState,
       evaluationScanType,
-      pullbackNear20:pullbackZone === 'near_20ma',
-      pullbackNear50:pullbackZone === 'near_50ma'
+      pullbackNear20:resolvedPullbackZone === 'near_20ma',
+      pullbackNear50:resolvedPullbackZone === 'near_50ma'
     }),
     near20:Number.isFinite(facts.currentPrice) && Number.isFinite(facts.ma20) && chartCoachProximityLabel(facts.currentPrice, facts.ma20) === 'near' ? 'near' : '',
     near50:Number.isFinite(facts.currentPrice) && Number.isFinite(facts.ma50) && chartCoachProximityLabel(facts.currentPrice, facts.ma50) === 'near' ? 'near' : ''
@@ -27306,6 +27319,157 @@ function chartGuruSemanticEnvelopeCompatibilityForStoryKey(storyKey = ''){
     : null;
 }
 
+function chartGuruSupportAuthority(globalVerdict = {}, derivedStates = {}, canonicalPullback = {}){
+  const explicit = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  const projection = canonicalPullback && typeof canonicalPullback === 'object' ? canonicalPullback : {};
+  const derived = derivedStates && typeof derivedStates === 'object' ? derivedStates : {};
+  const text = value => String(value || '').trim().toLowerCase();
+  const firstUsable = (values, allowed) => values.map(text).find(value => allowed.includes(value)) || '';
+  const firstFinite = values => values.map(numericOrNull).find(Number.isFinite) ?? null;
+  const explicitInteraction = firstUsable([
+    explicit.support_interaction_state,
+    explicit.supportInteractionState
+  ], ['active_20ma_support', 'active_50ma_support']);
+  const projectionInteraction = firstUsable([
+    projection.support_interaction_state,
+    projection.supportInteractionState
+  ], ['active_20ma_support', 'active_50ma_support']);
+  const interaction = [explicitInteraction, projectionInteraction].find(value => value && value !== 'none') || '';
+  const supportType = chartGuruResolvedSupportType({
+    supportContext:firstUsable([
+      explicit.supportContext, explicit.support_context, explicit.supportType, explicit.support_type,
+      projection.supportContext, projection.support_context, projection.supportType, projection.support_type,
+      derived.supportContext, derived.support_context
+    ], ['20ma', '20ma_support', '50ma', '50ma_support']),
+    pullbackNear20:/20ma/.test(interaction),
+    pullbackNear50:/50ma/.test(interaction)
+  });
+  const supportTestState = firstUsable([
+    explicit.supportTestState, explicit.support_test_state,
+    projection.supportTestState, projection.support_test_state,
+    derived.supportTestState, derived.support_test_state
+  ], ['held', 'testing', 'failed']);
+  const buyerControlState = firstUsable([
+    explicit.buyerControlState, explicit.buyer_control_state,
+    projection.buyerControlState, projection.buyer_control_state,
+    derived.buyerControlState, derived.buyer_control_state
+  ], ['confirmed', 'emerging']);
+  const explicitActive = typeof explicit.supportCurrentlyActive === 'boolean'
+    ? explicit.supportCurrentlyActive
+    : (typeof explicit.support_currently_active === 'boolean' ? explicit.support_currently_active : null);
+  const projectedActive = typeof projection.supportCurrentlyActive === 'boolean'
+    ? projection.supportCurrentlyActive
+    : (typeof projection.support_currently_active === 'boolean' ? projection.support_currently_active : null);
+  const explicitSupportEvidence = !!(
+    chartGuruResolvedSupportType({
+      supportContext:firstUsable([explicit.supportContext, explicit.support_context, explicit.supportType, explicit.support_type], ['20ma', '20ma_support', '50ma', '50ma_support']),
+      pullbackNear20:/20ma/.test(explicitInteraction),
+      pullbackNear50:/50ma/.test(explicitInteraction)
+    })
+    && ['held', 'testing'].includes(firstUsable([explicit.supportTestState, explicit.support_test_state], ['held', 'testing', 'failed']))
+  );
+  let active = false;
+  if(supportTestState === 'failed'){
+    active = false;
+  }else if(explicitActive !== null){
+    active = explicitActive;
+  }else if(explicitSupportEvidence || /^active_(?:20|50)ma_support$/.test(explicitInteraction)){
+    active = true;
+  }else if(projectedActive !== null){
+    active = projectedActive;
+  }else{
+    active = /^active_(?:20|50)ma_support$/.test(interaction)
+      || (supportTestState !== 'failed' && ['held', 'testing'].includes(supportTestState));
+  }
+  const usable = !!(
+    supportType
+    && (active || ['testing', 'held', 'failed'].includes(supportTestState))
+  );
+  if(usable){
+    return {
+      authoritative:true,
+      supportType,
+      supportContext:`${supportType}_support`,
+      supportTestState,
+      supportCurrentlyActive:active,
+      buyerControlState,
+      distanceFromSupportPct:firstFinite([
+        explicit.distanceFromSupportPct, explicit.distance_from_support_pct, explicit.supportDistancePct, explicit.support_distance_pct,
+        projection.distanceFromSupportPct, projection.distance_from_support_pct, projection.supportDistancePct, projection.support_distance_pct
+      ]),
+      currentPhase:firstUsable([
+        explicit.currentPhase, explicit.current_phase,
+        projection.currentPhase, projection.current_phase
+      ], ['at_support', 'responding_from_support', 'stalled_after_response', 'extended_from_support', 'away_from_support', 'support_failed', 'repairing_structure'])
+    };
+  }
+  return {
+    authoritative:false,
+    supportType:'',
+    supportContext:text(derived.supportContext || derived.support_context),
+    supportTestState:text(derived.supportTestState || derived.support_test_state),
+    supportCurrentlyActive:false,
+    buyerControlState:text(derived.buyerControlState || derived.buyer_control_state),
+    distanceFromSupportPct:null,
+    currentPhase:''
+  };
+}
+
+function chartGuruExplicitResolverSupportContext(record = {}, globalVerdict = {}){
+  const explicit = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
+  let resolvedState = {};
+  try{
+    const simplified = typeof resolveSimplifiedStateForSurface === 'function'
+      ? resolveSimplifiedStateForSurface(record, 'review', {log:false, source:'chart_guru_support_authority'})
+      : null;
+    resolvedState = simplified && simplified.debug && simplified.debug.resolvedState && typeof simplified.debug.resolvedState === 'object'
+      ? simplified.debug.resolvedState
+      : {};
+  }catch(error){
+    resolvedState = {};
+  }
+  const checks = resolvedState.buyer_control_gate_checks && typeof resolvedState.buyer_control_gate_checks === 'object'
+    ? resolvedState.buyer_control_gate_checks
+    : {};
+  const usable = (value, allowed) => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return allowed.includes(normalized) ? normalized : '';
+  };
+  const supportContext = usable(checks.support_context, ['20ma_support', '50ma_support'])
+    || usable(resolvedState.support_context, ['20ma_support', '50ma_support']);
+  const supportTestState = usable(checks.support_test_state, ['held', 'testing', 'failed'])
+    || usable(resolvedState.support_test_state, ['held', 'testing', 'failed']);
+  const buyerControlState = usable(checks.buyer_control_state, ['confirmed', 'emerging'])
+    || usable(resolvedState.buyer_control_state, ['confirmed', 'emerging']);
+  const explicitSupportContext = usable(explicit.support_context, ['20ma_support', '50ma_support'])
+    || usable(explicit.supportContext, ['20ma_support', '50ma_support'])
+    || usable(explicit.support_type, ['20ma_support', '50ma_support'])
+    || usable(explicit.supportType, ['20ma_support', '50ma_support']);
+  const explicitSupportTestState = usable(explicit.support_test_state, ['held', 'testing', 'failed'])
+    || usable(explicit.supportTestState, ['held', 'testing', 'failed']);
+  const explicitBuyerControlState = usable(explicit.buyer_control_state, ['confirmed', 'emerging'])
+    || usable(explicit.buyerControlState, ['confirmed', 'emerging']);
+  return {
+    ...explicit,
+    ...(explicitSupportContext || supportContext ? {support_context:explicitSupportContext || supportContext} : {}),
+    ...(explicitSupportTestState || supportTestState ? {support_test_state:explicitSupportTestState || supportTestState} : {}),
+    ...(explicitBuyerControlState || buyerControlState ? {buyer_control_state:explicitBuyerControlState || buyerControlState} : {})
+  };
+}
+
+function chartGuruValidatedCanonicalPhase(phase = '', {supportInteraction = '', supportCurrentlyActive = false, buyerResponsePresent = false, buyerControlState = '', reboundStalled = false} = {}){
+  const candidate = String(phase || '').trim().toLowerCase();
+  if(candidate === 'support_failed') return supportInteraction === 'failed' ? candidate : '';
+  if(['at_support', 'responding_from_support'].includes(candidate)){
+    if(!supportCurrentlyActive || supportInteraction === 'failed') return '';
+    return candidate === 'responding_from_support' && !(buyerResponsePresent || buyerControlState === 'confirmed') ? '' : candidate;
+  }
+  if(['away_from_support', 'extended_from_support'].includes(candidate)) return supportCurrentlyActive ? '' : candidate;
+  if(candidate === 'stalled_after_response') return reboundStalled ? candidate : '';
+  if(candidate === 'repairing_structure') return supportInteraction === 'failed' ? candidate : '';
+  return '';
+}
+
 function buildCanonicalChartStoryContext(context = {}){
   const supportType = chartGuruResolvedSupportType(context);
   const supportContext = String(context.supportContext || '').trim().toLowerCase();
@@ -27347,7 +27511,7 @@ function buildCanonicalChartStoryContext(context = {}){
     if(supportTestState === 'failed') return 'failed';
     if(supportTestState === 'held') return 'held';
     if(confirmedContinuationEvidence) return 'held';
-    if(['testing', 'not_tested'].includes(supportTestState)) return supportTestState;
+    if(supportTestState === 'testing') return 'testing';
     if(context.failedBounce === true || context.structureBroken === true) return 'failed';
     if(!supportContextRecognized) return 'not_tested';
     if(recentSupportResponsePresent) return 'held';
@@ -27358,6 +27522,7 @@ function buildCanonicalChartStoryContext(context = {}){
       || context.near50 === 'near'
       || buyerResponsePresent
     ) return 'testing';
+    if(supportTestState === 'not_tested') return 'not_tested';
     return 'not_tested';
   })();
   const supportCurrentlyActive = !!(
@@ -27461,7 +27626,7 @@ function buildCanonicalChartStoryContext(context = {}){
     if(buyerResponsePresent) return 'follow_through_unconfirmed';
     return 'follow_through_unknown';
   })();
-  const currentPhase = context.failedBounce === true || supportInteraction === 'failed'
+  const deterministicCurrentPhase = context.failedBounce === true || supportInteraction === 'failed'
     ? 'support_failed'
     : (reboundExtended
       ? 'extended_from_support'
@@ -27472,6 +27637,13 @@ function buildCanonicalChartStoryContext(context = {}){
           : (!supportDistanceMeasured && supportContextRecognized
             ? 'current_location_unresolved'
             : (context.structureIntact === true ? 'away_from_support' : 'repairing_structure')))));
+  const currentPhase = chartGuruValidatedCanonicalPhase(context.authoritativeCurrentPhase, {
+    supportInteraction,
+    supportCurrentlyActive,
+    buyerResponsePresent,
+    buyerControlState,
+    reboundStalled
+  }) || deterministicCurrentPhase;
   const dominantEvent = context.failedBounce === true || supportInteraction === 'failed'
     ? 'support_failed'
     : (context.structureBroken === true
@@ -28775,6 +28947,16 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   const resolvedPriceabilityState = lower(derivedStates.priceabilityState || globalVerdict.priceability_state || globalVerdict.priceabilityState);
   const resolvedFinalVerdict = lower(globalVerdict.final_verdict || globalVerdict.finalVerdict || '');
   const evaluationScanType = String(derivedStates.evaluationScanType || derivedStates.evaluation_scan_type || '').trim();
+  const canonicalPullback = options.canonicalPullback && typeof options.canonicalPullback === 'object'
+    ? options.canonicalPullback
+    : (typeof resolveCanonicalPullbackState === 'function' ? resolveCanonicalPullbackState({record:item, globalVerdict, derivedStates}) : {});
+  const chartGuruResolverContext = chartGuruExplicitResolverSupportContext(item, globalVerdict);
+  const supportAuthority = chartGuruSupportAuthority(chartGuruResolverContext, derivedStates, canonicalPullback);
+  const authoritativeSupportActive = supportAuthority.authoritative && supportAuthority.supportCurrentlyActive;
+  const authoritativePullbackZone = authoritativeSupportActive
+    ? (supportAuthority.supportType === '50ma' ? 'near_50ma' : 'near_20ma')
+    : resolvedPullbackZone;
+  const authoritativeSetupLocationState = authoritativeSupportActive ? 'usable_pullback' : resolvedSetupLocationState;
   const marketStatusText = lower(item.marketStatus || state.marketStatus || '');
   const structureIntact = ['strong', 'intact', 'developing_clean'].includes(resolvedStructureState)
     || ['alive', 'messy'].includes(resolvedStructureEligibility);
@@ -28784,10 +28966,12 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     resolvedStructureState === 'weakening'
     || resolvedStructureEligibility === 'damaged'
   );
-  const pullbackNear20 = near20 === 'near' || resolvedPullbackZone === 'near_20ma';
-  const pullbackNear50 = near50 === 'near' || resolvedPullbackZone === 'near_50ma';
-  const recentlyLeftSupportZone = ['left_support_zone', 'off_level'].includes(resolvedPullbackZone)
-    || ['off_level', 'lost_support'].includes(resolvedSetupLocationState);
+  const pullbackNear20 = authoritativePullbackZone === 'near_20ma' || (!authoritativeSupportActive && near20 === 'near');
+  const pullbackNear50 = authoritativePullbackZone === 'near_50ma' || (!authoritativeSupportActive && near50 === 'near');
+  const recentlyLeftSupportZone = !authoritativeSupportActive && (
+    ['left_support_zone', 'off_level'].includes(authoritativePullbackZone)
+    || ['off_level', 'lost_support'].includes(authoritativeSetupLocationState)
+  );
   const offLevelWithoutStructureDamage = structureIntact
     && !structureWeakening
     && !structureBroken
@@ -28795,8 +28979,10 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
   const weakVolume = ['weak', 'light', 'low', 'below_average'].includes(resolvedVolumeState) || volumeRatio !== null && volumeRatio <= 0.8;
   const activeVolume = ['active', 'strong', 'above_average'].includes(resolvedVolumeState) || volumeRatio !== null && volumeRatio >= 1.05;
   const actionable = resolvedFinalVerdict === 'entry';
-  const historicalExtendedAfterRun = resolvedSetupLocationState === 'extended'
-    || resolvedPullbackZone === 'extended';
+  const historicalExtendedAfterRun = !authoritativeSupportActive && (
+    authoritativeSetupLocationState === 'extended'
+    || authoritativePullbackZone === 'extended'
+  );
   const extendedAfterRun = !!(
     facts.maRelation.above20 === true
     && facts.maRelation.above50 === true
@@ -29038,9 +29224,10 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     extendedAfterRun,
     historicalExtendedAfterRun,
     marketSupportive,
-    supportContext:String(derivedStates.supportContext || derivedStates.support_context || globalVerdict.support_context || globalVerdict.supportContext || '').trim().toLowerCase(),
-    supportTestState:String(derivedStates.supportTestState || derivedStates.support_test_state || globalVerdict.support_test_state || globalVerdict.supportTestState || '').trim().toLowerCase(),
-    buyerControlState:String(derivedStates.buyerControlState || derivedStates.buyer_control_state || globalVerdict.buyer_control_state || globalVerdict.buyerControlState || '').trim().toLowerCase()
+    supportContext:supportAuthority.authoritative ? supportAuthority.supportContext : String(derivedStates.supportContext || derivedStates.support_context || globalVerdict.support_context || globalVerdict.supportContext || '').trim().toLowerCase(),
+    supportTestState:supportAuthority.authoritative ? supportAuthority.supportTestState : String(derivedStates.supportTestState || derivedStates.support_test_state || globalVerdict.support_test_state || globalVerdict.supportTestState || '').trim().toLowerCase(),
+    buyerControlState:supportAuthority.authoritative ? supportAuthority.buyerControlState : String(derivedStates.buyerControlState || derivedStates.buyer_control_state || globalVerdict.buyer_control_state || globalVerdict.buyerControlState || '').trim().toLowerCase(),
+    authoritativeCurrentPhase:supportAuthority.authoritative ? supportAuthority.currentPhase : ''
   };
   const greenRun = chartCoachRecentColorRun(recentSequence, 'green');
   const redRun = chartCoachRecentColorRun(recentSequence, 'red');
@@ -37194,7 +37381,7 @@ const CHART_GURU_EVENT_LABELS = {
   failed_bounce:'Failed first bounce from 20MA',
   pullback_still_repairing:'Pullback drifting below 20MA',
   constructive_pullback_near_50ma:'First test of 50MA',
-  off_level_wait_for_clearer_support:'Deep pullback into 50MA',
+  off_level_wait_for_clearer_support:'Off level — wait for clearer support',
   structure_breaking_down:'Support breakdown',
   strong_upside_acceleration:'Trend acceleration',
   sharp_selloff:'Trend damage with sellers in control',

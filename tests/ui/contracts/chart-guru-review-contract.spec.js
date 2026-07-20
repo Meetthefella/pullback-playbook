@@ -14,7 +14,7 @@ function buildDeterministicEventPacketFromFixture(chartCoach = {}){
     failed_bounce:'Failed first bounce from 20MA',
     pullback_still_repairing:'Pullback drifting below 20MA',
     constructive_pullback_near_50ma:'First test of 50MA',
-    off_level_wait_for_clearer_support:'Deep pullback into 50MA',
+    off_level_wait_for_clearer_support:'Off level — wait for clearer support',
     structure_breaking_down:'Support breakdown',
     strong_upside_acceleration:'Trend acceleration',
     sharp_selloff:'Trend damage with sellers in control',

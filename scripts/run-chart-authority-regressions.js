@@ -215,8 +215,17 @@ async function runNetlifyCanonicalizationRegression(){
     learningPoint:'A one-day bounce is not enough on its own before trusting the rebound. Traders can reduce the risk by waiting for follow through that proves buyers are doing more than producing a brief lift.',
     whatNext:'Watch for firmer follow-through that reclaims more of the pullback and starts pushing back through the nearby averages.'
   };
+  const canonicalNarrative = {
+    chartStory:'The current location is not clear enough to frame a support story. More location evidence is needed.',
+    whyItMatters:'This matters because the phase shows whether buyers have actually earned control.',
+    setupLocation:'The relevant location is the current support context.',
+    learningPoint:'The location matters, but the next price response is what confirms the story.',
+    whatNext:'Watch for price to reach a clearer support area.'
+  };
 
-  const {handler} = require(modulePath);
+  const {handler, __test} = require(modulePath);
+  const normalizedInterpretation = __test.normalizeTraderInterpretation(traderInterpretation, {});
+  assert.ok(/early repair attempt/i.test(normalizedInterpretation.traderRead), 'Legacy trader-interpretation normalization remains directly covered without an outbound request');
   const invokeHandler = async sequence => {
     const fetchCalls = [];
     global.fetch = async (url, options = {}) => {
@@ -250,22 +259,19 @@ async function runNetlifyCanonicalizationRegression(){
 
   const successRun = await invokeHandler([
     {payload:{output_text:JSON.stringify(aiPayload)}},
-    {payload:{output_text:JSON.stringify(traderInterpretation)}},
-    {payload:{output_text:JSON.stringify(finalNarrative)}}
+    {payload:{output_text:JSON.stringify(canonicalNarrative)}}
   ]);
 
-  assert.strictEqual(successRun.fetchCalls.length, 3, 'Expected analysis request plus two-step Chart Guru requests');
+  assert.strictEqual(successRun.fetchCalls.length, 2, 'Expected primary analysis followed by canonical final prose');
   assert.strictEqual(successRun.response.statusCode, 200, 'Handler should succeed');
   const firstRequest = JSON.parse(successRun.fetchCalls[0].options.body || '{}');
   const secondRequest = JSON.parse(successRun.fetchCalls[1].options.body || '{}');
-  const thirdRequest = JSON.parse(successRun.fetchCalls[2].options.body || '{}');
   const body = successRun.body;
-  assert.strictEqual(secondRequest.text && secondRequest.text.format && secondRequest.text.format.name, 'chart_guru_trader_interpretation', 'Production Chart Guru should call the interpretation step before final prose');
-  assert.strictEqual(thirdRequest.text && thirdRequest.text.format && thirdRequest.text.format.name, 'chart_guru_final_prose', 'Production Chart Guru should use the final prose schema after interpretation');
+  assert.strictEqual(secondRequest.text && secondRequest.text.format && secondRequest.text.format.name, 'chart_guru_final_prose', 'Production Chart Guru should request canonical final prose after primary analysis');
   assert.ok(/Return extractedFromImage, trustedMarketContext, canonicalValues/i.test(String(firstRequest.instructions || '')), 'The canonical analysis request should remain intact');
-  assert.ok(!/Return extractedFromImage, trustedMarketContext, canonicalValues/i.test(String(thirdRequest.instructions || '')), 'Final prose request should not carry the full non-prose output contract');
-  const finalPromptText = (((thirdRequest.input || [])[0] || {}).content || []).find(part => part && part.type === 'input_text');
-  assert.ok(finalPromptText && /dominantEvent/.test(String(finalPromptText.text || '')), 'Final prose prompt should receive traderInterpretation');
+  assert.ok(!/Return extractedFromImage, trustedMarketContext, canonicalValues/i.test(String(secondRequest.instructions || '')), 'Final prose request should not carry the full non-prose output contract');
+  const finalPromptText = (((secondRequest.input || [])[0] || {}).content || []).find(part => part && part.type === 'input_text');
+  assert.ok(finalPromptText && /current_location_unresolved|clearer_support/.test(String(finalPromptText.text || '')), 'Final prose prompt should receive the canonical narration contract only');
   assert.strictEqual(body.analysis.canonicalValues.price, 200.09, 'Canonical price must come from trusted market context');
   assert.strictEqual(body.analysis.canonicalValues.ma20, 205.74, 'Canonical 20MA must come from trusted market context');
   assert.strictEqual(body.analysis.canonicalValues.ma50, 209.99, 'Canonical 50MA must come from trusted market context');
@@ -274,14 +280,13 @@ async function runNetlifyCanonicalizationRegression(){
   assert.strictEqual(body.analysis.visible_ma20, null, 'Unreadable image MA should remain unreadable in extracted image facts');
   assert.strictEqual(
     body.analysis.coach_summary,
-    finalNarrative.chartStory,
-    'Summary should now come from the validated two-step Chart Guru prose'
+    canonicalNarrative.chartStory,
+    'Summary should come from validated canonical narration prose'
   );
-  assert.ok(body.analysis.traderInterpretation && /early repair attempt/i.test(body.analysis.traderInterpretation.traderRead || ''), 'Analysis should preserve the intermediate trader interpretation');
-  assert.ok(body.analysis.chartGuruNarrative && /nearby averages/i.test(body.analysis.chartGuruNarrative.whatNext || ''), 'Analysis should preserve the final two-step narrative payload');
-  assert.strictEqual(body.analysis.chartCoach && body.analysis.chartCoach.source, 'openai_two_step_chart_guru', 'Two-step success should populate a renderable Chart Guru model');
+  assert.ok(body.analysis.chartGuruNarrative && /clearer support/i.test(body.analysis.chartGuruNarrative.whatNext || ''), 'Analysis should preserve the validated canonical narration payload');
+  assert.strictEqual(body.analysis.chartCoach && body.analysis.chartCoach.source, 'openai_canonical_narration', 'Canonical narration success should populate a renderable Chart Guru model');
   assert.ok(Array.isArray(body.analysis.chartCoach && body.analysis.chartCoach.sections) && body.analysis.chartCoach.sections.some(section => section.key === 'setup_location'), 'Two-step success should populate the visible section model');
-  assert.strictEqual(body.analysis.chartCoach && body.analysis.chartCoach.recentStory && body.analysis.chartCoach.recentStory.key, 'openai_two_step_narrative', 'Two-step success should emit broader recentStory metadata server-side');
+  assert.strictEqual(body.analysis.chartCoach && body.analysis.chartCoach.recentStory && body.analysis.chartCoach.recentStory.key, 'openai_two_step_narrative', 'Canonical narration should retain compatible recentStory metadata server-side');
   assert.ok(Array.isArray(body.analysis.chartCoach && body.analysis.chartCoach.diagnostics && body.analysis.chartCoach.diagnostics.priorityOrder), 'Two-step success should emit chartCoach diagnostics server-side');
   assert.strictEqual(body.analysis.chartGuruOpenAiFallbackReason, '', 'Successful two-step Chart Guru should not set a fallback reason');
 
@@ -297,37 +302,22 @@ async function runNetlifyCanonicalizationRegression(){
   assert.strictEqual(Array.isArray(malformedBody.analysis.chartCoach && malformedBody.analysis.chartCoach.sections) ? malformedBody.analysis.chartCoach.sections.length : -1, 0, 'Malformed JSON server fallback should not emit a legacy Chart Guru section list');
   assert.strictEqual(malformedBody.analysis.chartCoach && malformedBody.analysis.chartCoach.primaryStory, null, 'Malformed JSON server fallback should defer primary story selection to the shared deterministic builder');
 
-  const interpretationFailureRun = await invokeHandler([
-    {payload:{output_text:JSON.stringify(aiPayload)}},
-    {ok:false, status:500, payload:{error:{message:'Interpretation exploded'}}}
-  ]);
-  assert.strictEqual(interpretationFailureRun.response.statusCode, 200, 'Interpretation-stage failure should degrade to deterministic 200');
-  assert.strictEqual(interpretationFailureRun.body.analysis.chartGuruOpenAiFallbackReason, 'interpretation_request_failed', 'Interpretation-stage failure should record a specific fallback reason');
-  assert.strictEqual(Array.isArray(interpretationFailureRun.body.analysis.chartCoach.sections) ? interpretationFailureRun.body.analysis.chartCoach.sections.length : -1, 0, 'Interpretation-stage failure should leave Chart Guru to deterministic fallback');
-
-  const interpretationMalformedRun = await invokeHandler([
-    {payload:{output_text:JSON.stringify(aiPayload)}},
-    {payload:{output_text:'{"dominantEvent":"broken"'}}
-  ]);
-  assert.strictEqual(interpretationMalformedRun.response.statusCode, 200, 'Malformed interpretation JSON should degrade to deterministic 200');
-  assert.strictEqual(interpretationMalformedRun.body.analysis.chartGuruOpenAiFallbackReason, 'interpretation_json_parse_failed', 'Malformed interpretation JSON should record a parse fallback reason');
-
   const finalFailureRun = await invokeHandler([
     {payload:{output_text:JSON.stringify(aiPayload)}},
-    {payload:{output_text:JSON.stringify(traderInterpretation)}},
     {ok:false, status:500, payload:{error:{message:'Final prose exploded'}}}
   ]);
   assert.strictEqual(finalFailureRun.response.statusCode, 200, 'Final-prose failure should degrade to deterministic 200');
-  assert.strictEqual(finalFailureRun.body.analysis.chartGuruOpenAiFallbackReason, 'final_prose_request_failed', 'Final-prose failure should record a specific fallback reason');
-  assert.strictEqual(Array.isArray(finalFailureRun.body.analysis.chartCoach.sections) ? finalFailureRun.body.analysis.chartCoach.sections.length : -1, 0, 'Final-prose failure should leave Chart Guru to deterministic fallback');
+  assert.strictEqual(finalFailureRun.body.analysis.chartCoach && finalFailureRun.body.analysis.chartCoach.source, 'deterministic_fallback', 'Final-prose failure should use deterministic fallback');
 
-  const finalMalformedRun = await invokeHandler([
+  const retryRun = await invokeHandler([
     {payload:{output_text:JSON.stringify(aiPayload)}},
-    {payload:{output_text:JSON.stringify(traderInterpretation)}},
-    {payload:{output_text:'{"chartStory":"broken"'}}
+    {payload:{output_text:JSON.stringify(finalNarrative)}},
+    {payload:{output_text:JSON.stringify(canonicalNarrative)}}
   ]);
-  assert.strictEqual(finalMalformedRun.response.statusCode, 200, 'Malformed final prose JSON should degrade to deterministic 200');
-  assert.strictEqual(finalMalformedRun.body.analysis.chartGuruOpenAiFallbackReason, 'final_prose_json_parse_failed', 'Malformed final prose JSON should record a parse fallback reason');
+  assert.strictEqual(retryRun.fetchCalls.length, 3, 'Invalid canonical prose should receive one constrained retry');
+  const retryRequest = JSON.parse(retryRun.fetchCalls[2].options.body || '{}');
+  assert.strictEqual(retryRequest.text && retryRequest.text.format && retryRequest.text.format.name, 'chart_guru_final_prose_retry', 'Retry request should expose the canonical retry stage name');
+  assert.strictEqual(retryRun.body.analysis.chartCoach && retryRun.body.analysis.chartCoach.source, 'openai_canonical_narration', 'A valid retry should restore canonical narration');
 }
 
 function runReviewPresentationRegression(){
@@ -464,6 +454,14 @@ function runDeterministicCandleFallbackRegression(){
     resolveGlobalVerdict(record){
       return record._globalVerdict || {final_verdict:'watch'};
     },
+    resolveCanonicalPullbackState({record = {}, derivedStates = {}} = {}){
+      return record && record._canonicalPullback ? record._canonicalPullback : {
+        supportInteractionState:String(derivedStates.supportInteractionState || ''),
+        supportContext:String(derivedStates.supportContext || ''),
+        supportTestState:String(derivedStates.supportTestState || ''),
+        buyerControlState:String(derivedStates.buyerControlState || '')
+      };
+    },
     analysisDerivedStatesFromRecord(record){
       if(record && record._derivedStates) return record._derivedStates;
       return {structureState:'intact', setupLocationState:'near_50ma', priceabilityState:'provisional', bounceState:'attempt', stabilisationState:'early'};
@@ -522,6 +520,9 @@ function runDeterministicCandleFallbackRegression(){
     'chartGuruRecentSupportResponsePresent',
     'chartGuruSupportReferenceLevel',
     'chartGuruSupportDistancePct',
+    'chartGuruSupportAuthority',
+    'chartGuruExplicitResolverSupportContext',
+    'chartGuruValidatedCanonicalPhase',
     'buildCanonicalChartStoryContext',
     'chartGuruSemanticEnvelopeFromNarrativeContext',
     'chartGuruSemanticEnvelopeCompatibilityForStoryKey',
@@ -1440,6 +1441,52 @@ function runDeterministicCandleFallbackRegression(){
     'Constructive near-support story'
   );
   assert.strictEqual(hwmStyleCoach.primaryStory.readerTest.tone, 'good', 'Constructive near-support story should pass the Reader Test with a constructive tone');
+
+  const legacyDerivedSupportCoach = sandbox.buildDeterministicChartCoach(
+    {marketData:{price:100, ma20:100.5, ma50:96, ma200:80, avgVolume30d:1000000}},
+    {canonicalValues:{price:100, ma20:100.5, ma50:96, ma200:80, volume:800000}, trustedMarketContext:{avgVolume30d:1000000, recentCandleSequence:[]}},
+    {
+      derivedStates:{structureState:'intact', pullbackZone:'near_20ma', setupLocationState:'usable_pullback', supportContext:'20ma_support', supportTestState:'testing', buyerControlState:'emerging', bounceState:'none', stabilisationState:'early', volumeState:'weak'},
+      globalVerdict:{final_verdict:'watch'}
+    }
+  );
+  assert.strictEqual(legacyDerivedSupportCoach.storyContext.support.level, '20ma_support', 'Legacy records without canonical support data may fall back to derived support context');
+  assert.strictEqual(legacyDerivedSupportCoach.storyContext.support.interaction, 'testing', 'Legacy records must preserve their usable derived support-test state');
+
+  const locationOnlySupportCoach = sandbox.buildDeterministicChartCoach(
+    {marketData:{price:100, ma20:100.4, ma50:96, ma200:80, avgVolume30d:1000000}},
+    {canonicalValues:{price:100, ma20:100.4, ma50:96, ma200:80, volume:800000}, trustedMarketContext:{avgVolume30d:1000000, recentCandleSequence:[]}},
+    {
+      derivedStates:{structureState:'intact', pullbackZone:'near_20ma', setupLocationState:'usable_pullback', supportContext:'none', supportTestState:'not_tested', buyerControlState:'none', bounceState:'none', stabilisationState:'none', volumeState:'weak'},
+      globalVerdict:{final_verdict:'watch', support_context:'20ma_support', support_interaction_state:'active_20ma_support'}
+    }
+  );
+  assert.strictEqual(locationOnlySupportCoach.storyContext.support.currentlyActive, true, 'Location-only: active 20MA support must preserve the valid support location');
+  assert.strictEqual(locationOnlySupportCoach.storyContext.support.interaction, 'testing', 'Location-only: active support without explicit evidence must remain testing');
+  assert.notStrictEqual(locationOnlySupportCoach.storyContext.buyerControl.state, 'confirmed', 'Location-only: support proximity must not manufacture confirmed buyer control');
+  assert.notStrictEqual(locationOnlySupportCoach.primaryStory.key, 'off_level_wait_for_clearer_support', 'Location-only: in-band support must not use the off-level story');
+  assert.ok(!/away from (?:the )?20-day average|return to support|return to the 20-day average/i.test(locationOnlySupportCoach.summaryText), 'Location-only: in-band support prose must not claim price is away from support');
+
+  for(const supportType of ['20ma', '50ma']){
+    const failedSupportCoach = sandbox.buildDeterministicChartCoach(
+      {marketData:{price:100, ma20:100.2, ma50:99.8, ma200:80, avgVolume30d:1000000}},
+      {canonicalValues:{price:100, ma20:100.2, ma50:99.8, ma200:80, volume:900000}, trustedMarketContext:{avgVolume30d:1000000, recentCandleSequence:[]}},
+      {
+        derivedStates:{structureState:'weakening', pullbackZone:supportType === '20ma' ? 'near_20ma' : 'near_50ma', setupLocationState:'usable_pullback', supportContext:'none', supportTestState:'testing', buyerControlState:'emerging', bounceState:'attempt', volumeState:'weak'},
+        globalVerdict:{final_verdict:'watch', support_context:`${supportType}_support`, support_test_state:'failed', support_interaction_state:`active_${supportType}_support`, current_phase:'support_failed'}
+      }
+    );
+    assert.strictEqual(failedSupportCoach.storyContext.support.interaction, 'failed', `${supportType}: failed support must override stale active-location interaction`);
+    assert.strictEqual(failedSupportCoach.storyContext.support.currentlyActive, false, `${supportType}: failed support must be inactive`);
+    assert.strictEqual(failedSupportCoach.storyContext.currentPhase, 'support_failed', `${supportType}: valid canonical failed phase must be retained`);
+    assert.ok(!['early_rebound_from_20ma', 'constructive_pullback_near_20ma', 'constructive_pullback_near_50ma', 'bounce_confirmation_pending'].includes(failedSupportCoach.primaryStory.key), `${supportType}: failed support must not select an active-support rebound story`);
+    assert.ok(!/support is holding|responding from support/i.test(failedSupportCoach.summaryText), `${supportType}: failed support prose must not claim holding support or a response`);
+  }
+
+  const rejectedAwayPhase = sandbox.buildCanonicalChartStoryContext({supportContext:'20ma_support', supportTestState:'held', buyerControlState:'confirmed', pullbackNear20:true, currentPrice:100, ma20:100.2, structureIntact:true, authoritativeCurrentPhase:'away_from_support'});
+  assert.strictEqual(rejectedAwayPhase.currentPhase, 'at_support', 'An away phase must be rejected while authoritative support is active and in band');
+  const retainedRespondingPhase = sandbox.buildCanonicalChartStoryContext({supportContext:'20ma_support', supportTestState:'held', buyerControlState:'confirmed', pullbackNear20:true, currentPrice:100, ma20:100.2, structureIntact:true, authoritativeCurrentPhase:'responding_from_support'});
+  assert.strictEqual(retainedRespondingPhase.currentPhase, 'responding_from_support', 'A consistent canonical responding phase must be retained');
 
   const constructiveSupportOnlyCoach = sandbox.buildDeterministicChartCoach(
     {
@@ -2616,10 +2663,11 @@ function runSourceAssertions(){
 }
 
 async function run(){
+  // This harness asserts the initial two-step request sequence, before any stateful Chart Guru regression advances it.
   await runNetlifyCanonicalizationRegression();
+  runDeterministicCandleFallbackRegression();
   runReviewPresentationRegression();
   runPresentationModelRegression();
-  runDeterministicCandleFallbackRegression();
   runChartPipelinePreservationRegression();
   runClientNormalizerRegression();
   runServerCandleOrderRegression();
