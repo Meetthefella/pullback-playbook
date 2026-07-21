@@ -564,7 +564,7 @@ function projectNarrationPhaseFromPacket(eventPacket = {}){
   if(interaction === 'failed' || packet.supportSemantic === 'support_failed' || has('support_failed') || has('support_failed_test')) return 'support_failed';
   if(followThrough === 'stalled' || packet.confirmationSemantic === 'follow_through_stalled' || has('rebound_stalled') || has('follow_through_stalled') || has('stalled_after_support_response')) return 'stalled_after_response';
   if(explicitPhase && explicitPhase !== 'unknown') return explicitPhase;
-  if(support.currentlyActive === true && ['testing','held'].includes(interaction)) return (responsePresent || ['developing','emerging','confirmed'].includes(control)) ? 'responding_from_support' : 'at_support';
+  if(support.currentlyActive === true && ['testing','held'].includes(interaction)) return (responsePresent || ['developing','emerging','confirmed'].includes(control) || has('early_rebound_from_20ma') || has('early_rebound_from_50ma') || has('early_rebound_from_200ma')) ? 'responding_from_support' : 'at_support';
   if(has('early_rebound_from_20ma') || has('early_rebound_from_50ma') || has('early_rebound_from_200ma') || (packet.supportSemantic === 'support_present' && (responsePresent || ['developing','emerging','confirmed'].includes(control)))) return 'responding_from_support';
   if(has('extended_after_run') || has('rebound_extended')) return 'extended_from_support';
   if(packet.supportSemantic === 'support_absent') return 'away_from_support';

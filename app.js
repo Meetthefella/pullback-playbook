@@ -37722,7 +37722,7 @@ function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
   const narrationTrendState = value => ({strong:'healthy',healthy:'healthy',acceptable:'healthy',weak:'weak',broken:'broken'})[String(value || '').trim().toLowerCase()] || 'unknown';
   const narrationVolumeState = value => ({expanding:'constructive',constructive:'constructive',contracting:'light',diminishing:'light',light:'light',average:'mixed',normal:'mixed',mixed:'mixed',weak:'weak',heavy:'heavy'})[String(value || '').trim().toLowerCase()] || 'unknown';
   const narrationEventKeys = [...new Set([
-    packet.dominantEventKey, packet.primaryStoryKey, packet.recentStoryKey,
+    packet.dominantEventKey, canonicalNarrationEarlyReboundEventKey(packet.dominantEventLabel), packet.primaryStoryKey, packet.recentStoryKey,
     ...(Array.isArray(packet.eventSequence) ? packet.eventSequence : []),
     ...(Array.isArray(packet.storyEvents) ? packet.storyEvents : [])
   ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean))];
@@ -37736,8 +37736,8 @@ function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
     if(supportInteraction === 'failed' || packet.supportSemantic === 'support_failed' || hasNarrationEvent('support_failed') || hasNarrationEvent('support_failed_test')) return 'support_failed';
     if(packetFollowThrough === 'stalled' || packet.confirmationSemantic === 'follow_through_stalled' || hasNarrationEvent('rebound_stalled') || hasNarrationEvent('follow_through_stalled') || hasNarrationEvent('stalled_after_support_response')) return 'stalled_after_response';
     if(explicitPhase) return explicitPhase;
-    if(packet.supportState && packet.supportState.currentlyActive === true && ['testing','held'].includes(supportInteraction)) return ['present','confirmed','response_present'].includes(packetResponse) || ['developing','emerging','confirmed'].includes(packetControl) ? 'responding_from_support' : 'at_support';
-    if(hasNarrationEvent('early_rebound_from_20ma') || hasNarrationEvent('early_rebound_from_50ma') || (packet.supportSemantic === 'support_present' && (['present','confirmed','response_present'].includes(packetResponse) || ['developing','emerging','confirmed'].includes(packetControl)))) return 'responding_from_support';
+    if(packet.supportState && packet.supportState.currentlyActive === true && ['testing','held'].includes(supportInteraction)) return ['present','confirmed','response_present'].includes(packetResponse) || ['developing','emerging','confirmed'].includes(packetControl) || hasNarrationEvent('early_rebound_from_20ma') || hasNarrationEvent('early_rebound_from_50ma') || hasNarrationEvent('early_rebound_from_200ma') ? 'responding_from_support' : 'at_support';
+    if(hasNarrationEvent('early_rebound_from_20ma') || hasNarrationEvent('early_rebound_from_50ma') || hasNarrationEvent('early_rebound_from_200ma') || (packet.supportSemantic === 'support_present' && (['present','confirmed','response_present'].includes(packetResponse) || ['developing','emerging','confirmed'].includes(packetControl)))) return 'responding_from_support';
     if(hasNarrationEvent('extended_after_run') || hasNarrationEvent('rebound_extended')) return 'extended_from_support';
     if(packet.supportSemantic === 'support_absent') return 'away_from_support';
     if(packet.supportSemantic === 'support_present' || ['testing','held'].includes(supportInteraction)) return 'at_support';
@@ -37780,6 +37780,40 @@ function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
     verdict:allowed(context.verdict, ['watch','near_entry','entry','avoid']),
     evidenceFactIds:Array.isArray(packet.evidenceFactIds) ? packet.evidenceFactIds.map(value => String(value || '').trim()).filter(Boolean) : []
   };
+}
+
+function canonicalNarrationEarlyReboundEventKey(value = ''){
+  const match = String(value || '').trim().match(/\bearly rebound from (?:the )?(20|50|200)(?:(?:\s*ma)|(?:[- ]day)?\s+average)\b/i);
+  return match ? `early_rebound_from_${match[1]}ma` : '';
+}
+
+function repairCanonicalNarrationContractPhase(contract = {}, eventPacket = {}){
+  const source = contract && typeof contract === 'object' ? contract : null;
+  if(!source || !String(source.version || '').trim() || String(source.phase || '').trim().toLowerCase() !== 'unknown') return source;
+  const packet = eventPacket && typeof eventPacket === 'object' ? eventPacket : {};
+  const packetState = value => {
+    const normalized = String(value || '').trim().toLowerCase();
+    return normalized && normalized !== 'unknown' ? value : '';
+  };
+  const rebuilt = buildCanonicalNarrationContract({
+    ...packet,
+    dominantEventKey:packetState(packet.dominantEventKey) || canonicalNarrationEarlyReboundEventKey(source.dominantEvent),
+    dominantEventLabel:String(packet.dominantEventLabel || source.dominantEvent || '').trim(),
+    eventSequence:Array.isArray(packet.eventSequence) ? packet.eventSequence : source.eventSequence,
+    supportState:packet.supportState || source.support,
+    buyerResponseState:packetState(packet.buyerResponseState) || source.buyerResponse,
+    buyerControlState:packetState(packet.buyerControlState) || source.buyerControl,
+    followThroughState:packetState(packet.followThroughState) || source.followThrough,
+    currentPhase:packetState(packet.currentPhase) || source.phase
+  }, {
+    structureState:source.structure,
+    trendState:source.trend,
+    volumeState:source.volume,
+    marketStatus:source.market === 'weak' ? 'below 50 MA' : '',
+    verdict:source.verdict
+  });
+  if(rebuilt.phase === 'unknown') return source;
+  return {...source, phase:rebuilt.phase, nextRequiredEvent:rebuilt.nextRequiredEvent};
 }
 
 function buildChartGuruDeterministicAuthorityPayload(card, options = {}){
@@ -38065,7 +38099,10 @@ function normalizeAnalysisResponse(raw){
   const candleStructureAnalysis = normalizeObject(raw.candleStructureAnalysis || raw.candle_structure_analysis) || {};
   const tradePlanCommentary = normalizeObject(raw.tradePlanCommentary || raw.trade_plan_commentary) || {};
   const deterministicEventPacket = normalizeDeterministicEventPacket(raw.deterministicEventPacket || raw.deterministic_event_packet);
-  const canonicalNarrationContract = normalizeObject(raw.canonicalNarrationContract || raw.canonical_narration_contract);
+  const canonicalNarrationContract = repairCanonicalNarrationContractPhase(
+    normalizeObject(raw.canonicalNarrationContract || raw.canonical_narration_contract),
+    deterministicEventPacket
+  );
   const traderInterpretation = normalizeTraderInterpretation(raw.traderInterpretation || raw.trader_interpretation);
   const chartCoach = normalizeChartCoach(raw.chartGuru || raw.chart_guru || raw.chartCoach || raw.chart_coach);
   const confidenceWarnings = Array.isArray(raw.confidenceWarnings || raw.confidence_warnings)

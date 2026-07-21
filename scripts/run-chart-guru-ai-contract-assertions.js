@@ -6,21 +6,27 @@ const hooks = require('../netlify/functions/analyse-setup').__test;
 
 const rendererFields = ['version','phase','dominantEvent','eventSequence','structure','support','buyerResponse','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'].sort();
 
-function clientContractBuilder(){
-  const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
-  const start = source.indexOf('function buildCanonicalNarrationContract(');
+function sourceFunction(source, name){
+  const start = source.indexOf(`function ${name}(`);
   const open = source.indexOf('){', start) + 1;
-  if(open < 1) throw new Error('Could not find client narration contract body.');
+  if(open < 1) throw new Error(`Could not find ${name}.`);
   let depth = 0;
   for(let index = open; index < source.length; index += 1){
     if(source[index] === '{') depth += 1;
-    if(source[index] === '}' && --depth === 0){
-      const sandbox = {};
-      vm.runInNewContext(source.slice(start, index + 1), sandbox);
-      return sandbox.buildCanonicalNarrationContract;
-    }
+    if(source[index] === '}' && --depth === 0) return source.slice(start, index + 1);
   }
-  throw new Error('Could not load client narration contract builder.');
+  throw new Error(`Could not load ${name}.`);
+}
+
+function clientContractHelpers(){
+  const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  const sandbox = {};
+  vm.runInNewContext([
+    sourceFunction(source, 'buildCanonicalNarrationContract'),
+    sourceFunction(source, 'canonicalNarrationEarlyReboundEventKey'),
+    sourceFunction(source, 'repairCanonicalNarrationContractPhase')
+  ].join('\n'), sandbox);
+  return sandbox;
 }
 
 function buildHealthyContract(){
@@ -47,13 +53,24 @@ function verifyRendererBoundary(){
 }
 
 function verifyClientDerivedStateMapping(){
-  const buildClientContract = clientContractBuilder();
+  const {buildCanonicalNarrationContract:buildClientContract, repairCanonicalNarrationContractPhase} = clientContractHelpers();
+  const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  assert.ok(source.includes('const canonicalNarrationContract = repairCanonicalNarrationContractPhase('), 'analysis normalization must route persisted contracts through the canonical phase repair');
   const contract = buildClientContract({
     currentPhase:'responding_from_support', dominantEventLabel:'Early response', eventSequence:['support_test'],
     evidenceFactIds:['support'], supportState:{type:'50ma', label:'50-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed'
   }, {structureState:'developing_clean', trendState:'strong', volumeState:'expanding', marketStatus:'S&P above 50 MA'});
   assert.deepStrictEqual(JSON.parse(JSON.stringify({structure:contract.structure, trend:contract.trend, volume:contract.volume})), {structure:'intact', trend:'healthy', volume:'constructive'}, 'client contract must preserve realistic deriveSetupStates semantics instead of degrading them to unknown');
   assert.deepStrictEqual(JSON.parse(JSON.stringify(contract.support)), {type:'50ma', label:'50-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'}, 'client contract must retain complete active support authority');
+  const repaired = repairCanonicalNarrationContractPhase({
+    ...contract,
+    phase:'unknown',
+    dominantEvent:'Early rebound from 20MA',
+    nextRequiredEvent:'unknown',
+    buyerResponse:'unknown', buyerControl:'unknown', followThrough:'unknown'
+  }, {});
+  assert.strictEqual(repaired.phase, 'responding_from_support', 'client rehydration must repair an unknown persisted contract before it reaches diagnostics');
+  assert.strictEqual(repaired.nextRequiredEvent, 'follow_through', 'client rehydration must derive the repaired contract next event');
 }
 
 function verifyRetryFallbackContract(){

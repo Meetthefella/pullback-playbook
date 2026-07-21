@@ -6313,6 +6313,9 @@ function runAiContractAssertions(){
         icon:String(fallback.icon || '').trim(),
         label:String(fallback.label || '').trim()
       };
+    },
+    repairCanonicalNarrationContractPhase(contract){
+      return contract;
     }
   };
   vm.createContext(normalizeSandbox);
