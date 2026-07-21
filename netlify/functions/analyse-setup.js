@@ -509,6 +509,25 @@ const NARRATION_ENUMS = {
   verdict:new Set(['watch','near_entry','entry','avoid','unknown'])
 };
 
+// This is intentionally phase-owned rather than prompt-owned.  A renderer can
+// phrase the next observation for a trader, but it must never select a different
+// event from the deterministic story.
+const NARRATION_NEXT_EVENT_BY_PHASE = Object.freeze({
+  at_support:'support_hold',
+  responding_from_support:'follow_through',
+  stalled_after_response:'follow_through',
+  extended_from_support:'pullback_or_reset',
+  away_from_support:'clearer_support',
+  support_failed:'repair',
+  repairing_structure:'repair',
+  current_location_unresolved:'clearer_support',
+  unknown:'unknown'
+});
+
+function canonicalNextRequiredEventForPhase(phase = ''){
+  return NARRATION_NEXT_EVENT_BY_PHASE[normaliseString(phase, '').trim().toLowerCase()] || 'unknown';
+}
+
 function normalizeNarrationEnum(value, values, fallback = 'unknown'){
   const normalized = normaliseString(value, '').trim().toLowerCase();
   return values.has(normalized) ? normalized : fallback;
@@ -546,11 +565,26 @@ function projectNarrationPhaseFromPacket(eventPacket = {}){
   if(followThrough === 'stalled' || packet.confirmationSemantic === 'follow_through_stalled' || has('rebound_stalled') || has('follow_through_stalled') || has('stalled_after_support_response')) return 'stalled_after_response';
   if(explicitPhase && explicitPhase !== 'unknown') return explicitPhase;
   if(support.currentlyActive === true && ['testing','held'].includes(interaction)) return (responsePresent || ['developing','emerging','confirmed'].includes(control)) ? 'responding_from_support' : 'at_support';
-  if(has('early_rebound_from_20ma') || has('early_rebound_from_50ma') || (packet.supportSemantic === 'support_present' && (responsePresent || ['developing','emerging','confirmed'].includes(control)))) return 'responding_from_support';
+  if(has('early_rebound_from_20ma') || has('early_rebound_from_50ma') || has('early_rebound_from_200ma') || (packet.supportSemantic === 'support_present' && (responsePresent || ['developing','emerging','confirmed'].includes(control)))) return 'responding_from_support';
   if(has('extended_after_run') || has('rebound_extended')) return 'extended_from_support';
   if(packet.supportSemantic === 'support_absent') return 'away_from_support';
   if(packet.supportSemantic === 'support_present' || ['testing','held'].includes(interaction)) return 'at_support';
   return 'unknown';
+}
+
+function projectNarrationPhaseFromContract(contract = {}){
+  const source = safeObject(contract);
+  const dominantEventType = canonicalEarlyReboundMovingAverageType(source.dominantEvent);
+  const dominantEventKey = dominantEventType ? `early_rebound_from_${dominantEventType}` : '';
+  return projectNarrationPhaseFromPacket({
+    dominantEventKey,
+    eventSequence:source.eventSequence,
+    supportState:source.support,
+    buyerResponseState:source.buyerResponse,
+    buyerControlState:source.buyerControl,
+    followThroughState:source.followThrough,
+    currentPhase:source.phase
+  });
 }
 
 function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
@@ -569,13 +603,10 @@ function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
   const followThrough = normalizeNarrationEnum(packet.followThroughState || packet.confirmationSemantic
     .replace('follow_through_', ''), NARRATION_ENUMS.followThrough,
     packet.buyerResponseSemantic === 'response_present' ? 'unconfirmed' : 'unknown');
-  const nextFromPhase = {
-    at_support:'support_hold', responding_from_support:'follow_through', stalled_after_response:'follow_through',
-    extended_from_support:'pullback_or_reset', away_from_support:'clearer_support', support_failed:'repair',
-    repairing_structure:'repair', current_location_unresolved:'clearer_support'
-  };
-  const nextRequiredEvent = normalizeNarrationEnum(extra.nextRequiredEvent || extra.nextChartNeed, NARRATION_ENUMS.nextRequiredEvent,
-    nextFromPhase[phase] || 'unknown');
+  // Do not allow a persisted compatibility hint to override the event implied by
+  // the resolved phase.  That was the route by which stale/missing next-event
+  // data reached the renderer.
+  const nextRequiredEvent = canonicalNextRequiredEventForPhase(phase);
   return {
     version:CHART_GURU_NARRATION_CONTRACT_VERSION,
     phase,
@@ -609,14 +640,25 @@ function selectCanonicalNarrationContractForRenderer(suppliedContract, legacyEve
   // Preserve valid supplied authority. An unknown phase is the narrow exception:
   // deterministic chronology must not be discarded before narration is rendered.
   if(Object.keys(supplied).length){
-    const projectedPhase = projectNarrationPhaseFromPacket(legacyEventPacket);
+    const packetPhase = projectNarrationPhaseFromPacket(legacyEventPacket);
+    const contractPhase = projectNarrationPhaseFromContract(supplied);
+    const projectedPhase = packetPhase !== 'unknown' ? packetPhase : contractPhase;
     if(String(supplied.phase || '').trim().toLowerCase() === 'unknown' && projectedPhase !== 'unknown'){
-      return buildCanonicalNarrationContract(legacyEventPacket, {
-        ...legacySource,
-        verdict:supplied.verdict || legacySource.verdict
-      });
+      if(packetPhase !== 'unknown'){
+        return buildCanonicalNarrationContract(legacyEventPacket, {
+          ...legacySource,
+          verdict:supplied.verdict || legacySource.verdict
+        });
+      }
+      return {...supplied, phase:projectedPhase, nextRequiredEvent:canonicalNextRequiredEventForPhase(projectedPhase)};
     }
-    return supplied;
+    // Phase and next event are one deterministic projection.  Retain all other
+    // supplied v1 authority, but never send a stale persisted next-event hint to
+    // the renderer.
+    const canonicalNextEvent = canonicalNextRequiredEventForPhase(supplied.phase);
+    return supplied.nextRequiredEvent === canonicalNextEvent
+      ? supplied
+      : {...supplied, nextRequiredEvent:canonicalNextEvent};
   }
   return buildCanonicalNarrationContract(legacyEventPacket, legacySource);
 }
@@ -634,7 +676,8 @@ function validateCanonicalNarrationContract(contract = {}){
   const recognisedPhaseEvidence = value.followThrough === 'stalled'
     || support.interaction === 'failed'
     || (['testing','held'].includes(support.interaction) && ['present','confirmed'].includes(value.buyerResponse))
-    || (support.interaction === 'held' && ['developing','emerging','confirmed'].includes(value.buyerControl));
+    || (support.interaction === 'held' && ['developing','emerging','confirmed'].includes(value.buyerControl))
+    || !!canonicalEarlyReboundMovingAverageType(value.dominantEvent);
   if(value.phase === 'unknown' && recognisedPhaseEvidence) errors.push('phase_unknown_with_recognized_evidence');
   // A stalled rebound can follow an initially confirmed buyer response and control.
   // Only a confirmed continuation conflicts with the current stalled follow-through.
@@ -642,8 +685,8 @@ function validateCanonicalNarrationContract(contract = {}){
   if(value.phase === 'support_failed' && (value.support && value.support.interaction === 'held' || value.followThrough === 'confirmed')) errors.push('support_failed_conflict');
   if(['extended_from_support','away_from_support'].includes(value.phase) && value.support && ['testing','held'].includes(value.support.interaction)) errors.push('away_phase_active_support_conflict');
   if(value.structure === 'broken' && (value.support && value.support.interaction === 'held' || value.buyerControl === 'confirmed')) errors.push('broken_structure_recovery_conflict');
-  const expectedNext = {stalled_after_response:'follow_through',support_failed:'repair',repairing_structure:'repair',extended_from_support:'pullback_or_reset',away_from_support:'clearer_support'};
-  if(expectedNext[value.phase] && value.nextRequiredEvent !== expectedNext[value.phase]) errors.push('phase_next_event_mismatch');
+  const expectedNext = canonicalNextRequiredEventForPhase(value.phase);
+  if(value.nextRequiredEvent !== expectedNext) errors.push('phase_next_event_mismatch');
   return {ok:errors.length === 0, errors};
 }
 
@@ -701,6 +744,18 @@ function activeSupportAliases(support = {}){
   return [...aliases]
     .map(alias => alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/[ -]+/g, '[ -]+'))
     .filter(Boolean);
+}
+
+function canonicalEarlyReboundMovingAverageType(dominantEvent = ''){
+  const text = normaliseString(dominantEvent, '').trim();
+  if(!text) return '';
+  for(const type of ['20ma','50ma','200ma']){
+    // Reuse the same aliases that protect named active-support prose. This keeps
+    // compact (20MA) and spaced (20 MA) canonical labels in one vocabulary.
+    const aliases = activeSupportAliases({type});
+    if(aliases.length && new RegExp(`\\bearly rebound from (?:the\\s+)?(?:${aliases.join('|')})\\b`, 'i').test(text)) return type;
+  }
+  return '';
 }
 
 function namedActiveSupportContradictionCode(text = '', support = {}){
@@ -790,18 +845,43 @@ function validateNarrationProseAgainstContract(response = {}, contract = {}){
   return {ok:errors.length === 0, errors};
 }
 
-async function renderCanonicalNarrationWithRetry(contract, requestRenderer){
+async function renderCanonicalNarrationWithRetry(contract, requestRenderer, logContext = {}){
   const finalPrompt = buildProductionChartGuruFinalPrompt(contract);
   const errors = [];
-  const first = await requestRenderer(finalPrompt, 'chart_guru_final_prose');
+  const unpackRendererResult = result => {
+    const wrapped = safeObject(result);
+    return Object.prototype.hasOwnProperty.call(wrapped, 'parsed')
+      ? {prose:wrapped.parsed, rawResponse:wrapped.rawText ?? wrapped.parsed}
+      : {prose:result, rawResponse:result};
+  };
+  const firstResult = unpackRendererResult(await requestRenderer(finalPrompt, 'chart_guru_final_prose'));
+  const first = firstResult.prose;
   const firstValidation = validateNarrationProseAgainstContract(first, contract);
+  console.log('[CHART_GURU_NARRATION_RENDERER_RESPONSE]', JSON.stringify({
+    ...safeObject(logContext), attempt:0, nextRequiredEvent:contract.nextRequiredEvent,
+    rawResponse:firstResult.rawResponse, response:first, validation:firstValidation
+  }));
   if(firstValidation.ok) return {prose:first, source:'openai', errors, retryCount:0};
   errors.push(...firstValidation.errors.map(code => `first:${code}`));
+  console.warn('[CHART_GURU_NARRATION_VALIDATION_FAILURE]', JSON.stringify({
+    ...safeObject(logContext), attempt:0, nextRequiredEvent:contract.nextRequiredEvent, errors:firstValidation.errors
+  }));
   const retryPrompt = `${finalPrompt}\n\nCorrect only these failed contract constraints: ${firstValidation.errors.join(', ')}.`;
-  const retry = await requestRenderer(retryPrompt, 'chart_guru_final_prose_retry');
+  const retryResult = unpackRendererResult(await requestRenderer(retryPrompt, 'chart_guru_final_prose_retry'));
+  const retry = retryResult.prose;
   const retryValidation = validateNarrationProseAgainstContract(retry, contract);
+  console.log('[CHART_GURU_NARRATION_RENDERER_RESPONSE]', JSON.stringify({
+    ...safeObject(logContext), attempt:1, nextRequiredEvent:contract.nextRequiredEvent,
+    rawResponse:retryResult.rawResponse, response:retry, validation:retryValidation
+  }));
   if(retryValidation.ok) return {prose:retry, source:'retry', errors, retryCount:1};
   errors.push(...retryValidation.errors.map(code => `retry:${code}`));
+  console.warn('[CHART_GURU_NARRATION_VALIDATION_FAILURE]', JSON.stringify({
+    ...safeObject(logContext), attempt:1, nextRequiredEvent:contract.nextRequiredEvent, errors:retryValidation.errors
+  }));
+  console.warn('[CHART_GURU_NARRATION_FALLBACK_TRIGGER]', JSON.stringify({
+    ...safeObject(logContext), trigger:'renderer_validation_failed_after_retry', nextRequiredEvent:contract.nextRequiredEvent, errors
+  }));
   return {prose:deterministicNarrationFallback(contract), source:'deterministic_fallback', errors, retryCount:1};
 }
 
@@ -2469,6 +2549,14 @@ exports.handler = async function handler(event){
     });
     const contractValidation = validateCanonicalNarrationContract(canonicalNarrationContract);
     analysis.canonicalNarrationContract = canonicalNarrationContract;
+    console.log('[CHART_GURU_NARRATION_CONTRACT]', JSON.stringify({
+      requestId:narrationRequestId,
+      ticker:String(payload.ticker || ''),
+      suppliedPhase:String(safeObject(payload.canonicalNarrationContract).phase || ''),
+      deterministicPacketPhase:projectNarrationPhaseFromPacket(structuredFacts.deterministicEventPacket),
+      contract:canonicalNarrationContract,
+      validation:contractValidation
+    }));
     const narrationErrors = contractValidation.errors.slice();
     let prose = null;
     let narrationSource = 'deterministic_fallback';
@@ -2476,16 +2564,24 @@ exports.handler = async function handler(event){
     if(contractValidation.ok){
       try{
         const rendered = await renderCanonicalNarrationWithRetry(canonicalNarrationContract, async (prompt, requestName) => {
-          const response = await sendStrictSchemaOpenAiRequest(apiKey, model, buildProductionChartGuruFinalInstructions(), prompt, requestName, FINAL_PROSE_SCHEMA, 700);
-          return response.parsed;
-        });
+          return sendStrictSchemaOpenAiRequest(apiKey, model, buildProductionChartGuruFinalInstructions(), prompt, requestName, FINAL_PROSE_SCHEMA, 700);
+        }, {requestId:narrationRequestId, ticker:String(payload.ticker || ''), phase:canonicalNarrationContract.phase});
         prose = rendered.prose;
         narrationSource = rendered.source;
         narrationRetryCount = Number(rendered.retryCount || 0);
         narrationErrors.push(...rendered.errors);
       }catch(err){ narrationErrors.push(`request:${String(err && err.stage || 'failed')}`); }
     }
-    if(!prose) prose = deterministicNarrationFallback(canonicalNarrationContract);
+    if(!prose){
+      console.warn('[CHART_GURU_NARRATION_FALLBACK_TRIGGER]', JSON.stringify({
+        requestId:narrationRequestId,
+        ticker:String(payload.ticker || ''),
+        trigger:contractValidation.ok ? 'renderer_request_failed' : 'invalid_canonical_contract',
+        nextRequiredEvent:canonicalNarrationContract.nextRequiredEvent,
+        errors:narrationErrors
+      }));
+      prose = deterministicNarrationFallback(canonicalNarrationContract);
+    }
     analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, canonicalNarrationContract, structuredFacts);
     delete analysis.traderInterpretation;
     analysis.canonicalNarrationContract = canonicalNarrationContract;
@@ -2529,6 +2625,13 @@ exports.handler = async function handler(event){
       analysis.deterministicEventPacket,
       {structure:payload.structureState, trend:payload.trendState, volume:payload.volumeState}
     );
+    console.warn('[CHART_GURU_NARRATION_FALLBACK_TRIGGER]', JSON.stringify({
+      requestId:narrationRequestId,
+      ticker:String(payload.ticker || ''),
+      trigger:'narration_pipeline_error',
+      nextRequiredEvent:contract.nextRequiredEvent,
+      errors:['pipeline_error']
+    }));
     const prose = deterministicNarrationFallback(contract);
     analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, contract, {deterministicEventPacket:analysis.deterministicEventPacket});
     delete analysis.traderInterpretation;

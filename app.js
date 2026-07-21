@@ -26674,7 +26674,9 @@ function chartGuruNarrationDebugMarkup(analysis = {}, chartCoach = null){
     ['Validation codes', codes.length ? `[${codes.join(', ')}]` : '[]'],
     ['Retry count', Number(narration.retryCount || 0) ? '1' : '0'],
     ['Contract phase', String(contract.phase || 'unknown')],
+    ['Packet phase', String(eventPacket.currentPhase || 'unknown')],
     ['Dominant event', String(narration.dominantEventKey || eventPacket.dominantEventKey || contract.dominantEvent || 'unknown')],
+    ['Next required event', String(contract.nextRequiredEvent || 'unknown')],
     ['Contract version', String(narration.contractVersion || contract.version || 'unknown')],
     ['Prose request ID', String(narration.requestId || 'unavailable')],
     ['Prose timestamp', String(narration.completedAt || 'unavailable')]

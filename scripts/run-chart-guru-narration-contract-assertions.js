@@ -70,6 +70,7 @@ for(const [phase, nextRequiredEvent] of Object.entries({
   }, {structure:phase === 'support_failed' ? 'weakening' : 'intact', nextRequiredEvent});
   assert.strictEqual(contract.phase, phase, `${phase}: canonical phase must be preserved`);
   assert.strictEqual(contract.nextRequiredEvent, nextRequiredEvent, `${phase}: next event must be phase-specific`);
+  assert.ok(hooks.validateCanonicalNarrationContract({...contract, nextRequiredEvent:'unknown'}).errors.includes('phase_next_event_mismatch'), `${phase}: a valid known phase must reject a missing next event`);
   const fallback = hooks.deterministicNarrationFallback(contract);
   assert.strictEqual(hooks.validateNarrationProseAgainstContract(fallback, contract).ok, true, `${phase}: fallback sections must be faithful`);
   const text = Object.values(fallback).join(' ').toLowerCase();
@@ -84,6 +85,11 @@ const stalled = hooks.buildCanonicalNarrationContract({
   supportState:{interaction:'held'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed', evidenceFactIds:['support','stall']
 }, {structure:'intact', nextRequiredEvent:'follow_through'});
 stalled.support = {type:'50ma', label:'50-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'};
+const staleNextEventContract = hooks.selectCanonicalNarrationContractForRenderer({
+  ...stalled,
+  nextRequiredEvent:'clearer_support'
+});
+assert.strictEqual(staleNextEventContract.nextRequiredEvent, 'follow_through', 'a supplied contract may not retain a stale next event that contradicts its phase');
 
 const amznStylePacket = {
   dominantEventKey:'early_rebound_from_20ma',
@@ -113,6 +119,24 @@ assert.strictEqual(amznStyleContract.nextRequiredEvent, 'follow_through', 'a sta
 assert.strictEqual(hooks.projectNarrationPhaseFromPacket(amznStylePacket), 'stalled_after_response', 'packet phase projection must recognise the AMZN-style chronology');
 const repairedSuppliedContract = hooks.selectCanonicalNarrationContractForRenderer({...amznStyleContract, phase:'unknown'}, amznStylePacket, {structure:'intact', verdict:'watch'});
 assert.strictEqual(repairedSuppliedContract.phase, 'stalled_after_response', 'a supplied unknown phase must be repaired from deterministic chronology before rendering');
+const repairedContractOnly = hooks.selectCanonicalNarrationContractForRenderer({...amznStyleContract, phase:'unknown'}, {}, {structure:'intact', verdict:'watch'});
+assert.strictEqual(repairedContractOnly.phase, 'stalled_after_response', 'a supplied unknown phase must be repaired from its own canonical buyer-state chronology when a legacy packet is unavailable');
+assert.strictEqual(repairedContractOnly.nextRequiredEvent, 'follow_through', 'phase repair must carry its exact canonical next event');
+const contractOnlyUnknown = dominantEvent => ({
+  version:'chart-guru-narration-contract-v1', phase:'unknown', dominantEvent, eventSequence:[],
+  structure:'intact', support:{type:'unknown', label:'', interaction:'unknown', currentlyActive:null, semantic:'unknown'},
+  buyerResponse:'unknown', buyerControl:'unknown', followThrough:'unknown', trend:'healthy', volume:'unknown', market:'supportive',
+  dominantBlocker:'unknown', nextRequiredEvent:'unknown', verdict:'watch', evidenceFactIds:[]
+});
+for(const dominantEvent of ['Early rebound from 20MA', 'Early rebound from 20 MA', 'Early rebound from 50MA', 'Early rebound from 50 MA', 'Early rebound from 200MA', 'Early rebound from 200 MA']){
+  const repaired = hooks.selectCanonicalNarrationContractForRenderer(contractOnlyUnknown(dominantEvent), {}, {});
+  assert.strictEqual(repaired.phase, 'responding_from_support', `${dominantEvent}: canonical MA label must repair an unknown contract-only phase`);
+  assert.strictEqual(repaired.nextRequiredEvent, 'follow_through', `${dominantEvent}: repaired phase must derive follow-through as the next required event`);
+  assert.strictEqual(hooks.validateCanonicalNarrationContract(repaired).ok, true, `${dominantEvent}: repaired contract must remain valid`);
+  assert.ok(hooks.validateCanonicalNarrationContract({...repaired, nextRequiredEvent:'unknown'}).errors.includes('phase_next_event_mismatch'), `${dominantEvent}: a repaired phase must still reject a contradictory next event`);
+}
+const unrelatedContractOnly = contractOnlyUnknown('Momentum remains mixed after recent volatility');
+assert.strictEqual(hooks.selectCanonicalNarrationContractForRenderer(unrelatedContractOnly, {}, {}).phase, 'unknown', 'unrelated dominant-event text must not manufacture a recognised phase');
 assert.ok(hooks.validateCanonicalNarrationContract({...amznStyleContract, phase:'unknown'}).errors.includes('phase_unknown_with_recognized_evidence'), 'unknown phase must fail validation when stalled chronology is already proven');
 const historicalSupportContradictions = [
   'Price is not sitting near a support area right now.',
@@ -126,6 +150,7 @@ for(const sentence of historicalSupportContradictions){
 }
 const genuinelyUnknownContract = hooks.buildCanonicalNarrationContract({}, {structure:'unknown', verdict:'watch'});
 assert.strictEqual(genuinelyUnknownContract.phase, 'unknown', 'incomplete evidence may remain unknown when no recognised chronology exists');
+assert.strictEqual(genuinelyUnknownContract.nextRequiredEvent, 'unknown', 'a genuinely unknown contract must retain an explicit unknown next event');
 assert.strictEqual(hooks.validateCanonicalNarrationContract(genuinelyUnknownContract).ok, true, 'a genuinely unknown contract must remain renderable');
 const stalledAfterConfirmedControl = {...stalled, buyerResponse:'confirmed', buyerControl:'confirmed', followThrough:'stalled'};
 assert.strictEqual(hooks.validateCanonicalNarrationContract(stalledAfterConfirmedControl).ok, true, 'confirmed initial buyer control must be valid when follow-through later stalls');
@@ -233,6 +258,8 @@ for(const phase of ['away_from_support','extended_from_support']){
   assert.strictEqual(requests, 2, 'two contradictory responses must make exactly two renderer calls');
   assert.strictEqual(fallback.source, 'deterministic_fallback', 'an invalid retry must use deterministic fallback');
   assert.strictEqual(fallback.retryCount, 1, 'a fallback after an invalid retry must report one retry');
+  const missingNextEvent = {...valid, whatNext:'Watch the next candle for a better signal.'};
+  assert.ok(hooks.validateNarrationProseAgainstContract(missingNextEvent, stalled).errors.includes('next_required_event_missing'), 'renderer prose must preserve the contract nextRequiredEvent in whatNext');
   assert.strictEqual(hooks.narrationDebugSource('openai'), 'canonical_llm', 'debug metadata must label canonical LLM prose consistently');
   assert.strictEqual(hooks.narrationDebugValidationStatus('recovered'), 'passed', 'a valid retry must report final validation as passed');
   assert.strictEqual(hooks.narrationDebugValidationStatus('invalid_contract'), 'failed', 'an invalid contract must report validation failure');
