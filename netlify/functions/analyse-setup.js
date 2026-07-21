@@ -734,14 +734,26 @@ async function renderCanonicalNarrationWithRetry(contract, requestRenderer){
   const errors = [];
   const first = await requestRenderer(finalPrompt, 'chart_guru_final_prose');
   const firstValidation = validateNarrationProseAgainstContract(first, contract);
-  if(firstValidation.ok) return {prose:first, source:'openai', errors};
+  if(firstValidation.ok) return {prose:first, source:'openai', errors, retryCount:0};
   errors.push(...firstValidation.errors.map(code => `first:${code}`));
   const retryPrompt = `${finalPrompt}\n\nCorrect only these failed contract constraints: ${firstValidation.errors.join(', ')}.`;
   const retry = await requestRenderer(retryPrompt, 'chart_guru_final_prose_retry');
   const retryValidation = validateNarrationProseAgainstContract(retry, contract);
-  if(retryValidation.ok) return {prose:retry, source:'retry', errors};
+  if(retryValidation.ok) return {prose:retry, source:'retry', errors, retryCount:1};
   errors.push(...retryValidation.errors.map(code => `retry:${code}`));
-  return {prose:deterministicNarrationFallback(contract), source:'deterministic_fallback', errors};
+  return {prose:deterministicNarrationFallback(contract), source:'deterministic_fallback', errors, retryCount:1};
+}
+
+function narrationDebugSource(source = ''){
+  return String(source || '').trim().toLowerCase() === 'openai'
+    ? 'canonical_llm'
+    : (String(source || '').trim() || 'deterministic_fallback');
+}
+
+function narrationDebugValidationStatus(outcome = ''){
+  return ['valid', 'recovered'].includes(String(outcome || '').trim().toLowerCase())
+    ? 'passed'
+    : 'failed';
 }
 
 function normalizeTraderInterpretation(value = {}, eventPacket = {}){
@@ -2115,6 +2127,7 @@ exports.handler = async function handler(event){
   const prompt = String(body.prompt || '').trim();
   const chartRef = body.chartRef || null;
   const verificationOnly = body.verificationOnly === true;
+  const narrationRequestId = `chart_guru_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
   if(!payload.ticker || !payload.marketStatus || (!verificationOnly && !prompt)){
     return jsonResponse(400, {
@@ -2398,6 +2411,7 @@ exports.handler = async function handler(event){
     const narrationErrors = contractValidation.errors.slice();
     let prose = null;
     let narrationSource = 'deterministic_fallback';
+    let narrationRetryCount = 0;
     if(contractValidation.ok){
       try{
         const rendered = await renderCanonicalNarrationWithRetry(canonicalNarrationContract, async (prompt, requestName) => {
@@ -2406,6 +2420,7 @@ exports.handler = async function handler(event){
         });
         prose = rendered.prose;
         narrationSource = rendered.source;
+        narrationRetryCount = Number(rendered.retryCount || 0);
         narrationErrors.push(...rendered.errors);
       }catch(err){ narrationErrors.push(`request:${String(err && err.stage || 'failed')}`); }
     }
@@ -2414,8 +2429,32 @@ exports.handler = async function handler(event){
     delete analysis.traderInterpretation;
     analysis.canonicalNarrationContract = canonicalNarrationContract;
     analysis.chartCoach.diagnostics = analysis.chartCoach.diagnostics || {};
-    analysis.chartCoach.diagnostics.narration = {contractVersion:canonicalNarrationContract.version, validationOutcome:contractValidation.ok ? (narrationErrors.length ? 'recovered' : 'valid') : 'invalid_contract', proseSource:narrationSource, validationErrors:narrationErrors};
+    const validationOutcome = contractValidation.ok ? (narrationErrors.length ? 'recovered' : 'valid') : 'invalid_contract';
+    analysis.chartCoach.diagnostics.narration = {
+      contractVersion:canonicalNarrationContract.version,
+      validationOutcome,
+      validationStatus:narrationDebugValidationStatus(validationOutcome),
+      proseSource:narrationSource,
+      narrationSource:narrationDebugSource(narrationSource),
+      validationErrors:narrationErrors,
+      retryCount:narrationRetryCount,
+      requestId:narrationRequestId,
+      completedAt:new Date().toISOString(),
+      dominantEventKey:String(structuredFacts.deterministicEventPacket && structuredFacts.deterministicEventPacket.dominantEventKey || '')
+    };
     analysis.chartCoach.source = narrationSource === 'deterministic_fallback' ? 'deterministic_fallback' : 'openai_canonical_narration';
+    console.log('[CHART_GURU_NARRATION_RESULT]', JSON.stringify({
+      requestId:narrationRequestId,
+      ticker:String(payload.ticker || ''),
+      narrationSource:analysis.chartCoach.diagnostics.narration.narrationSource,
+      validation:analysis.chartCoach.diagnostics.narration.validationStatus,
+      validationCodes:narrationErrors,
+      retryCount:narrationRetryCount,
+      phase:canonicalNarrationContract.phase,
+      dominantEvent:analysis.chartCoach.diagnostics.narration.dominantEventKey || canonicalNarrationContract.dominantEvent,
+      contractVersion:canonicalNarrationContract.version,
+      completedAt:analysis.chartCoach.diagnostics.narration.completedAt
+    }));
   }catch(err){
     console.error('Chart Guru canonical narration pipeline failed', {
       model,
@@ -2434,8 +2473,31 @@ exports.handler = async function handler(event){
     delete analysis.traderInterpretation;
     analysis.canonicalNarrationContract = contract;
     analysis.chartCoach.diagnostics = analysis.chartCoach.diagnostics || {};
-    analysis.chartCoach.diagnostics.narration = {contractVersion:contract.version, validationOutcome:'pipeline_error', proseSource:'deterministic_fallback', validationErrors:['pipeline_error']};
+    analysis.chartCoach.diagnostics.narration = {
+      contractVersion:contract.version,
+      validationOutcome:'pipeline_error',
+      validationStatus:'failed',
+      proseSource:'deterministic_fallback',
+      narrationSource:'deterministic_fallback',
+      validationErrors:['pipeline_error'],
+      retryCount:0,
+      requestId:narrationRequestId,
+      completedAt:new Date().toISOString(),
+      dominantEventKey:String(analysis.deterministicEventPacket && analysis.deterministicEventPacket.dominantEventKey || '')
+    };
     analysis.chartCoach.source = 'deterministic_fallback';
+    console.log('[CHART_GURU_NARRATION_RESULT]', JSON.stringify({
+      requestId:narrationRequestId,
+      ticker:String(payload.ticker || ''),
+      narrationSource:'deterministic_fallback',
+      validation:'failed',
+      validationCodes:['pipeline_error'],
+      retryCount:0,
+      phase:contract.phase,
+      dominantEvent:analysis.chartCoach.diagnostics.narration.dominantEventKey || contract.dominantEvent,
+      contractVersion:contract.version,
+      completedAt:analysis.chartCoach.diagnostics.narration.completedAt
+    }));
     return jsonResponse(200, {
       ok:true,
       model,
@@ -2470,6 +2532,8 @@ exports.__test = {
   deterministicNarrationFallback,
   validateNarrationProseAgainstContract,
   renderCanonicalNarrationWithRetry,
+  narrationDebugSource,
+  narrationDebugValidationStatus,
   normalizeTraderInterpretation,
   buildChartGuruNarrationDiagnostics,
   buildProductionStructuredFacts,

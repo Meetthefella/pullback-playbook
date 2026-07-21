@@ -177,6 +177,7 @@ for(const phase of ['away_from_support','extended_from_support']){
   const retried = await hooks.renderCanonicalNarrationWithRetry(stalled, async () => (++requests === 1 ? invalidRendererOutput : valid));
   assert.strictEqual(requests, 2, 'a contradictory first renderer response must trigger exactly one retry');
   assert.strictEqual(retried.source, 'retry', 'the valid retry must be used');
+  assert.strictEqual(retried.retryCount, 1, 'a valid retry must report one retry');
   assert.ok(retried.errors.some(code => code.startsWith('first:unsupported_away_from_active_support')), 'first-response contradiction diagnostics must be retained');
   requests = 0;
   const namedOff = {...valid, setupLocation:'Price is off the 50-day average.'};
@@ -188,6 +189,10 @@ for(const phase of ['away_from_support','extended_from_support']){
   const fallback = await hooks.renderCanonicalNarrationWithRetry(stalled, async () => { requests += 1; return invalidRendererOutput; });
   assert.strictEqual(requests, 2, 'two contradictory responses must make exactly two renderer calls');
   assert.strictEqual(fallback.source, 'deterministic_fallback', 'an invalid retry must use deterministic fallback');
+  assert.strictEqual(fallback.retryCount, 1, 'a fallback after an invalid retry must report one retry');
+  assert.strictEqual(hooks.narrationDebugSource('openai'), 'canonical_llm', 'debug metadata must label canonical LLM prose consistently');
+  assert.strictEqual(hooks.narrationDebugValidationStatus('recovered'), 'passed', 'a valid retry must report final validation as passed');
+  assert.strictEqual(hooks.narrationDebugValidationStatus('invalid_contract'), 'failed', 'an invalid contract must report validation failure');
   console.log('run-chart-guru-narration-contract-assertions: ok');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 

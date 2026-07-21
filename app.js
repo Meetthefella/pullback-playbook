@@ -26649,6 +26649,49 @@ function renderChartCoachMarkup(display = {}){
   }).join('');
 }
 
+function chartGuruNarrationDebugEnabled(){
+  if(!debugFlagEnabled('PP_DEBUG_CHART_GURU_NARRATION')) return false;
+  try{
+    const hostname = String(window && window.location && window.location.hostname || '').trim().toLowerCase();
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+  }catch(error){
+    return false;
+  }
+}
+
+function chartGuruNarrationDebugMarkup(analysis = {}, chartCoach = null){
+  if(!chartGuruNarrationDebugEnabled()) return '';
+  const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : {};
+  const safeCoach = chartCoach && typeof chartCoach === 'object' ? chartCoach : {};
+  const narration = safeCoach.diagnostics && safeCoach.diagnostics.narration && typeof safeCoach.diagnostics.narration === 'object'
+    ? safeCoach.diagnostics.narration
+    : {};
+  const contract = safeAnalysis.canonicalNarrationContract && typeof safeAnalysis.canonicalNarrationContract === 'object'
+    ? safeAnalysis.canonicalNarrationContract
+    : {};
+  const eventPacket = safeAnalysis.deterministicEventPacket && typeof safeAnalysis.deterministicEventPacket === 'object'
+    ? safeAnalysis.deterministicEventPacket
+    : {};
+  const source = String(narration.narrationSource || narration.proseSource || 'unknown').trim().toLowerCase() === 'openai'
+    ? 'canonical_llm'
+    : String(narration.narrationSource || narration.proseSource || 'unknown').trim();
+  const validation = String(narration.validationStatus || '').trim()
+    || (['valid', 'recovered'].includes(String(narration.validationOutcome || '').trim()) ? 'passed' : 'failed');
+  const codes = Array.isArray(narration.validationErrors) ? narration.validationErrors.map(code => String(code || '').trim()).filter(Boolean) : [];
+  const rows = [
+    ['Narration source', source || 'unknown'],
+    ['Validation', validation],
+    ['Validation codes', codes.length ? `[${codes.join(', ')}]` : '[]'],
+    ['Retry count', Number(narration.retryCount || 0) ? '1' : '0'],
+    ['Contract phase', String(contract.phase || 'unknown')],
+    ['Dominant event', String(narration.dominantEventKey || eventPacket.dominantEventKey || contract.dominantEvent || 'unknown')],
+    ['Contract version', String(narration.contractVersion || contract.version || 'unknown')],
+    ['Prose request ID', String(narration.requestId || 'unavailable')],
+    ['Prose timestamp', String(narration.completedAt || 'unavailable')]
+  ];
+  return renderDebugSectionMarkup('Chart Guru Narration', rows.map(([label, value]) => ({label, value})));
+}
+
 function sanitizeChartCoachForDisplay(chartCoach = null, setup = {}){
   const safe = chartCoach && typeof chartCoach === 'object' ? chartCoach : null;
   if(!safe) return null;
@@ -48555,6 +48598,9 @@ function renderReviewWorkspace(options = {}){
     {label:'lastReviewedAt', value:record.review.lastReviewedAt || '(none)'}
   ]);
   const reviewStateHealthDebug = (window.PP_FORCE_STATE_DEBUG === true) ? reviewDebugCompact : '';
+  const chartGuruNarrationDebug = advancedOpen
+    ? chartGuruNarrationDebugMarkup(analysisState.normalizedAnalysis, analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.chartCoach)
+    : '';
   const reviewDebugInternal = (window.PP_FORCE_STATE_DEBUG === true)
     ? renderAdvancedDebugMarkup([
       {label:'Review Legacy State', value:JSON.stringify(reviewLegacyState || {}, null, 0) || '(none)'},
@@ -48590,7 +48636,7 @@ function renderReviewWorkspace(options = {}){
         </div>
       </div>`
     : '';
-  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDiagnosticBundlePanel}${reviewStateHealthDebug}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
+  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDiagnosticBundlePanel}${chartGuruNarrationDebug}${reviewStateHealthDebug}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
