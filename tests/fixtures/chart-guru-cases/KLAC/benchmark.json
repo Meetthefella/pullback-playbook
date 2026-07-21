@@ -1,0 +1,123 @@
+{
+  "id": "KLAC_event_first_test_50ma_support",
+  "ticker": "KLAC",
+  "benchmark": {
+    "dominantEvent": "First test of 50MA",
+    "eventSequence": [
+      "the prior advance corrected sharply from the highs",
+      "price has pulled back into the 50-day average",
+      "support is being tested rather than clearly reclaimed",
+      "buyers still need to prove they can hold the area"
+    ],
+    "expectedTraderInterpretation": "KLAC has pulled back into the 50-day average after a sharper correction, so this is a real support test rather than an off-level setup.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "First test of 50MA"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "50MA",
+  "setupStates": {
+    "trendState": "strong",
+    "pullbackZone": "near_50ma",
+    "structureState": "intact",
+    "stabilisationState": "none",
+    "bounceState": "none",
+    "volumeState": "neutral"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "constructive_pullback_near_50ma",
+      "label": "Chart Story",
+      "icon": "\ud83d\udfe2",
+      "text": "The main clue is a constructive pullback into the 50-day average while the wider uptrend is still intact, but buyers still need to defend this support area.",
+      "evidenceFactIds": ["trend_context", "support_medium_term_average"],
+      "confidence": 0.89,
+      "rankReason": "trend_intact_pullback_into_50ma_support"
+    },
+    "recentStory": {
+      "key": "constructive_pullback_near_50ma",
+      "bias": "good",
+      "toneMode": "constructive_buyer_response",
+      "confidenceMode": "support_test_needs_buyer_proof",
+      "trendLabel": "First test of 50MA",
+      "supportLabel": "50-day average",
+      "supportSemantic": "support_present",
+      "buyerResponseSemantic": "response_absent",
+      "confirmationSemantic": "follow_through_unconfirmed",
+      "steps": [
+        "strong_uptrend",
+        "pullback_to_50ma",
+        "support_test",
+        "volume_not_a_problem",
+        "support_still_unproven"
+      ],
+      "stepDetails": [
+        {
+          "key": "pullback_to_50ma",
+          "evidenceFactIds": ["support_medium_term_average"],
+          "derivedFromSteps": ["pullback_to_50ma"],
+          "derivedFromConditions": ["near_50ma"]
+        },
+        {
+          "key": "support_test",
+          "evidenceFactIds": ["support_medium_term_average"],
+          "derivedFromSteps": ["pullback_to_50ma", "support_test"],
+          "derivedFromConditions": ["support_being_tested"]
+        }
+      ],
+      "evidenceFactIds": ["trend_context", "support_medium_term_average"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "KLAC",
+    "timeframe": "1D",
+    "currentPrice": 882.4,
+    "ma20": 921.3,
+    "ma50": 878.6,
+    "ma200": 756.9,
+    "volume": 1290000,
+    "latestCandleOHLC": {
+      "open": 889.8,
+      "high": 895.4,
+      "low": 874.9,
+      "close": 882.4
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "50MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "First test of 50MA",
+    "eventSequence": [
+      "the prior advance corrected sharply from the highs",
+      "price has pulled back into the 50-day average",
+      "support is being tested rather than clearly reclaimed",
+      "buyers still need to prove they can hold the area"
+    ],
+    "traderInterpretation": "KLAC has pulled back into the 50-day average after a sharper correction, so this is a real support test rather than an off-level setup.",
+    "currentRisk": "If price cannot hold around the 50-day average, the pullback can drift from a normal reset into deeper structure damage.",
+    "nextSignal": "Watch for buyers to defend the 50-day average and start reclaiming ground with firmer closes before trusting the setup more."
+  },
+  "finalProse": {
+    "chartStory": "KLAC has corrected sharply from the highs and is now testing the 50-day average. That puts the chart back at a support area that matters, but buyers still need to respond.",
+    "whyItMatters": "A first test of the 50-day average can still work in a healthy trend, but the support test only helps if buyers can actually hold it.",
+    "setupLocation": "Price is at the 50-day average, so this is a meaningful support test instead of an off-level setup.",
+    "learningPoint": "Support context and buyer response are separate. Reaching the 50-day average is useful, but traders still need proof that selling is being absorbed there.",
+    "whatNext": "Watch for buyers to defend the 50-day average and follow through with firmer closes before treating the pullback as constructive again."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["50ma", "support", "test"],
+    "eventSequenceTokens": ["corrected", "50-day average", "support"],
+    "traderTokens": ["50-day average", "support", "off-level"],
+    "tutorTokens": ["50-day average", "support", "buyers", "watch"],
+    "forbiddenTokens": ["away from support", "not near support", "entry ready", "macd", "rsi"]
+  }
+}

@@ -4,7 +4,7 @@ const path = require('path');
 const vm = require('vm');
 const hooks = require('../netlify/functions/analyse-setup').__test;
 
-const rendererFields = ['version','phase','dominantEvent','eventSequence','structure','support','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'].sort();
+const rendererFields = ['version','phase','dominantEvent','eventSequence','structure','support','buyerResponse','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'].sort();
 
 function clientContractBuilder(){
   const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');

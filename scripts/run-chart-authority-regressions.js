@@ -484,6 +484,7 @@ function runDeterministicCandleFallbackRegression(){
     }
   };
   vm.createContext(sandbox);
+  loadBrowserModule('js/chart-guru-phase-policy.js', sandbox);
   vm.runInContext(extractConstAssignment('APP_VERSION'), sandbox, {filename:'app.js#APP_VERSION'});
   vm.runInContext(extractConstAssignment('APP_BUILD_TIMESTAMP'), sandbox, {filename:'app.js#APP_BUILD_TIMESTAMP'});
   vm.runInContext(extractConstAssignment('CHART_GURU_RENDER_VERSION'), sandbox, {filename:'app.js#CHART_GURU_RENDER_VERSION'});
@@ -561,6 +562,7 @@ function runDeterministicCandleFallbackRegression(){
     'isGenericTradePlanCommentary',
     'canonicalVolumeParticipationForState',
     'buildCanonicalStoryContextForRecord',
+    'canonicalBuyerStatesFromStoryContext',
     'canonicalDecisionSummaryFromStoryContext',
     'canonicalNonChartBlockerSummary',
     'buildDecisionSummary',

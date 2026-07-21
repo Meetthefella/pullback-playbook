@@ -1,0 +1,116 @@
+{
+  "id": "BEN_event_first_sharp_pullback_damage",
+  "ticker": "BEN",
+  "benchmark": {
+    "dominantEvent": "Trend damage with sellers in control",
+    "eventSequence": [
+      "price rolled over from recent highs",
+      "a meaningful red candle drove into and through the 20-day average",
+      "selling pressure is still the clearest recent event",
+      "buyers have not produced a convincing response yet"
+    ],
+    "expectedTraderInterpretation": "BEN is no longer showing a calm healthy reset. The recent red candle damaged the 20-day support area and sellers are still the dominant force until buyers prove otherwise.",
+    "metadata": {
+      "benchmarkVersion": 1,
+      "caseType": "event_first_narration",
+      "expectedSetupLabel": "Trend damage with sellers in control"
+    }
+  },
+  "marketStatus": "S&P above 50 MA",
+  "scanType": "20MA",
+  "setupStates": {
+    "trendState": "weakening",
+    "pullbackZone": "near_20ma",
+    "structureState": "weakening",
+    "stabilisationState": "none",
+    "bounceState": "none",
+    "volumeState": "neutral"
+  },
+  "deterministicChartCoach": {
+    "primaryStory": {
+      "key": "sharp_selloff",
+      "label": "Chart Story",
+      "icon": "\ud83d\udd34",
+      "text": "The last few candles are large and red, showing sellers have been firmly in control.",
+      "evidenceFactIds": ["latest_red_candle", "large_red_run", "price_accelerating_lower"],
+      "confidence": 0.92,
+      "rankReason": "several_large_red_candles"
+    },
+    "recentStory": {
+      "key": "sharp_selloff",
+      "bias": "bad",
+      "toneMode": "broken_avoid",
+      "confidenceMode": "avoid_until_rebuilt",
+      "trendLabel": "Trend damage with sellers in control",
+      "supportLabel": "20-day average",
+      "supportSemantic": "support_failed",
+      "buyerResponseSemantic": "response_failed",
+      "confirmationSemantic": "follow_through_failed",
+      "steps": [
+        "weak_trend",
+        "sellers_in_control",
+        "selling_pressure",
+        "wait_for_damage_to_settle"
+      ],
+      "stepDetails": [
+        {
+          "key": "sellers_in_control",
+          "evidenceFactIds": ["latest_red_candle", "price_accelerating_lower"],
+          "derivedFromSteps": ["sellers_in_control"],
+          "derivedFromConditions": ["large_red_run", "support_losing_hold"]
+        }
+      ],
+      "evidenceFactIds": ["latest_red_candle", "large_red_run", "price_accelerating_lower"]
+    }
+  },
+  "trustedMarketContext": {
+    "ticker": "BEN",
+    "timeframe": "1D",
+    "currentPrice": 24.6,
+    "ma20": 25.4,
+    "ma50": 23.8,
+    "ma200": 21.7,
+    "volume": 910000,
+    "latestCandleOHLC": {
+      "open": 25.3,
+      "high": 25.4,
+      "low": 24.45,
+      "close": 24.6
+    },
+    "currentAppDerivedTradePlan": {
+      "source": "scanner_estimate",
+      "scanType": "20MA",
+      "entry": null,
+      "stop": null,
+      "firstTarget": null,
+      "status": "missing",
+      "riskStatus": "plan_missing"
+    }
+  },
+  "interpreterResponse": {
+    "dominantEvent": "Trend damage with sellers in control",
+    "eventSequence": [
+      "price rolled over from recent highs",
+      "a meaningful red candle drove into and through the 20-day average",
+      "selling pressure is still the clearest recent event",
+      "buyers have not produced a convincing response yet"
+    ],
+    "traderInterpretation": "BEN is no longer showing a calm healthy reset. The recent red candle damaged the 20-day support area and sellers are still the dominant force until buyers prove otherwise.",
+    "currentRisk": "If sellers keep holding the chart below the 20-day average, the pullback can deepen before any proper repair starts.",
+    "nextSignal": "Watch for selling pressure to settle and for buyers to rebuild structure before treating the chart as a constructive pullback again."
+  },
+  "finalProse": {
+    "chartStory": "BEN rolled over from recent highs and the latest red pressure pushed into and through the 20-day average. That leaves sellers in control for now.",
+    "whyItMatters": "This is different from a healthy reset because the recent candles are showing damage first, not a calm move into support.",
+    "setupLocation": "Price is no longer just touching the 20-day average cleanly. The support area has been damaged and the chart needs repair before it can look healthier again.",
+    "learningPoint": "A support touch is not enough on its own. If sellers drive through that area, traders treat the pullback as damaged instead of assuming buyers will save it.",
+    "whatNext": "Watch for the selling to settle and for buyers to rebuild the area before trusting BEN as a pullback setup again."
+  },
+  "semanticExpectations": {
+    "dominantEventTokens": ["trend damage", "sellers", "control"],
+    "eventSequenceTokens": ["rolled over", "through the 20-day average", "selling pressure"],
+    "traderTokens": ["damaged", "sellers", "dominant force"],
+    "tutorTokens": ["sellers", "support", "repair", "watch"],
+    "forbiddenTokens": ["controlled pullback", "buyers are emerging", "entry ready", "macd", "rsi"]
+  }
+}

@@ -15,7 +15,7 @@ const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
 const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
 const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v3';
 const CHART_GURU_NARRATION_CONTRACT_VERSION = 'chart-guru-narration-contract-v1';
-const CANONICAL_NARRATION_RENDERER_FIELDS = ['version','phase','dominantEvent','eventSequence','structure','support','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'];
+const CANONICAL_NARRATION_RENDERER_FIELDS = ['version','phase','dominantEvent','eventSequence','structure','support','buyerResponse','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'];
 const INTERPRETATION_REQUIRED_FIELDS = [
   'dominantEvent',
   'dominantEventKey',
@@ -477,6 +477,8 @@ function normalizeDeterministicEventPacket(value = {}){
       distanceFromSupportPct:normaliseNumber(supportState.distanceFromSupportPct)
     } : null,
     buyerControlState:normaliseString(source.buyerControlState, ''),
+    buyerResponseState:normaliseString(source.buyerResponseState, ''),
+    followThroughState:normaliseString(source.followThroughState, ''),
     currentPhase:normaliseString(source.currentPhase, ''),
     stepDetails:Array.isArray(source.stepDetails)
       ? source.stepDetails.map(detail => {
@@ -496,8 +498,9 @@ const NARRATION_ENUMS = {
   phase:new Set(['at_support','responding_from_support','stalled_after_response','extended_from_support','away_from_support','support_failed','repairing_structure','current_location_unresolved']),
   structure:new Set(['intact','weakening','broken','unknown']),
   support:new Set(['testing','held','failed','not_tested','unknown']),
-  buyerControl:new Set(['none','emerging','confirmed','unknown']),
-  followThrough:new Set(['not_started','unconfirmed','stalled','confirmed','failed','unknown']),
+  buyerResponse:new Set(['none','present','confirmed','failed','unknown']),
+  buyerControl:new Set(['none','developing','emerging','confirmed','failed','unknown']),
+  followThrough:new Set(['not_started','developing','unconfirmed','stalled','confirmed','failed','unknown']),
   trend:new Set(['healthy','weak','broken','unknown']),
   volume:new Set(['constructive','weak','heavy','light','mixed','unknown']),
   market:new Set(['supportive','neutral','weak','unknown']),
@@ -539,7 +542,7 @@ function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
     packet.supportSemantic === 'support_failed' ? 'failed' : (packet.supportSemantic === 'support_present' ? 'testing' : 'unknown'));
   const buyerControl = normalizeNarrationEnum(packet.buyerControlState, NARRATION_ENUMS.buyerControl,
     packet.buyerResponseSemantic === 'response_present' ? 'emerging' : 'none');
-  const followThrough = normalizeNarrationEnum(packet.confirmationSemantic
+  const followThrough = normalizeNarrationEnum(packet.followThroughState || packet.confirmationSemantic
     .replace('follow_through_', ''), NARRATION_ENUMS.followThrough,
     packet.buyerResponseSemantic === 'response_present' ? 'unconfirmed' : 'unknown');
   const nextFromPhase = {
@@ -563,6 +566,8 @@ function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
       semantic:normalizeNarrationEnum(supportState.semantic, new Set(['active_testing_support','active_held_support','failed_support','off_support']),
         supportState.currentlyActive === true && support === 'held' ? 'active_held_support' : (supportState.currentlyActive === true && support === 'testing' ? 'active_testing_support' : (support === 'failed' ? 'failed_support' : 'unknown')))
     },
+    buyerResponse:normalizeNarrationEnum(packet.buyerResponseState, NARRATION_ENUMS.buyerResponse,
+      packet.buyerResponseSemantic === 'response_present' ? 'present' : (packet.buyerResponseSemantic === 'response_failed' ? 'failed' : (packet.supportSemantic === 'support_present' ? 'none' : 'unknown'))),
     buyerControl,
     followThrough,
     trend:narrationTrendState(extra.trend || extra.trendState) !== 'unknown' ? narrationTrendState(extra.trend || extra.trendState) : (structure === 'intact' ? 'healthy' : (structure === 'broken' ? 'broken' : 'unknown')),
@@ -593,7 +598,9 @@ function validateCanonicalNarrationContract(contract = {}){
   if(!['20ma','50ma','200ma','unknown'].includes(normaliseString(support.type, 'unknown'))) errors.push('support_type_unknown');
   if(!['active_testing_support','active_held_support','failed_support','off_support','unknown'].includes(normaliseString(support.semantic, 'unknown'))) errors.push('support_semantic_unknown');
   if(support.currentlyActive !== true && support.currentlyActive !== false && support.currentlyActive !== null && support.currentlyActive !== undefined) errors.push('support_currently_active_invalid');
-  if(value.phase === 'stalled_after_response' && (value.followThrough === 'confirmed' || value.buyerControl === 'confirmed')) errors.push('stalled_response_confirmed_conflict');
+  // A stalled rebound can follow an initially confirmed buyer response and control.
+  // Only a confirmed continuation conflicts with the current stalled follow-through.
+  if(value.phase === 'stalled_after_response' && value.followThrough === 'confirmed') errors.push('stalled_follow_through_confirmed_conflict');
   if(value.phase === 'support_failed' && (value.support && value.support.interaction === 'held' || value.followThrough === 'confirmed')) errors.push('support_failed_conflict');
   if(['extended_from_support','away_from_support'].includes(value.phase) && value.support && ['testing','held'].includes(value.support.interaction)) errors.push('away_phase_active_support_conflict');
   if(value.structure === 'broken' && (value.support && value.support.interaction === 'held' || value.buyerControl === 'confirmed')) errors.push('broken_structure_recovery_conflict');
@@ -614,10 +621,14 @@ function deterministicNarrationFallback(contract = {}){
   const phase = contract.phase || 'current_location_unresolved';
   const next = contract.nextRequiredEvent || 'clearer_support';
   const location = contract.support && contract.support.label ? ` near the ${contract.support.label}` : '';
+  const confirmedControlAwaitingFollowThrough = contract.buyerControl === 'confirmed' && ['not_started','developing'].includes(contract.followThrough);
+  const confirmedControlThenStalled = phase === 'stalled_after_response'
+    && contract.buyerControl === 'confirmed'
+    && contract.followThrough === 'stalled';
   const stories = {
     at_support:`Price is testing support${location}. Buyers have not proved that the level will hold yet.`,
     responding_from_support:`Price is responding from support${location}. Buyers are showing an early response, but it still needs backing up.`,
-    stalled_after_response:`The response from support has stalled. Buyers have not taken control, so the first lift needs follow-through.`,
+    stalled_after_response:`Buyers initially responded from support, but follow-through has stalled. The rebound needs a stronger continuation before the setup is actionable.`,
     extended_from_support:`Price has moved well away from the earlier support test. The next useful reference is a calmer pullback or reset.`,
     away_from_support:`Price is away from a clear support test. The chart needs a clearer location before the next decision point.`,
     support_failed:`Support has failed. The chart needs repair before any improvement can be trusted.`,
@@ -626,7 +637,11 @@ function deterministicNarrationFallback(contract = {}){
   };
   const nextText = {support_hold:'Watch for support to hold.',follow_through:'Watch for buyers to follow through with another firm close.',repair:'Watch for price to repair the damaged structure.',pullback_or_reset:'Watch for a calmer pullback or reset.',clearer_support:'Watch for price to reach a clearer support area.',none:'No additional event is required yet.',unknown:'Watch for a clearer next chart event.'};
   return {
-    chartStory:stories[phase] || stories.current_location_unresolved,
+    chartStory:confirmedControlAwaitingFollowThrough
+      ? `Buyers have responded from support${location} and taken initial control, but the move has not yet produced enough follow-through to make the setup actionable.`
+      : (confirmedControlThenStalled
+        ? `Buyers initially responded from support${location} and took control, but follow-through has stalled. The move needs renewed follow-through before the setup is actionable.`
+        : (stories[phase] || stories.current_location_unresolved)),
     whyItMatters: phase === 'support_failed' || phase === 'repairing_structure' ? 'This matters because damaged structure makes the next move harder to trust.' : 'This matters because the phase shows whether buyers have actually earned control.',
     setupLocation: ['extended_from_support','away_from_support'].includes(phase) ? 'Price is not at an active support test now.' : (phase === 'support_failed' ? 'The earlier support area has failed, so location must be rebuilt.' : `The relevant location is the current support context${location}.`),
     learningPoint: phase === 'stalled_after_response' ? 'An early response is not the same as follow-through.' : 'The location matters, but the next price response is what confirms the story.',
@@ -701,11 +716,14 @@ function validateNarrationProseAgainstContract(response = {}, contract = {}){
   } else if(!['extended_from_support','away_from_support'].includes(contract.phase) && /\b(?:away from|extended from|extension)\s+(?:the\s+)?support\b/i.test(text)) {
     errors.push('unsupported_extension_language');
   }
-  if(contract.buyerControl !== 'confirmed' && /\bbuyers?\s+(?:are|have)\s+(?:in\s+)?control\b|\bcontrol has returned\b/.test(text)) errors.push('unsupported_buyer_control_language');
+  if(contract.buyerControl !== 'confirmed' && /\bbuyers?\s+(?:are|have)\s+(?:in\s+)?control\b|\bcontrol has returned\b/.test(text)) errors.push(contract.buyerControl === 'developing' ? 'developing_control_described_as_confirmed' : 'unsupported_buyer_control_language');
+  if(contract.buyerControl === 'confirmed' && /buyers? still need to prove control|buyer control is not convincing|buyers? have not taken control|no buyer control/i.test(text)) errors.push('confirmed_buyer_control_denied');
+  if(contract.followThrough === 'confirmed' && /follow-through (?:still )?(?:needs|not)|needs (?:more |stronger )?follow-through/i.test(text)) errors.push('confirmed_follow_through_denied');
+  if(contract.followThrough === 'stalled' && /follow-through (?:is )?(?:confirmed|decisive)|rebound (?:is )?confirmed/i.test(text)) errors.push('stalled_follow_through_described_as_confirmed');
   if(contract.structure === 'broken' && /support (is |has )?holding|held support/.test(text)) errors.push('broken_structure_support_holding_language');
   if(contract.followThrough === 'stalled' && /improving rebound|rebound is improving/.test(text)) errors.push('stalled_follow_through_improvement_language');
   if(contract.phase === 'stalled_after_response' && /new pullback|reset|pull back again/.test(prose.whatNext.toLowerCase())) errors.push('stalled_response_reset_instruction');
-  if(contract.phase === 'responding_from_support' && /\b(?:buyers? (?:have )?(?:not|haven't|did not|didn't) respond(?:ed)?|no buyer response)\b/i.test(text)) errors.push('unsupported_buyer_response_denial');
+  if(contract.phase === 'responding_from_support' && /\b(?:buyers? (?:have )?(?:not|haven't|did not|didn't) respond(?:ed)?|no buyer response)\b/i.test(text)) errors.push('buyer_response_denied');
   const nextPatterns = {follow_through:/follow-through|follow through|another firm close/,repair:/repair|rebuild/,pullback_or_reset:/pullback|reset/,clearer_support:/clearer support|support area/,support_hold:/support.*hold|hold.*support/};
   if(nextPatterns[contract.nextRequiredEvent] && !nextPatterns[contract.nextRequiredEvent].test(prose.whatNext.toLowerCase())) errors.push('next_required_event_missing');
   return {ok:errors.length === 0, errors};
@@ -1442,6 +1460,16 @@ function normalizeRecentStoryStep(step = ''){
     .slice(0, 80);
 }
 
+function legacyBuyerResponseSemanticFromCanonical(value = ''){
+  const state = normaliseString(value, '').trim().toLowerCase();
+  return ({none:'response_absent',present:'response_present',confirmed:'response_present',failed:'response_failed',unknown:'response_unknown'})[state] || 'response_unknown';
+}
+
+function legacyFollowThroughSemanticFromCanonical(value = ''){
+  const state = normaliseString(value, '').trim().toLowerCase();
+  return ({not_started:'follow_through_not_started',developing:'follow_through_developing',unconfirmed:'follow_through_unconfirmed',confirmed:'follow_through_confirmed',stalled:'follow_through_stalled',failed:'follow_through_failed',unknown:'follow_through_unknown'})[state] || 'follow_through_unknown';
+}
+
 function buildTwoStepChartCoach(finalResponse = {}, canonicalNarrationContract = {}, structuredFacts = {}){
   const prose = normalizeFlatStringFields(finalResponse, FINAL_PROSE_REQUIRED_FIELDS);
   const facts = safeObject(structuredFacts);
@@ -1488,8 +1516,11 @@ function buildTwoStepChartCoach(finalResponse = {}, canonicalNarrationContract =
       trendLabel:String(contract.dominantEvent || eventPacket.recentStoryTrendLabel || '').trim(),
       supportLabel:String(prose.setupLocation || eventPacket.recentStorySupportLabel || '').trim(),
       supportSemantic:String(safeObject(contract.support).semantic || eventPacket.supportSemantic || '').trim(),
-      buyerResponseSemantic:String(contract.buyerControl || '').trim(),
-      confirmationSemantic:String(contract.followThrough || '').trim(),
+      buyerResponseSemantic:legacyBuyerResponseSemanticFromCanonical(contract.buyerResponse),
+      confirmationSemantic:legacyFollowThroughSemanticFromCanonical(contract.followThrough),
+      buyerResponseState:String(contract.buyerResponse || '').trim(),
+      buyerControlState:String(contract.buyerControl || '').trim(),
+      followThroughState:String(contract.followThrough || '').trim(),
       steps:eventSequence,
       stepDetails:storyStepDetails,
       evidenceFactIds:evidenceFactIds.slice()
@@ -1522,8 +1553,11 @@ function buildTwoStepChartCoach(finalResponse = {}, canonicalNarrationContract =
         toneMode:String(eventPacket.recentStoryToneMode || 'openai_two_step').trim(),
         confidenceMode:String(eventPacket.recentStoryConfidenceMode || 'canonical_narration_contract').trim(),
         supportSemantic:String(safeObject(contract.support).semantic || eventPacket.supportSemantic || '').trim(),
-        buyerResponseSemantic:String(contract.buyerControl || '').trim(),
-        confirmationSemantic:String(contract.followThrough || '').trim(),
+        buyerResponseSemantic:legacyBuyerResponseSemanticFromCanonical(contract.buyerResponse),
+        confirmationSemantic:legacyFollowThroughSemanticFromCanonical(contract.followThrough),
+        buyerResponseState:String(contract.buyerResponse || '').trim(),
+        buyerControlState:String(contract.buyerControl || '').trim(),
+        followThroughState:String(contract.followThrough || '').trim(),
         steps:eventSequence.slice(),
         stepDetails:storyStepDetails.map(detail => ({
           key:detail.key,

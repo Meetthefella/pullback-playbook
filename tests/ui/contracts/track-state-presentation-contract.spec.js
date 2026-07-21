@@ -1579,7 +1579,7 @@ test('terminal structural damage retains historical response without presenting 
 
   expect(result.storyWithAnalysis.buyerResponse.semantic).toBe('response_present');
   expect(result.storyWithAnalysis.storyEvents).toContain('buyers_responded');
-  expect(result.storyWithAnalysis.buyerControl.state).toBe('none');
+  expect(result.storyWithAnalysis.buyerControl.state).toBe('failed');
   expect(result.storyWithAnalysis.confirmation.semantic).toBe('follow_through_failed');
   expect(['support_failed', 'repairing_structure']).toContain(result.storyWithAnalysis.currentPhase);
   expect(result.reviewProjection.currentPhase).toBe(result.storyWithAnalysis.currentPhase);

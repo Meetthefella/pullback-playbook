@@ -4435,6 +4435,7 @@ function runSimplifiedPipelineAssertions(){
   };
   vm.createContext(scanSemanticSandbox);
   [
+    'canonicalBuyerStatesFromStoryContext',
     'canonicalNonChartBlockerSummary',
     'buildDecisionSemantics',
     'sharedDecisionSummaryFromSemantics'
@@ -10301,8 +10302,10 @@ function runReviewPricedButNotReadyAssertions(){
     'canonicalReviewTechnicalStructureLabelFromStoryContext',
     'canonicalReviewTechnicalPullbackLabelFromStoryContext',
     'canonicalReviewTechnicalBuyerLabelFromStoryContext',
+    'canonicalBuyerStatesFromStoryContext',
     'canonicalReviewTechnicalContextLineFromStoryContext',
     'canonicalDecisionSummaryFromStoryContext',
+    'canonicalBuyerStatesFromStoryContext',
     'canonicalNonChartBlockerSummary',
     'buildDecisionSemantics',
     'sharedDecisionSummaryFromSemantics',
@@ -10966,7 +10969,7 @@ function runReviewPricedButNotReadyAssertions(){
       buyerControl:{state:'emerging'}
     }
   });
-  if(!/support is holding|buyers still need to prove control/i.test(String(lowScoreDecisionSummary || '')) || /setup quality has slipped below useful watchlist quality/i.test(String(lowScoreDecisionSummary || ''))){
+  if(!/support is holding|buyer control still needs confirmation/i.test(String(lowScoreDecisionSummary || '')) || /setup quality has slipped below useful watchlist quality/i.test(String(lowScoreDecisionSummary || ''))){
     throw new Error('buildDecisionSummary must prefer the canonical chart-story explanation when low-score is not an independent blocker.');
   }
 

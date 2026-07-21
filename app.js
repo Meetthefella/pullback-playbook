@@ -24623,11 +24623,34 @@ function canonicalReviewTechnicalBuyerLabelFromStoryContext(storyContext = {}){
   return 'Buyer control not confirmed';
 }
 
+function canonicalBuyerStatesFromStoryContext(storyContext = {}){
+  const response = String(storyContext.buyerResponse && (storyContext.buyerResponse.state || storyContext.buyerResponse.semantic) || '').trim().toLowerCase();
+  const control = String(storyContext.buyerControl && storyContext.buyerControl.state || '').trim().toLowerCase();
+  const follow = String(storyContext.followThrough && storyContext.followThrough.state || storyContext.confirmation && (storyContext.confirmation.state || storyContext.confirmation.semantic) || '').trim().toLowerCase();
+  const phase = String(storyContext.currentPhase || '').trim().toLowerCase();
+  const normalizeResponse = value => ({response_present:'present',response_absent:'none',absent:'none',response_failed:'failed',present:'present',confirmed:'confirmed',failed:'failed',none:'none'})[value] || 'unknown';
+  const normalizeControl = value => ({emerging:'developing',developing:'developing',confirmed:'confirmed',failed:'failed',none:'none'})[value] || 'unknown';
+  const normalizeFollow = value => ({follow_through_unconfirmed:'not_started',unconfirmed:'not_started',not_started:'not_started',developing:'developing',follow_through_confirmed:'confirmed',confirmed:'confirmed',stalled:'stalled',follow_through_failed:'failed',failed:'failed'})[value] || 'unknown';
+  let buyerResponse = normalizeResponse(response);
+  let buyerControl = normalizeControl(control);
+  let followThrough = normalizeFollow(follow);
+  if(buyerResponse === 'unknown') buyerResponse = phase === 'support_failed' ? 'failed' : (['responding_from_support','stalled_after_response'].includes(phase) ? 'present' : (phase === 'at_support' ? 'none' : 'unknown'));
+  if(buyerControl === 'unknown') buyerControl = phase === 'support_failed' ? 'failed' : (buyerResponse === 'confirmed' ? 'confirmed' : (buyerResponse === 'present' ? 'developing' : (buyerResponse === 'none' ? 'none' : 'unknown')));
+  if(followThrough === 'unknown') followThrough = phase === 'support_failed' ? 'failed' : (phase === 'stalled_after_response' ? 'stalled' : (buyerControl === 'confirmed' ? 'developing' : (buyerResponse === 'present' ? 'not_started' : 'unknown')));
+  return {buyerResponse, buyerControl, followThrough};
+}
+
 function canonicalReviewTechnicalContextLineFromStoryContext(storyContext = {}, record = {}){
+  const buyerStates = canonicalBuyerStatesFromStoryContext(storyContext);
+  const responseLabel = ({none:'No buyer response',present:'Buyers responding',confirmed:'Buyer response confirmed',failed:'Buyer response failed',unknown:'Buyer response unknown'})[buyerStates.buyerResponse];
+  const controlLabel = ({none:'No buyer control',developing:'Buyer control developing',confirmed:'Buyer control confirmed',failed:'Buyer control failed',unknown:'Buyer control unknown'})[buyerStates.buyerControl];
+  const followLabel = ({not_started:'Follow-through not started',developing:'Follow-through developing',confirmed:'Follow-through confirmed',stalled:'Follow-through stalled',failed:'Follow-through failed',unknown:'Follow-through unknown'})[buyerStates.followThrough];
   return [
     canonicalReviewTechnicalStructureLabelFromStoryContext(storyContext),
     canonicalReviewTechnicalPullbackLabelFromStoryContext(storyContext),
-    canonicalReviewTechnicalBuyerLabelFromStoryContext(storyContext),
+    responseLabel,
+    controlLabel,
+    followLabel,
     reviewTechnicalVolumeLabel(storyContext.volume && storyContext.volume.state || ''),
     reviewTechnicalMarketLabel(record)
   ].join(' | ');
@@ -24640,26 +24663,28 @@ function canonicalDecisionSummaryFromStoryContext({finalVerdict, storyContext, f
   const currentPhase = String(safeStoryContext.currentPhase || '').trim();
   const dominantStory = String(safeStoryContext.dominantStory || '').trim();
   const buyerControlState = String(safeStoryContext.buyerControl && safeStoryContext.buyerControl.state || '').trim().toLowerCase();
+  const buyerStates = canonicalBuyerStatesFromStoryContext(safeStoryContext);
   if(verdict === 'entry') return 'Entry - plan is valid and risk defined.';
   if(verdict === 'avoid'){
-    if(currentPhase === 'support_failed' || dominantStory === 'failed_support_test' || dominantStory === 'structure_breaking_down'){
-      return 'Avoid - support failed and the chart needs repair.';
-    }
+    if(currentPhase === 'support_failed' || dominantStory === 'failed_support_test' || dominantStory === 'structure_breaking_down') return 'Avoid - support failed and the chart needs repair.';
     return 'Avoid - too weak or broken. Leave it alone.';
   }
   if(verdict === 'near_entry'){
     if(currentPhase === 'extended_from_support') return 'Near Entry - rebound is constructive, but price is already away from support. Wait for the trigger or a reset.';
     if(currentPhase === 'away_from_support') return 'Near Entry - trend remains constructive, but price is currently away from support. Wait for a reset.';
     if(currentPhase === 'stalled_after_response') return 'Near Entry - buyers responded, but follow-through still needs to improve.';
-    if(currentPhase === 'responding_from_support' || currentPhase === 'at_support') return 'Near Entry - support is holding, but the trigger is still missing.';
-    if(buyerControlState === 'confirmed') return 'Near Entry - buyers are in control, but the entry trigger is still missing.';
-    return 'Near Entry - almost ready. Watch for confirmation.';
+    return buyerControlState === 'confirmed'
+      ? 'Near Entry - buyers are in control, but the entry trigger is still missing.'
+      : 'Near Entry - support is holding, but the trigger is still missing.';
   }
   if(currentPhase === 'support_failed') return 'Watch - support failed. Let the chart repair.';
   if(currentPhase === 'extended_from_support') return 'Watch - constructive rebound, but price is already away from support.';
   if(currentPhase === 'away_from_support') return 'Watch - trend remains constructive, but price is currently away from support.';
   if(currentPhase === 'stalled_after_response') return 'Watch - buyers responded, but follow-through stalled.';
-  if(currentPhase === 'responding_from_support') return 'Watch - support is holding, but buyers still need to prove control.';
+  if(buyerStates.buyerResponse === 'none') return 'Watch - support is being tested. Wait for a real buyer response.';
+  if(buyerStates.buyerControl === 'developing') return 'Watch - buyers have responded, but buyer control still needs confirmation.';
+  if(buyerStates.buyerControl === 'confirmed' && ['not_started','developing'].includes(buyerStates.followThrough)) return 'Watch - support is holding and buyers have responded, but follow-through still needs confirmation.';
+  if(currentPhase === 'responding_from_support') return 'Watch - support is holding. Wait for the next independent confirmation.';
   if(currentPhase === 'at_support') return 'Watch - support is being tested. Wait for a real buyer response.';
   if(currentPhase === 'current_location_unresolved') return 'Watch - support context is unresolved with current chart data.';
   if(dominantStory === 'healthy_trend') return 'Watch - strong trend, but no usable pullback setup yet.';
@@ -25021,8 +25046,35 @@ function sharedDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''
   const currentPhase = String(semantics.currentPhase || '').trim().toLowerCase();
   const dominantStory = String(semantics.dominantStory || '').trim().toLowerCase();
   const buyerControlState = String(semantics.storyContext && semantics.storyContext.buyerControl && semantics.storyContext.buyerControl.state || '').trim().toLowerCase();
+  const buyerStates = canonicalBuyerStatesFromStoryContext(semantics.storyContext || {});
   const blockerSummary = String(semantics.blockerSummary || '').trim();
-  if(blockerSummary) return blockerSummary;
+  // Verdict authority comes first. Buyer-state compatibility only rewrites Watch copy.
+  if(verdict === 'entry') return 'Entry - plan is valid and risk defined.';
+  if(verdict === 'avoid'){
+    if(currentPhase === 'support_failed' || dominantStory === 'failed_support_test' || dominantStory === 'structure_breaking_down'){
+      return 'Avoid - support failed and the chart needs repair.';
+    }
+    return 'Avoid - too weak or broken. Leave it alone.';
+  }
+  if(verdict === 'near_entry'){
+    if(currentPhase === 'extended_from_support') return 'Near Entry - rebound is constructive, but price is already away from support. Wait for the trigger or a reset.';
+    if(currentPhase === 'away_from_support') return 'Near Entry - trend remains constructive, but price is currently away from support. Wait for a reset.';
+    if(currentPhase === 'stalled_after_response') return 'Near Entry - buyers responded, but follow-through still needs to improve.';
+    return buyerControlState === 'confirmed'
+      ? 'Near Entry - buyers are in control, but the entry trigger is still missing.'
+      : 'Near Entry - support is holding, but the trigger is still missing.';
+  }
+  // Persisted blocker copy is presentation data, not buyer-state authority. When
+  // initial buyer control is confirmed, the next incomplete canonical event owns
+  // the summary so old “prove control” wording cannot survive rehydration.
+  if(buyerStates.buyerControl === 'confirmed'){
+    if(['not_started','developing'].includes(buyerStates.followThrough)) return 'Watch - buyers have taken control at support, but follow-through is still developing.';
+    if(buyerStates.followThrough === 'stalled') return 'Watch - buyers initially took control, but follow-through has stalled.';
+    if(buyerStates.followThrough === 'failed') return 'Watch - buyer control failed after follow-through broke down.';
+  }
+  const contradictsConfirmedBuyerControl = buyerStates.buyerControl === 'confirmed'
+    && /buyers? still need to prove control|buyer control is not convincing|buyers? have not taken control|stronger buyer control is needed|no convincing buyer control|buyers? lack control/i.test(blockerSummary);
+  if(blockerSummary && !contradictsConfirmedBuyerControl) return blockerSummary;
   if(verdict === 'entry') return 'Entry - plan is valid and risk defined.';
   if(verdict === 'avoid'){
     if(currentPhase === 'support_failed' || dominantStory === 'failed_support_test' || dominantStory === 'structure_breaking_down'){
@@ -25042,7 +25094,10 @@ function sharedDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''
   if(currentPhase === 'extended_from_support') return 'Watch - constructive rebound, but price is already away from support.';
   if(currentPhase === 'away_from_support') return 'Watch - trend remains constructive, but price is currently away from support.';
   if(currentPhase === 'stalled_after_response') return 'Watch - buyers responded, but follow-through stalled.';
-  if(currentPhase === 'responding_from_support') return 'Watch - support is holding, but buyers still need to prove control.';
+  if(buyerStates.buyerResponse === 'none') return 'Watch - support is being tested. Wait for a real buyer response.';
+  if(buyerStates.buyerControl === 'developing') return 'Watch - buyers have responded, but buyer control is still developing.';
+  if(buyerStates.buyerControl === 'confirmed' && ['not_started','developing'].includes(buyerStates.followThrough)) return 'Watch - support is holding and buyers have taken control, but follow-through is still developing.';
+  if(currentPhase === 'responding_from_support') return 'Watch - support is holding. Wait for the next independent confirmation.';
   if(currentPhase === 'at_support') return 'Watch - support is being tested. Wait for a real buyer response.';
   if(currentPhase === 'current_location_unresolved') return 'Watch - support context is unresolved with current chart data.';
   if(dominantStory === 'healthy_trend') return 'Watch - strong trend, but no usable pullback setup yet.';
@@ -27513,16 +27568,10 @@ function chartGuruExplicitResolverSupportContext(record = {}, globalVerdict = {}
 }
 
 function chartGuruValidatedCanonicalPhase(phase = '', {supportInteraction = '', supportCurrentlyActive = false, buyerResponsePresent = false, buyerControlState = '', reboundStalled = false} = {}){
-  const candidate = String(phase || '').trim().toLowerCase();
-  if(candidate === 'support_failed') return supportInteraction === 'failed' ? candidate : '';
-  if(['at_support', 'responding_from_support'].includes(candidate)){
-    if(!supportCurrentlyActive || supportInteraction === 'failed') return '';
-    return candidate === 'responding_from_support' && !(buyerResponsePresent || buyerControlState === 'confirmed') ? '' : candidate;
-  }
-  if(['away_from_support', 'extended_from_support'].includes(candidate)) return supportCurrentlyActive ? '' : candidate;
-  if(candidate === 'stalled_after_response') return reboundStalled ? candidate : '';
-  if(candidate === 'repairing_structure') return supportInteraction === 'failed' ? candidate : '';
-  return '';
+  const policy = globalThis.ChartGuruPhasePolicy;
+  return policy && typeof policy.validatedCanonicalPhase === 'function'
+    ? policy.validatedCanonicalPhase(phase, {supportInteraction, supportCurrentlyActive, buyerResponsePresent, buyerControlState, reboundStalled})
+    : '';
 }
 
 function buildCanonicalChartStoryContext(context = {}){
@@ -27543,7 +27592,6 @@ function buildCanonicalChartStoryContext(context = {}){
   const terminalCurrentFailure = context.structureBroken === true || context.failedBounce === true || supportTestState === 'failed';
   const confirmedContinuationEvidence = !!(
     context.followThroughConfirmed === true
-    || buyerControlState === 'confirmed'
     || (
       recentSupportResponsePresent
       && supportDistanceMeasured
@@ -27626,7 +27674,7 @@ function buildCanonicalChartStoryContext(context = {}){
     )
   );
   const buyerControlSemantic = terminalCurrentFailure
-    ? 'none'
+    ? 'failed'
     : (buyerControlState === 'confirmed'
     ? 'confirmed'
     : (confirmedContinuationEvidence ? 'confirmed' : (buyerResponsePresent ? 'emerging' : 'none')));
@@ -27675,10 +27723,12 @@ function buildCanonicalChartStoryContext(context = {}){
   })();
   const confirmationSemantic = (() => {
     if(terminalCurrentFailure) return 'follow_through_failed';
+    if(reboundStalled) return 'follow_through_stalled';
     if(confirmedContinuationEvidence) return 'follow_through_confirmed';
     if(context.failedBounce === true) return 'follow_through_failed';
     if(supportInteraction === 'failed' && !buyerResponsePresent) return 'follow_through_failed';
-    if(buyerResponsePresent) return 'follow_through_unconfirmed';
+    if(buyerControlSemantic === 'confirmed') return 'follow_through_developing';
+    if(buyerResponsePresent) return 'follow_through_not_started';
     return 'follow_through_unknown';
   })();
   const deterministicCurrentPhase = context.failedBounce === true || supportInteraction === 'failed'
@@ -27776,12 +27826,21 @@ function buildCanonicalChartStoryContext(context = {}){
     buyerControl:{
       state:buyerControlSemantic
     },
+    followThrough:{
+      state:confirmationSemantic === 'follow_through_confirmed'
+        ? 'confirmed'
+        : (confirmationSemantic === 'follow_through_failed'
+          ? 'failed'
+          : (confirmationSemantic === 'follow_through_developing'
+            ? 'developing'
+            : (confirmationSemantic === 'follow_through_not_started' ? 'not_started' : (reboundStalled ? 'stalled' : 'unknown'))))
+    },
     confirmation:{
       state:confirmationSemantic === 'follow_through_confirmed'
         ? 'confirmed'
         : (confirmationSemantic === 'follow_through_failed'
           ? 'failed'
-          : (confirmationSemantic === 'follow_through_unconfirmed' ? 'unconfirmed' : 'unknown')),
+          : (confirmationSemantic === 'follow_through_developing' ? 'developing' : (confirmationSemantic === 'follow_through_not_started' ? 'not_started' : 'unknown'))),
       semantic:confirmationSemantic
     },
     sellerPressure:{
@@ -37510,6 +37569,9 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
   const authoritativeBuyerControl = storyContext.buyerControl && typeof storyContext.buyerControl === 'object'
     ? storyContext.buyerControl
     : (narrativeContext.buyerControl && typeof narrativeContext.buyerControl === 'object' ? narrativeContext.buyerControl : {});
+  const persistedBuyerResponseState = String(authoritativeBuyerResponse && authoritativeBuyerResponse.state || recentStory.buyerResponseState || '').trim();
+  const persistedBuyerControlState = String(authoritativeBuyerControl && authoritativeBuyerControl.state || recentStory.buyerControlState || '').trim();
+  const persistedFollowThroughState = String(storyContext && storyContext.followThrough && storyContext.followThrough.state || narrativeContext.followThrough && narrativeContext.followThrough.state || recentStory.followThroughState || '').trim();
   const authoritativePhase = String(storyContext.currentPhase || narrativeContext.currentState && narrativeContext.currentState.phase || '').trim();
   const narrativeSupportState = authoritativeSupportState
     ? authoritativeSupportState
@@ -37585,7 +37647,9 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
     confirmationSemantic:semanticEnvelope.confirmationSemantic,
     storyEvents,
     supportState,
-    buyerControlState:String(authoritativeBuyerControl && authoritativeBuyerControl.state || '').trim(),
+    buyerControlState:persistedBuyerControlState,
+    buyerResponseState:persistedBuyerResponseState,
+    followThroughState:persistedFollowThroughState,
     currentPhase:authoritativePhase,
     stepDetails:Array.isArray(recentStory.stepDetails)
       ? recentStory.stepDetails.map(detail => ({
@@ -37637,8 +37701,9 @@ function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
         return 'unknown';
       })())
     },
-    buyerControl:allowed(packet.buyerControlState, ['none','emerging','confirmed'], packet.buyerResponseSemantic === 'response_present' ? 'emerging' : 'none'),
-    followThrough:allowed(String(packet.confirmationSemantic || '').replace('follow_through_', ''), ['not_started','unconfirmed','stalled','confirmed','failed']),
+    buyerResponse:allowed(packet.buyerResponseState, ['none','present','confirmed','failed'], packet.buyerResponseSemantic === 'response_present' ? 'present' : (packet.buyerResponseSemantic === 'response_failed' ? 'failed' : 'unknown')),
+    buyerControl:allowed(packet.buyerControlState, ['none','developing','emerging','confirmed','failed'], packet.buyerResponseSemantic === 'response_present' ? 'developing' : 'none'),
+    followThrough:allowed(packet.followThroughState || String(packet.confirmationSemantic || '').replace('follow_through_', ''), ['not_started','developing','unconfirmed','stalled','confirmed','failed']),
     trend:narrationTrendState(context.trendState) !== 'unknown' ? narrationTrendState(context.trendState) : (structure === 'intact' ? 'healthy' : (structure === 'broken' ? 'broken' : 'unknown')),
     volume:narrationVolumeState(context.volumeState),
     market:/below/i.test(String(context.marketStatus || '')) ? 'weak' : 'supportive',

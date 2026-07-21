@@ -150,6 +150,8 @@ function toPlainJson(value){
 function buildEventPacketSandbox(){
   const sandbox = {console};
   sandbox.globalThis = sandbox;
+  const phasePolicySource = fs.readFileSync(path.join(root, 'js', 'chart-guru-phase-policy.js'), 'utf8');
+  vm.runInNewContext(phasePolicySource, sandbox, {filename:'js/chart-guru-phase-policy.js'});
   const snippets = [
     extractConstAssignment('CHART_GURU_EVENT_LABELS'),
     `function numericOrNull(value){
@@ -169,6 +171,7 @@ function buildEventPacketSandbox(){
     extractFunction('chartGuruSupportDistancePct'),
     extractFunction('chartGuruControlledPullbackPresent'),
     extractFunction('chartGuruVolumeParticipationLabel'),
+    extractFunction('chartGuruValidatedCanonicalPhase'),
     extractFunction('buildCanonicalChartStoryContext'),
     extractFunction('chartGuruSemanticEnvelopeFromNarrativeContext'),
     extractFunction('chartGuruSemanticEnvelopeCompatibilityForStoryKey'),
@@ -302,6 +305,33 @@ function verifyBuyerResponsePresentStates(){
   });
 }
 
+function verifyStalledFollowThroughSerialization(){
+  const sandbox = buildEventPacketSandbox();
+  const storyContext = sandbox.buildCanonicalChartStoryContext({
+    supportContextRecognized:true,
+    supportTestState:'held',
+    supportContext:'20ma',
+    structureIntact:true,
+    recentlyLeftSupportZone:true,
+    buyerControlState:'confirmed',
+    bounceAttempt:true,
+    latestDirection:'flat'
+  });
+  assert.strictEqual(storyContext.currentPhase, 'stalled_after_response', 'a stalled rebound must retain its stalled phase');
+  assert.strictEqual(storyContext.followThrough.state, 'stalled', 'a stalled rebound must serialize follow-through as stalled before developing/not-started fallbacks');
+  assert.strictEqual(storyContext.confirmation.semantic, 'follow_through_stalled', 'legacy confirmation semantic must preserve the stalled state');
+  const packet = sandbox.buildDeterministicEventPacketFromChartCoach({
+    primaryStory:{key:'rebound_stalled', label:'Rebound stalled', text:'The rebound stalled.', evidenceFactIds:[]},
+    recentStory:{steps:['buyers_responded','rebound_stalled'], evidenceFactIds:[]},
+    storyContext
+  });
+  assert.strictEqual(packet.followThroughState, 'stalled', 'persisted deterministic packet must retain stalled follow-through');
+  const contract = analyseSetupModule.__test.buildCanonicalNarrationContract(packet, {verdict:'watch', nextRequiredEvent:'follow_through'});
+  assert.strictEqual(contract.phase, 'stalled_after_response', 'Chart Guru narration contract must retain the stalled phase');
+  assert.strictEqual(contract.followThrough, 'stalled', 'Chart Guru narration contract must retain persisted stalled follow-through');
+  assert.ok(/follow-through has stalled/i.test(analyseSetupModule.__test.deterministicNarrationFallback(contract).chartStory), 'deterministic fallback must describe stalled follow-through, never developing follow-through');
+}
+
 function verifyNetlifyNormalizationAndTutorBoundary(){
   const hooks = analyseSetupModule.__test;
   assert.ok(hooks, 'analyse-setup.js must expose a __test surface for contract assertions.');
@@ -339,9 +369,11 @@ function verifyNetlifyNormalizationAndTutorBoundary(){
     assert.strictEqual(compatInterpretation.nextSignal, fixture.interpreterResponse.nextSignal, `${fixture.id}: trader interpretation should normalize nextSignal.`);
     assert.strictEqual(hooks.validateTraderInterpretationResponse(compatInterpretation).ok, true, `${fixture.id}: normalized trader interpretation should satisfy the Stage 2 contract.`);
 
-    const tutorPrompt = hooks.buildProductionChartGuruFinalPrompt(compatInterpretation, 'Tutor prompt preface');
-    assert.ok(tutorPrompt.includes('Trader interpretation to translate into Chart Guru teaching prose:'), `${fixture.id}: Stage 3 prompt should explicitly consume trader interpretation.`);
-    assert.ok(tutorPrompt.includes(compatInterpretation.traderInterpretation), `${fixture.id}: Stage 3 prompt should include normalized trader interpretation.`);
+    const narrationContract = hooks.buildCanonicalNarrationContract(sourcePacket, compatInterpretation);
+    assert.strictEqual(hooks.validateCanonicalNarrationContract(narrationContract).ok, true, `${fixture.id}: the Stage 3 narration contract should be valid.`);
+    const tutorPrompt = hooks.buildProductionChartGuruFinalPrompt(narrationContract, 'Tutor prompt preface');
+    assert.ok(tutorPrompt.includes('Canonical narration contract to render into Chart Guru teaching prose:'), `${fixture.id}: Stage 3 prompt should explicitly consume canonical narration authority.`);
+    assert.ok(tutorPrompt.includes(`"phase": "${narrationContract.phase}"`), `${fixture.id}: Stage 3 prompt should include the canonical phase.`);
     assert.ok(!tutorPrompt.includes('trustedMarketContext'), `${fixture.id}: Stage 3 prompt must not include raw trusted market facts.`);
     assert.ok(!tutorPrompt.includes('deterministicEventPacket'), `${fixture.id}: Stage 3 prompt must not include raw deterministic packet payload.`);
     assert.ok(!tutorPrompt.includes('visible_latest_price'), `${fixture.id}: Stage 3 prompt must not include screenshot-derived evidence fields.`);
@@ -350,7 +382,7 @@ function verifyNetlifyNormalizationAndTutorBoundary(){
     assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('buyers are trying to stabilise the chart'), `${fixture.id}: Stage 3 instructions must anchor preferred stabilisation language.`);
     assert.ok(hooks.buildProductionChartGuruFinalInstructions().includes('build a base'), `${fixture.id}: Stage 3 instructions must anchor preferred rebuilding language.`);
 
-    const chartCoach = hooks.buildTwoStepChartCoach(fixture.finalProse, compatInterpretation, {
+    const chartCoach = hooks.buildTwoStepChartCoach(fixture.finalProse, narrationContract, {
       deterministicEventPacket:sourcePacket
     });
     assert.strictEqual(chartCoach.primaryStory.key, sourcePacket.primaryStoryKey, `${fixture.id}: final chartCoach must preserve deterministic primary story authority.`);
@@ -358,21 +390,20 @@ function verifyNetlifyNormalizationAndTutorBoundary(){
     assert.notStrictEqual(chartCoach.primaryStory.key, 'openai_two_step_primary_story', `${fixture.id}: chartCoach must not create an OpenAI-only primary story contract when deterministic authority exists.`);
     assert.notStrictEqual(chartCoach.recentStory.key, 'openai_two_step_narrative', `${fixture.id}: chartCoach must not replace deterministic recent story key with an OpenAI-only story key.`);
     assert.deepStrictEqual(toPlainJson(chartCoach.recentStory.steps), toPlainJson(sourcePacket.eventSequence), `${fixture.id}: chartCoach must preserve the deterministic event sequence.`);
-    assert.strictEqual(chartCoach.recentStory.supportSemantic, compatInterpretation.supportSemantic, `${fixture.id}: chartCoach debug should preserve supportSemantic.`);
-    assert.strictEqual(chartCoach.recentStory.buyerResponseSemantic, compatInterpretation.buyerResponseSemantic, `${fixture.id}: chartCoach debug should preserve buyerResponseSemantic.`);
-    assert.strictEqual(chartCoach.recentStory.confirmationSemantic, compatInterpretation.confirmationSemantic, `${fixture.id}: chartCoach debug should preserve confirmationSemantic.`);
+    assert.strictEqual(chartCoach.recentStory.supportSemantic, narrationContract.support.semantic, `${fixture.id}: chartCoach debug should preserve canonical support semantics.`);
+    assert.strictEqual(chartCoach.recentStory.buyerResponseSemantic, narrationContract.buyerResponse === 'failed' ? 'response_failed' : (['present','confirmed'].includes(narrationContract.buyerResponse) ? 'response_present' : (narrationContract.buyerResponse === 'none' ? 'response_absent' : 'response_unknown')), `${fixture.id}: chartCoach debug should preserve buyer-response semantics without reading buyer control.`);
+    assert.strictEqual(chartCoach.recentStory.confirmationSemantic, ({not_started:'follow_through_not_started',developing:'follow_through_developing',unconfirmed:'follow_through_unconfirmed',confirmed:'follow_through_confirmed',stalled:'follow_through_stalled',failed:'follow_through_failed',unknown:'follow_through_unknown'})[narrationContract.followThrough], `${fixture.id}: chartCoach debug should preserve follow-through semantics without overloading buyer response.`);
     assert.strictEqual(chartCoach.diagnostics.storyContract.primaryStoryKey, sourcePacket.primaryStoryKey, `${fixture.id}: diagnostics must point to deterministic primary story authority.`);
     assert.strictEqual(chartCoach.diagnostics.storyContract.storyKey, sourcePacket.recentStoryKey, `${fixture.id}: diagnostics must point to deterministic recent story authority.`);
-    assert.strictEqual(chartCoach.diagnostics.storyContract.supportSemantic, compatInterpretation.supportSemantic, `${fixture.id}: diagnostics must expose supportSemantic.`);
-    assert.strictEqual(chartCoach.diagnostics.storyContract.buyerResponseSemantic, compatInterpretation.buyerResponseSemantic, `${fixture.id}: diagnostics must expose buyerResponseSemantic.`);
-    assert.strictEqual(chartCoach.diagnostics.storyContract.confirmationSemantic, compatInterpretation.confirmationSemantic, `${fixture.id}: diagnostics must expose confirmationSemantic.`);
+    assert.strictEqual(chartCoach.diagnostics.storyContract.supportSemantic, narrationContract.support.semantic, `${fixture.id}: diagnostics must expose canonical support semantics.`);
+    assert.strictEqual(chartCoach.diagnostics.storyContract.buyerResponseSemantic, chartCoach.recentStory.buyerResponseSemantic, `${fixture.id}: diagnostics must preserve the buyer-response semantic mapping.`);
+    assert.strictEqual(chartCoach.diagnostics.storyContract.confirmationSemantic, chartCoach.recentStory.confirmationSemantic, `${fixture.id}: diagnostics must preserve the follow-through semantic mapping.`);
 
-    const mergedAnalysis = hooks.mergeTwoStepNarrativeIntoAnalysis({}, fixture.finalProse, compatInterpretation, {
+    const mergedAnalysis = hooks.mergeTwoStepNarrativeIntoAnalysis({}, fixture.finalProse, narrationContract, {
       deterministicEventPacket:sourcePacket
     });
     assert.strictEqual(mergedAnalysis.deterministicEventPacket.primaryStoryKey, sourcePacket.primaryStoryKey, `${fixture.id}: merged analysis must store deterministicEventPacket.`);
-    assert.deepStrictEqual(toPlainJson(mergedAnalysis.traderInterpretation.eventSequence), toPlainJson(sourcePacket.eventSequence), `${fixture.id}: merged analysis must retain eventSequence in traderInterpretation.`);
-    assert.strictEqual(mergedAnalysis.traderInterpretation.traderInterpretation, fixture.interpreterResponse.traderInterpretation, `${fixture.id}: merged analysis must store normalized traderInterpretation text.`);
+    assert.strictEqual(mergedAnalysis.chartCoach.diagnostics.storyContract.supportSemantic, narrationContract.support.semantic, `${fixture.id}: merged analysis must retain canonical narration support semantics.`);
     if(fixture.id === 'MSFT_event_first_support_breakdown_stabilising'){
       assert.strictEqual(sourcePacket.primaryStoryKey, 'structure_breaking_down', 'MSFT should preserve the structural-breakdown dominant event.');
       assert.strictEqual(sourcePacket.supportSemantic, 'support_failed', 'MSFT should preserve support_failed semantics.');
@@ -393,6 +424,7 @@ function verifyFixtureCoverage(){
 function run(){
   verifyFixtureCoverage();
   verifyBuyerResponsePresentStates();
+  verifyStalledFollowThroughSerialization();
   verifyAppPayloadIncludesDeterministicEventPacket();
   verifyDeterministicEventPacketPreservesTrace();
   verifyNetlifyNormalizationAndTutorBoundary();

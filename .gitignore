@@ -43,3 +43,8 @@ analysis-*.json
 # Generated deployment staging bundles
 .deploy-stage-*/
 .deploy-stage-*.zip
+
+# Generated test reports
+artifacts/
+playwright-report/
+test-results/

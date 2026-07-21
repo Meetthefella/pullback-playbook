@@ -53,6 +53,12 @@ const cases = [
     groups:['all', 'contracts']
   },
   {
+    id:'buyer-state-alignment',
+    label:'Buyer-state alignment assertions',
+    script:'scripts/run-buyer-state-alignment-assertions.js',
+    groups:['all', 'contracts']
+  },
+  {
     id:'chart-guru-ai-contracts',
     label:'Chart Guru AI contract assertions',
     script:'scripts/run-chart-guru-ai-contract-assertions.js',

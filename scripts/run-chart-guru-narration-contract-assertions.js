@@ -39,7 +39,7 @@ function assertRendererBoundary(contract){
   assert.ok(prompt.includes('Canonical narration contract'), 'renderer prompt must name the canonical contract');
   assert.ok(prompt.includes(contract.version), 'renderer prompt must include contract version');
   const rendererInput = JSON.parse(prompt.slice(prompt.indexOf('{')));
-  assert.deepStrictEqual(Object.keys(rendererInput).sort(), ['version','phase','dominantEvent','eventSequence','structure','support','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'].sort(), 'renderer prompt must use an exact contract-field allow-list');
+  assert.deepStrictEqual(Object.keys(rendererInput).sort(), ['version','phase','dominantEvent','eventSequence','structure','support','buyerResponse','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'].sort(), 'renderer prompt must use an exact contract-field allow-list');
   assert.ok(!/verification|imageAnalysis|traderInterpretation|diagnostics|chartMatch|visibleTicker/i.test(prompt), 'verification, image analysis, interpreter, and diagnostics fields must never enter renderer input');
 }
 
@@ -84,6 +84,25 @@ const stalled = hooks.buildCanonicalNarrationContract({
   supportState:{interaction:'held'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed', evidenceFactIds:['support','stall']
 }, {structure:'intact', nextRequiredEvent:'follow_through'});
 stalled.support = {type:'50ma', label:'50-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'};
+const stalledAfterConfirmedControl = {...stalled, buyerResponse:'confirmed', buyerControl:'confirmed', followThrough:'stalled'};
+assert.strictEqual(hooks.validateCanonicalNarrationContract(stalledAfterConfirmedControl).ok, true, 'confirmed initial buyer control must be valid when follow-through later stalls');
+assert.ok(
+  hooks.validateCanonicalNarrationContract({...stalledAfterConfirmedControl, followThrough:'confirmed'}).errors.includes('stalled_follow_through_confirmed_conflict'),
+  'stalled phase must reject confirmed follow-through rather than historical confirmed control'
+);
+const stalledControlProse = {
+  chartStory:'Buyers initially responded at support and took control, but the rebound has since stalled.',
+  whyItMatters:'The first response was constructive, but stalled follow-through means the setup has not progressed.',
+  setupLocation:'Price is holding around the 50-day average.',
+  learningPoint:'Initial buyer control needs continuation to become actionable.',
+  whatNext:'Watch for buyers to follow through with another firm close.'
+};
+assert.strictEqual(hooks.validateNarrationProseAgainstContract(stalledControlProse, stalledAfterConfirmedControl).ok, true, 'AI narration may preserve confirmed historical control while identifying stalled follow-through');
+const stalledContradictoryProse = {...stalledControlProse, chartStory:'Buyers took control and follow-through is confirmed.'};
+assert.ok(
+  hooks.validateNarrationProseAgainstContract(stalledContradictoryProse, stalledAfterConfirmedControl).errors.includes('stalled_follow_through_described_as_confirmed'),
+  'stalled prose must reject a claim that follow-through is confirmed'
+);
 const invalidRendererOutput = {
   chartStory:'Price is away from support after a strong extension.', whyItMatters:'It matters.', setupLocation:'Away from support.',
   learningPoint:'A lesson.', whatNext:'Watch for a new pullback reset.'
