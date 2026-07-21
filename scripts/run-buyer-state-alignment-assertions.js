@@ -66,10 +66,30 @@ assert.ok(/took control.*follow-through has stalled/i.test(stalledFallback.chart
 assert.strictEqual(hooks.validateNarrationProseAgainstContract(stalledFallback, confirmedControlThenStalled).ok, true, 'stalled fallback must remain faithful to confirmed-control history');
 
 const sharedDecision = extract('sharedDecisionSummaryFromSemantics');
+const reviewDecision = extract('reviewDecisionSummaryFromSemantics');
+const trackDecision = extract('trackDecisionSummaryFromSemantics');
 assert.ok(sharedDecision.includes('canonicalBuyerStatesFromStoryContext'), 'shared Scan/Review/Track decision copy must use the canonical buyer-state resolver');
 assert.ok(sharedDecision.includes('contradictsConfirmedBuyerControl'), 'shared decision copy must explicitly reject contradictory persisted buyer-control prose');
 const presentationSandbox = {canonicalBuyerStatesFromStoryContext:resolve, normalizeGlobalVerdictKey:value => String(value || '').trim().toLowerCase() || 'watch'};
 vm.runInNewContext(sharedDecision, presentationSandbox);
+vm.runInNewContext(reviewDecision, presentationSandbox);
+vm.runInNewContext(trackDecision, presentationSandbox);
+assert.ok(!/buyer control is not convincing yet|stronger buyer control is needed|support is reacting|bounce is improving/i.test(trackDecision), 'Track summary adapter must not regenerate deprecated buyer-state wording');
+const surfaceParityScenarios = [
+  ['buyer response developing', {currentPhase:'responding_from_support', buyerResponse:{state:'present'}, buyerControl:{state:'none'}, followThrough:{state:'not_started'}}, /buyer control|support is holding/i],
+  ['buyer control developing', {currentPhase:'responding_from_support', buyerResponse:{state:'present'}, buyerControl:{state:'developing'}, followThrough:{state:'not_started'}}, /buyer control is still developing/i],
+  ['buyer control confirmed', {currentPhase:'responding_from_support', buyerResponse:{state:'confirmed'}, buyerControl:{state:'confirmed'}, followThrough:{state:'confirmed'}}, /support is holding|independent confirmation/i],
+  ['follow-through developing', {currentPhase:'responding_from_support', buyerResponse:{state:'confirmed'}, buyerControl:{state:'confirmed'}, followThrough:{state:'developing'}}, /follow-through is still developing/i],
+  ['follow-through stalled', {currentPhase:'stalled_after_response', buyerResponse:{state:'confirmed'}, buyerControl:{state:'confirmed'}, followThrough:{state:'stalled'}}, /follow-through has stalled/i],
+  ['support failed', {currentPhase:'support_failed', buyerResponse:{state:'failed'}, buyerControl:{state:'failed'}, followThrough:{state:'failed'}}, /support failed/i]
+];
+for(const [name, storyContext, expectedMeaning] of surfaceParityScenarios){
+  const semantics = {finalVerdict:'watch', currentPhase:storyContext.currentPhase, storyContext};
+  const reviewSummary = presentationSandbox.reviewDecisionSummaryFromSemantics(semantics, '');
+  const trackSummary = presentationSandbox.trackDecisionSummaryFromSemantics(semantics, '');
+  assert.strictEqual(trackSummary, reviewSummary, `${name}: Track must consume the same resolved decision summary as Review`);
+  assert.ok(expectedMeaning.test(reviewSummary), `${name}: shared presentation must retain the expected buyer-state meaning`);
+}
 const staleRestoredSummary = presentationSandbox.sharedDecisionSummaryFromSemantics({
   finalVerdict:'watch', currentPhase:'responding_from_support',
   blockerSummary:'buyers still need to prove control',

@@ -10192,29 +10192,48 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const trackDecisionSemantics = trackDecisionProjection && trackDecisionProjection.semantics
     ? trackDecisionProjection.semantics
     : null;
+  // This is the same resolved presentation authority consumed by Review. Track
+  // may condense these fields in its card layout, but does not regenerate their
+  // buyer-state, blocker, upgrade, downgrade, or action meaning.
+  const canonicalTrackPresentation = trackDecisionProjection && typeof trackDecisionProjection === 'object'
+    ? {
+      primaryReason:String(trackDecisionProjection.primaryReason || '').trim(),
+      decisionSummary:typeof reviewDecisionSummaryFromSemantics === 'function'
+        ? String(reviewDecisionSummaryFromSemantics(trackDecisionSemantics, headline || '') || '').trim()
+        : String(headline || '').trim(),
+      nextAction:String(trackDecisionProjection.nextAction || '').trim(),
+      blocker:String(trackDecisionProjection.blocker || '').trim(),
+      upgradeCondition:String(trackDecisionProjection.upgradeCondition || '').trim(),
+      downgradeCondition:String(trackDecisionProjection.downgradeCondition || '').trim()
+    }
+    : null;
   if(trackDecisionProjection && String(trackDecisionProjection.primaryReason || '').trim()){
     resolvedPrimaryReason = String(trackDecisionProjection.primaryReason).trim();
   }
   const trackDecisionSummary = String(
-    trackDecisionSemantics && typeof trackDecisionSummaryFromSemantics === 'function'
-      ? trackDecisionSummaryFromSemantics(trackDecisionSemantics, headline || '')
+    canonicalTrackPresentation
+      ? canonicalTrackPresentation.decisionSummary
       : (headline || '')
   ).trim();
   const terminalTrackPhase = String(trackDecisionSemantics && trackDecisionSemantics.currentPhase || '').trim().toLowerCase();
   const terminalTrackState = ['support_failed', 'repairing_structure'].includes(terminalTrackPhase);
-  const trackPrimaryReason = terminalTrackState
+  const trackPrimaryReason = canonicalTrackPresentation && canonicalTrackPresentation.primaryReason
+    ? canonicalTrackPresentation.primaryReason
+    : (terminalTrackState
     ? String(trackDecisionSemantics && (trackDecisionSemantics.blockerSummary || trackDecisionSemantics.decisiveReason) || resolvedPrimaryReason).trim()
-    : resolvedPrimaryReason;
-  const trackNextAction = terminalTrackState
+    : resolvedPrimaryReason);
+  const trackNextAction = canonicalTrackPresentation && canonicalTrackPresentation.nextAction
+    ? canonicalTrackPresentation.nextAction
+    : (terminalTrackState
     ? 'Wait for the chart to repair before considering a new pullback entry.'
-    : String(trackDecisionProjection && trackDecisionProjection.nextAction || nextAction || '').trim();
+    : String(nextAction || '').trim());
   const trackPlanSummary = String(
     (trackRenderModel && trackRenderModel.planSummary)
     || (effectiveCanonicalVerdict === 'entry'
       ? 'Trade plan available.'
       : (visibleModel.planSummary || mainBlocker || 'No actionable trade plan yet.'))
   ).trim();
-  const trackBlocker = String(trackDecisionSemantics && trackDecisionSemantics.blockerSummary || mainBlocker || '').trim();
+  const trackBlocker = String(canonicalTrackPresentation && canonicalTrackPresentation.blocker || mainBlocker || '').trim();
   return {
     canonicalVerdict:effectiveCanonicalVerdict,
     finalVerdict:effectiveCanonicalVerdict,
@@ -10243,8 +10262,8 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     ).trim(),
     headline,
     statusText:headline,
-    primaryReason:resolvedPrimaryReason,
-    mainBlocker,
+    primaryReason:trackPrimaryReason,
+    mainBlocker:trackBlocker,
     nextAction:trackNextAction,
     planVisible,
     planStatus,
@@ -25074,6 +25093,9 @@ function sharedDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''
   }
   const contradictsConfirmedBuyerControl = buyerStates.buyerControl === 'confirmed'
     && /buyers? still need to prove control|buyer control is not convincing|buyers? have not taken control|stronger buyer control is needed|no convincing buyer control|buyers? lack control/i.test(blockerSummary);
+  const genericHealthyTrendBlocker = /strong trend, but no usable pullback setup yet/i.test(blockerSummary);
+  if(genericHealthyTrendBlocker && currentPhase === 'away_from_support') return 'Watch - trend remains constructive, but price is currently away from support. Wait for a reset.';
+  if(genericHealthyTrendBlocker && currentPhase === 'extended_from_support') return 'Watch - constructive rebound, but price is already away from support. Wait for a reset.';
   if(blockerSummary && !contradictsConfirmedBuyerControl) return blockerSummary;
   if(verdict === 'entry') return 'Entry - plan is valid and risk defined.';
   if(verdict === 'avoid'){
@@ -25112,19 +25134,9 @@ function reviewDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''
 }
 
 function trackDecisionSummaryFromSemantics(semantics = {}, fallbackSummary = ''){
-  const currentPhase = String(semantics.currentPhase || '').trim().toLowerCase();
-  const blockerSummary = String(semantics.blockerSummary || '').trim();
-  const genericHealthyTrendBlocker = /strong trend, but no usable pullback setup yet/i.test(blockerSummary);
-  if(genericHealthyTrendBlocker && currentPhase === 'away_from_support'){
-    return 'Watch - trend remains constructive, but price is currently away from support. Wait for a reset.';
-  }
-  if(genericHealthyTrendBlocker && currentPhase === 'extended_from_support'){
-    return 'Watch - constructive rebound, but price is already away from support. Wait for a reset.';
-  }
-  if(typeof sharedDecisionSummaryFromSemantics === 'function'){
-    return sharedDecisionSummaryFromSemantics(semantics, fallbackSummary);
-  }
-  return String(fallbackSummary || '').trim();
+  // Track is a condensed Review projection. It must not reinterpret the
+  // canonical semantics or introduce surface-specific buyer-state wording.
+  return reviewDecisionSummaryFromSemantics(semantics, fallbackSummary);
 }
 
 function reviewNextActionFromDecisionSemantics(semantics = {}, options = {}){
@@ -25137,14 +25149,14 @@ function reviewNextActionFromDecisionSemantics(semantics = {}, options = {}){
   const legacySemanticNextAction = String(optionBag.legacySemanticNextAction || '').trim();
   const legacySimplifiedActionLabel = String(optionBag.legacySimplifiedActionLabel || '').trim();
   if(safeSemantics.nextRequiredEvent === 'execute_if_trigger_valid') return 'Execute only if the trigger remains valid.';
-  if(safeSemantics.nextRequiredEvent === 'repair') return 'Wait for the setup to repair before reviewing it again.';
+  if(safeSemantics.nextRequiredEvent === 'repair') return 'Wait for the chart to repair before reviewing it again.';
   if(safeSemantics.nextRequiredEvent === 'reset_to_support') return 'Wait for price to reset into support before reviewing entry quality again.';
   if(safeSemantics.nextRequiredEvent === 'follow_through') return 'Wait for stronger follow-through before considering an entry.';
   if(safeSemantics.nextRequiredEvent === 'entry_trigger') return 'Wait for the trigger to confirm before considering entry.';
   if(safeSemantics.nextRequiredEvent === 'buyer_control') return 'Wait for buyers to prove control before considering an entry.';
   if(safeSemantics.nextRequiredEvent === 'buyer_response') return 'Wait for a real buyer response before considering an entry.';
   if(safeSemantics.nextRequiredEvent === 'pullback_into_support') return 'Wait for a usable pullback into support before considering entry.';
-  if(safeSemantics.currentPhase === 'support_failed') return 'Wait for the setup to repair before reviewing it again.';
+  if(safeSemantics.currentPhase === 'support_failed') return 'Wait for the chart to repair before reviewing it again.';
   if(safeSemantics.currentPhase === 'away_from_support' || safeSemantics.currentPhase === 'extended_from_support'){
     return 'Wait for price to reset into support before reviewing entry quality again.';
   }
