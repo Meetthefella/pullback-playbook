@@ -933,18 +933,60 @@ function validateNarrationProseAgainstContract(response = {}, contract = {}){
   if(contract.followThrough === 'stalled' && /improving rebound|rebound is improving/.test(text)) errors.push('stalled_follow_through_improvement_language');
   if(contract.phase === 'stalled_after_response' && /new pullback|reset|pull back again/.test(prose.whatNext.toLowerCase())) errors.push('stalled_response_reset_instruction');
   if(contract.phase === 'responding_from_support' && /\b(?:buyers? (?:have )?(?:not|haven't|did not|didn't) respond(?:ed)?|no buyer response)\b/i.test(text)) errors.push('buyer_response_denied');
-  const nextPatterns = {follow_through:/follow-through|follow through|another firm close/,repair:/repair|rebuild/,pullback_or_reset:/pullback|reset/,clearer_support:/clearer support|support area/,support_hold:/support.*hold|hold.*support/};
-  if(nextPatterns[contract.nextRequiredEvent] && !nextPatterns[contract.nextRequiredEvent].test(prose.whatNext.toLowerCase())) errors.push('next_required_event_missing');
+  const nextEventEvidence = narrationNextRequiredEventEvidence(prose.whatNext, contract.nextRequiredEvent);
+  if(nextEventEvidence.required && !nextEventEvidence.matched) errors.push('next_required_event_missing');
   return {ok:errors.length === 0, errors};
 }
 
+function narrationNextRequiredEventEvidence(whatNext = '', nextRequiredEvent = ''){
+  const value = normaliseString(whatNext, '').toLowerCase();
+  const event = normaliseString(nextRequiredEvent, 'unknown');
+  const patterns = {
+    follow_through:/follow-through|follow through|another firm close/,
+    repair:/repair|rebuild/,
+    pullback_or_reset:/pullback|reset/,
+    clearer_support:/clearer support|support area/,
+    support_hold:/support.*hold|hold.*support/
+  };
+  const semanticAlternatives = {
+    // Logged only: this is deliberately not accepted as a contract match until
+    // real renderer output proves that the existing wording is too narrow.
+    follow_through:/another (?:strong|constructive|positive) close|buyers?.{0,48}\b(?:build|add|continue|carry)\b.{0,48}\b(?:move|rebound|advance)|\b(?:move|rebound|advance).{0,48}\b(?:build|continue|carry)\b/
+  };
+  const required = !!patterns[event];
+  const matched = !required || patterns[event].test(value);
+  return {
+    nextRequiredEvent:event,
+    required,
+    matched,
+    classification:matched ? 'matched' : (semanticAlternatives[event] && semanticAlternatives[event].test(value) ? 'possible_wording_too_narrow' : 'llm_omitted_required_event'),
+    whatNext:value
+  };
+}
+
 async function renderCanonicalNarrationWithRetry(contract, requestRenderer, logContext = {}){
+  const expectedNextRequiredEvent = canonicalNextRequiredEventForPhase(contract.phase);
+  const firstPromptContract = buildCanonicalNarrationRendererInput(contract);
+  if(contract.nextRequiredEvent !== expectedNextRequiredEvent){
+    throw new Error(`renderer_contract_next_required_event_mismatch:${contract.nextRequiredEvent}:${expectedNextRequiredEvent}`);
+  }
+  if(firstPromptContract.nextRequiredEvent !== contract.nextRequiredEvent){
+    throw new Error(`renderer_prompt_next_required_event_missing:${contract.nextRequiredEvent}`);
+  }
   const finalPrompt = buildProductionChartGuruFinalPrompt(contract);
   const errors = [];
   const rendererTrace = {
     rendererReceivesRepairedContract:!safeObject(logContext).contractObject || safeObject(logContext).contractObject === contract,
-    rendererContract:cloneNarrationContract(contract)
+    rendererContract:cloneNarrationContract(contract),
+    firstPromptContract:cloneNarrationContract(firstPromptContract),
+    firstPromptNextRequiredEvent:normaliseString(firstPromptContract.nextRequiredEvent, 'unknown'),
+    finalContractNextRequiredEvent:normaliseString(contract.nextRequiredEvent, 'unknown')
   };
+  console.log('[CHART_GURU_NARRATION_FIRST_PROMPT]', JSON.stringify({
+    ...safeObject(logContext), contractObject:undefined, ...rendererTrace,
+    promptContainsNextRequiredEvent:finalPrompt.includes(`"nextRequiredEvent": "${contract.nextRequiredEvent}"`),
+    promptSnapshot:finalPrompt
+  }));
   const unpackRendererResult = result => {
     const wrapped = safeObject(result);
     return Object.prototype.hasOwnProperty.call(wrapped, 'parsed')
@@ -956,7 +998,7 @@ async function renderCanonicalNarrationWithRetry(contract, requestRenderer, logC
   const firstValidation = validateNarrationProseAgainstContract(first, contract);
   console.log('[CHART_GURU_NARRATION_RENDERER_RESPONSE]', JSON.stringify({
     ...safeObject(logContext), contractObject:undefined, ...rendererTrace, attempt:0, nextRequiredEvent:contract.nextRequiredEvent,
-    rawResponse:firstResult.rawResponse, response:first, validation:firstValidation
+    rawResponse:firstResult.rawResponse, response:first, nextEventEvidence:narrationNextRequiredEventEvidence(first && first.whatNext, contract.nextRequiredEvent), validation:firstValidation
   }));
   if(firstValidation.ok) return {prose:first, source:'openai', errors, retryCount:0, rendererContractSnapshot:rendererTrace.rendererContract, rendererReceivesRepairedContract:rendererTrace.rendererReceivesRepairedContract};
   errors.push(...firstValidation.errors.map(code => `first:${code}`));
@@ -969,7 +1011,7 @@ async function renderCanonicalNarrationWithRetry(contract, requestRenderer, logC
   const retryValidation = validateNarrationProseAgainstContract(retry, contract);
   console.log('[CHART_GURU_NARRATION_RENDERER_RESPONSE]', JSON.stringify({
     ...safeObject(logContext), contractObject:undefined, ...rendererTrace, attempt:1, nextRequiredEvent:contract.nextRequiredEvent,
-    rawResponse:retryResult.rawResponse, response:retry, validation:retryValidation
+    rawResponse:retryResult.rawResponse, response:retry, nextEventEvidence:narrationNextRequiredEventEvidence(retry && retry.whatNext, contract.nextRequiredEvent), validation:retryValidation
   }));
   if(retryValidation.ok) return {prose:retry, source:'retry', errors, retryCount:1, rendererContractSnapshot:rendererTrace.rendererContract, rendererReceivesRepairedContract:rendererTrace.rendererReceivesRepairedContract};
   errors.push(...retryValidation.errors.map(code => `retry:${code}`));
@@ -2851,6 +2893,7 @@ exports.__test = {
   buildCanonicalNarrationRendererInput,
   deterministicNarrationFallback,
   validateNarrationProseAgainstContract,
+  narrationNextRequiredEventEvidence,
   renderCanonicalNarrationWithRetry,
   narrationDebugSource,
   narrationDebugValidationStatus,

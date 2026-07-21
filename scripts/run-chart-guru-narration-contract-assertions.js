@@ -252,7 +252,12 @@ for(const phase of ['away_from_support','extended_from_support']){
 (async () => {
   const valid = {chartStory:'The response from support has stalled.', whyItMatters:'Buyers still need proof.', setupLocation:'Price is holding around the 50-day average.', learningPoint:'An early response needs follow-through.', whatNext:'Watch for buyers to follow through.'};
   let requests = 0;
-  const retried = await hooks.renderCanonicalNarrationWithRetry(stalled, async () => (++requests === 1 ? invalidRendererOutput : valid));
+  let firstPrompt = '';
+  const retried = await hooks.renderCanonicalNarrationWithRetry(stalled, async prompt => {
+    if(++requests === 1) firstPrompt = prompt;
+    return requests === 1 ? invalidRendererOutput : valid;
+  });
+  assert.match(firstPrompt, /"nextRequiredEvent"\s*:\s*"follow_through"/, 'first renderer prompt must include the final contract nextRequiredEvent');
   assert.strictEqual(requests, 2, 'a contradictory first renderer response must trigger exactly one retry');
   assert.strictEqual(retried.source, 'retry', 'the valid retry must be used');
   assert.strictEqual(retried.retryCount, 1, 'a valid retry must report one retry');
@@ -270,6 +275,8 @@ for(const phase of ['away_from_support','extended_from_support']){
   assert.strictEqual(fallback.retryCount, 1, 'a fallback after an invalid retry must report one retry');
   const missingNextEvent = {...valid, whatNext:'Watch the next candle for a better signal.'};
   assert.ok(hooks.validateNarrationProseAgainstContract(missingNextEvent, stalled).errors.includes('next_required_event_missing'), 'renderer prose must preserve the contract nextRequiredEvent in whatNext');
+  assert.strictEqual(hooks.narrationNextRequiredEventEvidence('Watch for buyers to build on the rebound.', 'follow_through').classification, 'possible_wording_too_narrow', 'diagnostics must distinguish a plausible follow-through synonym from an omitted event');
+  assert.strictEqual(hooks.narrationNextRequiredEventEvidence('Watch the next candle.', 'follow_through').classification, 'llm_omitted_required_event', 'diagnostics must distinguish an LLM omission from a wording mismatch');
   assert.strictEqual(hooks.narrationDebugSource('openai'), 'canonical_llm', 'debug metadata must label canonical LLM prose consistently');
   assert.strictEqual(hooks.narrationDebugValidationStatus('recovered'), 'passed', 'a valid retry must report final validation as passed');
   assert.strictEqual(hooks.narrationDebugValidationStatus('invalid_contract'), 'failed', 'an invalid contract must report validation failure');
