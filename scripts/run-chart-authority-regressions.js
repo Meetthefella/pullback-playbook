@@ -326,6 +326,7 @@ async function runNetlifyCanonicalizationRegression(){
   assert.match(String(repairedPromptText && repairedPromptText.text || ''), /"phase"\s*:\s*"responding_from_support"/, 'HTTP renderer prompt must receive the repaired phase');
   assert.match(String(repairedPromptText && repairedPromptText.text || ''), /"nextRequiredEvent"\s*:\s*"follow_through"/, 'HTTP renderer prompt must receive the repaired next event');
   const repairedAnalysis = repairedHttpRun.body.analysis;
+  const returnedDiagnostics = repairedHttpRun.body.diagnostics;
   const repairedDiagnostics = repairedAnalysis.chartCoach && repairedAnalysis.chartCoach.diagnostics && repairedAnalysis.chartCoach.diagnostics.narration;
   assert.strictEqual(repairedAnalysis.canonicalNarrationContract.phase, 'responding_from_support', 'HTTP response must persist the repaired phase');
   assert.notStrictEqual(repairedAnalysis.canonicalNarrationContract.nextRequiredEvent, 'unknown', 'HTTP response must persist a resolved next event');
@@ -335,6 +336,10 @@ async function runNetlifyCanonicalizationRegression(){
   assert.strictEqual(repairedDiagnostics.pipelineTrace.phaseBeforeRepair, 'unknown', 'Diagnostics must retain the incoming phase snapshot');
   assert.strictEqual(repairedDiagnostics.pipelineTrace.phaseAfterRepair, 'responding_from_support', 'Diagnostics must retain the repaired phase snapshot');
   assert.strictEqual(repairedDiagnostics.pipelineTrace.rendererReceivesRepairedContract, true, 'Renderer must receive the final repaired contract object');
+  assert.strictEqual(returnedDiagnostics.contractPhase, 'responding_from_support', 'HTTP response diagnostics must expose the final contract phase');
+  assert.strictEqual(returnedDiagnostics.nextRequiredEvent, 'follow_through', 'HTTP response diagnostics must expose the final next event');
+  assert.strictEqual(returnedDiagnostics.phaseRepair.after, returnedDiagnostics.contractPhase, 'HTTP response repair trace must agree with the displayed contract phase');
+  assert.deepStrictEqual(returnedDiagnostics.canonicalNarrationContract, returnedDiagnostics.rendererContractSnapshot, 'HTTP response must serialise one final contract for diagnostics and renderer');
 
   const malformedResponseRun = await invokeHandler([
     {payload:{output_text:'{"broken": true'}}

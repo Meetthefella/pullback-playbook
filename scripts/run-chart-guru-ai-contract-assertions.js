@@ -89,8 +89,30 @@ function verifyServerPreservesSuppliedContract(){
   assert.deepStrictEqual(selected.support, contract.support, 'the server must not normalize or downgrade supplied support authority');
 }
 
+function verifyClientDiagnosticsUseFreshServerSnapshot(){
+  const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+  const sandbox = {
+    renderDebugSectionMarkup:(_title, rows) => rows.map(row => `${row.label}:${row.value}`).join('\n')
+  };
+  vm.runInNewContext(sourceFunction(source, 'chartGuruNarrationDebugMarkup'), sandbox);
+  const staleStoredContract = {phase:'unknown', nextRequiredEvent:'unknown', dominantEvent:'stale event'};
+  const freshServerDiagnostics = {
+    contractPhase:'responding_from_support', dominantEvent:'early_rebound_from_20ma', nextRequiredEvent:'follow_through', contractVersion:'chart-guru-narration-contract-v1',
+    phaseRepair:{before:'unknown', after:'responding_from_support', source:'deterministic_packet'}, functionVersion:'abc123'
+  };
+  const markup = sandbox.chartGuruNarrationDebugMarkup({
+    canonicalNarrationContract:staleStoredContract,
+    deterministicEventPacket:{currentPhase:'responding_from_support'}
+  }, {diagnostics:{narration:freshServerDiagnostics}});
+  assert.match(markup, /Contract phase:responding_from_support/, 'debug panel must use the fresh server contract phase rather than stored analysis');
+  assert.match(markup, /Next required event:follow_through/, 'debug panel must use the fresh server next event rather than stored analysis');
+  assert.match(markup, /Dominant event:early_rebound_from_20ma/, 'debug panel must use the fresh server dominant event');
+  assert.ok(!/Contract phase:unknown/.test(markup), 'a stale stored contract may not overwrite server diagnostics');
+}
+
 verifyRendererBoundary();
 verifyClientDerivedStateMapping();
 verifyRetryFallbackContract();
 verifyServerPreservesSuppliedContract();
+verifyClientDiagnosticsUseFreshServerSnapshot();
 console.log('run-chart-guru-ai-contract-assertions: ok');

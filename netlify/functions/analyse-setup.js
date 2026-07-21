@@ -670,6 +670,70 @@ function narrationContractSnapshot(contract = {}){
   };
 }
 
+function cloneNarrationContract(contract = {}){
+  return JSON.parse(JSON.stringify(safeObject(contract)));
+}
+
+function finaliseCanonicalNarrationContract(selectedContract = {}, deterministicPacket = {}){
+  const before = narrationContractSnapshot(selectedContract);
+  const source = canonicalNarrationPhaseRepairSource(selectedContract, deterministicPacket);
+  const phaseRepairedContract = repairCanonicalNarrationContractPhase(selectedContract, deterministicPacket);
+  const finalContract = repairCanonicalNarrationContractNextRequiredEvent(phaseRepairedContract);
+  return {
+    finalContract,
+    phaseRepair:{before:before.phase, after:finalContract.phase, source}
+  };
+}
+
+function narrationRuntimeIdentity(event = {}){
+  const headers = safeObject(event.headers);
+  const requestHost = normaliseString(headers.host || headers.Host, '');
+  const requestOrigin = normaliseString(headers.origin || headers.Origin, '');
+  const context = process.env.CONTEXT || process.env.NETLIFY_CONTEXT || '';
+  const commitRef = process.env.COMMIT_REF || '';
+  const deployId = process.env.DEPLOY_ID || '';
+  const deployUrl = process.env.DEPLOY_URL || process.env.URL || '';
+  const productionHost = /netlify\.app$|netlify\.com$/i.test(requestHost);
+  return {
+    requestOrigin,
+    requestHost,
+    functionEndpoint:normaliseString(event.rawPath || event.path, '') || '/.netlify/functions/analyse-setup',
+    deployUrl,
+    deployId,
+    commitRef,
+    context,
+    functionVersion:commitRef || deployId || (productionHost ? 'unknown_production_build' : 'local')
+  };
+}
+
+function narrationResponseDiagnostics(finalContract = {}, phaseRepair = {}, runtimeIdentity = {}, rendererContractSnapshot = null){
+  const canonicalNarrationContract = cloneNarrationContract(finalContract);
+  const rendererSnapshot = cloneNarrationContract(rendererContractSnapshot || finalContract);
+  return {
+    contractPhase:canonicalNarrationContract.phase,
+    dominantEvent:canonicalNarrationContract.dominantEvent,
+    nextRequiredEvent:canonicalNarrationContract.nextRequiredEvent,
+    canonicalNarrationContract,
+    rendererContractSnapshot:rendererSnapshot,
+    phaseRepair:{
+      before:normaliseString(phaseRepair.before, 'unknown') || 'unknown',
+      after:normaliseString(phaseRepair.after, 'unknown') || 'unknown',
+      source:normaliseString(phaseRepair.source, 'none') || 'none'
+    },
+    ...safeObject(runtimeIdentity)
+  };
+}
+
+function narrationResponseDiagnosticsAreConsistent(diagnostics = {}, finalContract = {}){
+  const expected = cloneNarrationContract(finalContract);
+  const value = safeObject(diagnostics);
+  return value.contractPhase === expected.phase
+    && value.nextRequiredEvent === expected.nextRequiredEvent
+    && JSON.stringify(value.canonicalNarrationContract) === JSON.stringify(expected)
+    && JSON.stringify(value.rendererContractSnapshot) === JSON.stringify(expected)
+    && safeObject(value.phaseRepair).after === expected.phase;
+}
+
 function selectCanonicalNarrationContractForRenderer(suppliedContract, legacyEventPacket = {}, legacySource = {}){
   const supplied = safeObject(suppliedContract);
   // Select once, then always run the same explicit repair sequence.  This avoids
@@ -879,7 +943,7 @@ async function renderCanonicalNarrationWithRetry(contract, requestRenderer, logC
   const errors = [];
   const rendererTrace = {
     rendererReceivesRepairedContract:!safeObject(logContext).contractObject || safeObject(logContext).contractObject === contract,
-    rendererContract:narrationContractSnapshot(contract)
+    rendererContract:cloneNarrationContract(contract)
   };
   const unpackRendererResult = result => {
     const wrapped = safeObject(result);
@@ -2587,33 +2651,31 @@ exports.handler = async function handler(event){
     // Keep the final repair assignments explicit at the production boundary. No
     // prompt, validator, persistence merge, or diagnostics branch may consume a
     // pre-repair contract.
-    const phaseBeforeRepair = narrationContractSnapshot(selectedNarrationContract);
-    const phaseRepairSource = canonicalNarrationPhaseRepairSource(selectedNarrationContract, structuredFacts.deterministicEventPacket);
-    let canonicalNarrationContract = repairCanonicalNarrationContractPhase(selectedNarrationContract, structuredFacts.deterministicEventPacket);
-    const phaseAfterRepair = narrationContractSnapshot(canonicalNarrationContract);
-    canonicalNarrationContract = repairCanonicalNarrationContractNextRequiredEvent(canonicalNarrationContract);
-    const nextRequiredEventAfterRepair = narrationContractSnapshot(canonicalNarrationContract);
+    const finalisation = finaliseCanonicalNarrationContract(selectedNarrationContract, structuredFacts.deterministicEventPacket);
+    const finalContract = finalisation.finalContract;
+    const finalContractSnapshot = narrationContractSnapshot(finalContract);
+    const runtimeIdentity = narrationRuntimeIdentity(event);
     const narrationContractTrace = {
-      phaseBeforeRepair:phaseBeforeRepair.phase,
-      phaseAfterRepair:phaseAfterRepair.phase,
-      phaseRepairSource,
+      phaseBeforeRepair:finalisation.phaseRepair.before,
+      phaseAfterRepair:finalisation.phaseRepair.after,
+      phaseRepairSource:finalisation.phaseRepair.source,
       contractConstructionSource:Object.keys(suppliedNarrationContract).length ? 'incoming_request' : 'deterministic_packet',
-      dominantEventBeforeRepair:phaseBeforeRepair.dominantEvent,
-      dominantEventAfterRepair:phaseAfterRepair.dominantEvent,
+      dominantEventBeforeRepair:narrationContractSnapshot(selectedNarrationContract).dominantEvent,
+      dominantEventAfterRepair:finalContractSnapshot.dominantEvent,
       packetPhase:projectNarrationPhaseFromPacket(structuredFacts.deterministicEventPacket),
-      nextRequiredEventBeforeRepair:phaseBeforeRepair.nextRequiredEvent,
-      nextRequiredEventAfterRepair:nextRequiredEventAfterRepair.nextRequiredEvent,
-      functionVersion:process.env.COMMIT_REF || process.env.BUILD_ID || process.env.DEPLOY_ID || 'local'
+      nextRequiredEventBeforeRepair:narrationContractSnapshot(selectedNarrationContract).nextRequiredEvent,
+      nextRequiredEventAfterRepair:finalContractSnapshot.nextRequiredEvent,
+      ...runtimeIdentity
     };
-    const contractValidation = validateCanonicalNarrationContract(canonicalNarrationContract, structuredFacts.deterministicEventPacket);
-    analysis.canonicalNarrationContract = canonicalNarrationContract;
+    const contractValidation = validateCanonicalNarrationContract(finalContract, structuredFacts.deterministicEventPacket);
+    analysis.canonicalNarrationContract = cloneNarrationContract(finalContract);
     console.log('[CHART_GURU_NARRATION_CONTRACT]', JSON.stringify({
       requestId:narrationRequestId,
       ticker:String(payload.ticker || ''),
       suppliedPhase:String(safeObject(payload.canonicalNarrationContract).phase || ''),
       deterministicPacketPhase:projectNarrationPhaseFromPacket(structuredFacts.deterministicEventPacket),
       trace:narrationContractTrace,
-      contract:canonicalNarrationContract,
+      contract:finalContract,
       validation:contractValidation
     }));
     const narrationErrors = contractValidation.errors.slice();
@@ -2623,9 +2685,9 @@ exports.handler = async function handler(event){
     let narrationRendererTrace = null;
     if(contractValidation.ok){
       try{
-        const rendered = await renderCanonicalNarrationWithRetry(canonicalNarrationContract, async (prompt, requestName) => {
+        const rendered = await renderCanonicalNarrationWithRetry(finalContract, async (prompt, requestName) => {
           return sendStrictSchemaOpenAiRequest(apiKey, model, buildProductionChartGuruFinalInstructions(), prompt, requestName, FINAL_PROSE_SCHEMA, 700);
-        }, {requestId:narrationRequestId, ticker:String(payload.ticker || ''), phase:canonicalNarrationContract.phase, contractObject:canonicalNarrationContract, trace:narrationContractTrace});
+        }, {requestId:narrationRequestId, ticker:String(payload.ticker || ''), phase:finalContract.phase, contractObject:finalContract, trace:narrationContractTrace});
         prose = rendered.prose;
         narrationSource = rendered.source;
         narrationRetryCount = Number(rendered.retryCount || 0);
@@ -2641,18 +2703,28 @@ exports.handler = async function handler(event){
         requestId:narrationRequestId,
         ticker:String(payload.ticker || ''),
         trigger:contractValidation.ok ? 'renderer_request_failed' : 'invalid_canonical_contract',
-        nextRequiredEvent:canonicalNarrationContract.nextRequiredEvent,
+        nextRequiredEvent:finalContract.nextRequiredEvent,
         errors:narrationErrors
       }));
-      prose = deterministicNarrationFallback(canonicalNarrationContract);
+      prose = deterministicNarrationFallback(finalContract);
     }
-    analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, canonicalNarrationContract, structuredFacts);
+    analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, finalContract, structuredFacts);
     delete analysis.traderInterpretation;
-    analysis.canonicalNarrationContract = canonicalNarrationContract;
+    analysis.canonicalNarrationContract = cloneNarrationContract(finalContract);
     analysis.chartCoach.diagnostics = analysis.chartCoach.diagnostics || {};
     const validationOutcome = contractValidation.ok ? (narrationErrors.length ? 'recovered' : 'valid') : 'invalid_contract';
+    const responseDiagnostics = narrationResponseDiagnostics(
+      finalContract,
+      finalisation.phaseRepair,
+      runtimeIdentity,
+      narrationRendererTrace && narrationRendererTrace.rendererContractSnapshot || finalContract
+    );
+    if(!narrationResponseDiagnosticsAreConsistent(responseDiagnostics, finalContract)){
+      throw new Error('narration_response_diagnostics_inconsistent');
+    }
     analysis.chartCoach.diagnostics.narration = {
-      contractVersion:canonicalNarrationContract.version,
+      ...responseDiagnostics,
+      contractVersion:finalContract.version,
       validationOutcome,
       validationStatus:narrationDebugValidationStatus(validationOutcome),
       proseSource:narrationSource,
@@ -2666,8 +2738,7 @@ exports.handler = async function handler(event){
         ...narrationContractTrace,
         validatorReceivesRepairedContract:true,
         rendererReceivesRepairedContract:!!(narrationRendererTrace && narrationRendererTrace.rendererReceivesRepairedContract),
-        rendererContractSnapshot:narrationRendererTrace && narrationRendererTrace.rendererContractSnapshot || null,
-        returnedDiagnosticsReceiveRepairedContract:analysis.canonicalNarrationContract === canonicalNarrationContract
+        returnedDiagnosticsReceiveRepairedContract:JSON.stringify(analysis.canonicalNarrationContract) === JSON.stringify(finalContract)
       }
     };
     analysis.chartCoach.source = narrationSource === 'deterministic_fallback' ? 'deterministic_fallback' : 'openai_canonical_narration';
@@ -2678,10 +2749,10 @@ exports.handler = async function handler(event){
       validation:analysis.chartCoach.diagnostics.narration.validationStatus,
       validationCodes:narrationErrors,
       retryCount:narrationRetryCount,
-      phase:canonicalNarrationContract.phase,
-      nextRequiredEvent:canonicalNarrationContract.nextRequiredEvent,
-      dominantEvent:analysis.chartCoach.diagnostics.narration.dominantEventKey || canonicalNarrationContract.dominantEvent,
-      contractVersion:canonicalNarrationContract.version,
+      phase:responseDiagnostics.contractPhase,
+      nextRequiredEvent:responseDiagnostics.nextRequiredEvent,
+      dominantEvent:responseDiagnostics.dominantEvent,
+      contractVersion:finalContract.version,
       completedAt:analysis.chartCoach.diagnostics.narration.completedAt
     }));
   }catch(err){
@@ -2692,25 +2763,31 @@ exports.handler = async function handler(event){
       status:Number.isFinite(Number(err && err.status)) ? Number(err.status) : null,
       raw:err && Object.prototype.hasOwnProperty.call(err, 'raw') ? err.raw : null
     });
-    const contract = selectCanonicalNarrationContractForRenderer(
-      payload.canonicalNarrationContract,
-      analysis.deterministicEventPacket,
-      {structure:payload.structureState, trend:payload.trendState, volume:payload.volumeState}
+    const fallbackSelectedContract = safeObject(payload.canonicalNarrationContract);
+    const fallbackFinalisation = finaliseCanonicalNarrationContract(
+      Object.keys(fallbackSelectedContract).length ? fallbackSelectedContract : buildCanonicalNarrationContract(analysis.deterministicEventPacket, {structure:payload.structureState, trend:payload.trendState, volume:payload.volumeState}),
+      analysis.deterministicEventPacket
     );
+    const fallbackFinalContract = fallbackFinalisation.finalContract;
     console.warn('[CHART_GURU_NARRATION_FALLBACK_TRIGGER]', JSON.stringify({
       requestId:narrationRequestId,
       ticker:String(payload.ticker || ''),
       trigger:'narration_pipeline_error',
-      nextRequiredEvent:contract.nextRequiredEvent,
+      nextRequiredEvent:fallbackFinalContract.nextRequiredEvent,
       errors:['pipeline_error']
     }));
-    const prose = deterministicNarrationFallback(contract);
-    analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, contract, {deterministicEventPacket:analysis.deterministicEventPacket});
+    const prose = deterministicNarrationFallback(fallbackFinalContract);
+    analysis = mergeTwoStepNarrativeIntoAnalysis(analysis, prose, fallbackFinalContract, {deterministicEventPacket:analysis.deterministicEventPacket});
     delete analysis.traderInterpretation;
-    analysis.canonicalNarrationContract = contract;
+    analysis.canonicalNarrationContract = cloneNarrationContract(fallbackFinalContract);
     analysis.chartCoach.diagnostics = analysis.chartCoach.diagnostics || {};
+    const fallbackResponseDiagnostics = narrationResponseDiagnostics(fallbackFinalContract, fallbackFinalisation.phaseRepair, narrationRuntimeIdentity(event));
+    if(!narrationResponseDiagnosticsAreConsistent(fallbackResponseDiagnostics, fallbackFinalContract)){
+      return jsonResponse(500, {error:'Chart Guru diagnostics could not be serialised consistently.'});
+    }
     analysis.chartCoach.diagnostics.narration = {
-      contractVersion:contract.version,
+      ...fallbackResponseDiagnostics,
+      contractVersion:fallbackFinalContract.version,
       validationOutcome:'pipeline_error',
       validationStatus:'failed',
       proseSource:'deterministic_fallback',
@@ -2729,15 +2806,17 @@ exports.handler = async function handler(event){
       validation:'failed',
       validationCodes:['pipeline_error'],
       retryCount:0,
-      phase:contract.phase,
-      dominantEvent:analysis.chartCoach.diagnostics.narration.dominantEventKey || contract.dominantEvent,
-      contractVersion:contract.version,
+      phase:fallbackResponseDiagnostics.contractPhase,
+      nextRequiredEvent:fallbackResponseDiagnostics.nextRequiredEvent,
+      dominantEvent:fallbackResponseDiagnostics.dominantEvent,
+      contractVersion:fallbackFinalContract.version,
       completedAt:analysis.chartCoach.diagnostics.narration.completedAt
     }));
     return jsonResponse(200, {
       ok:true,
       model,
-      analysis
+      analysis,
+      diagnostics:analysis.chartCoach.diagnostics.narration
     });
   }
 
@@ -2751,7 +2830,8 @@ exports.handler = async function handler(event){
   return jsonResponse(200, {
     ok: true,
     model,
-    analysis
+    analysis,
+    diagnostics:safeObject(safeObject(analysis.chartCoach).diagnostics).narration || null
   });
 };
 

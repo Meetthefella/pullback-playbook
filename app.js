@@ -26655,9 +26655,6 @@ function chartGuruNarrationDebugMarkup(analysis = {}, chartCoach = null){
   const narration = safeCoach.diagnostics && safeCoach.diagnostics.narration && typeof safeCoach.diagnostics.narration === 'object'
     ? safeCoach.diagnostics.narration
     : {};
-  const contract = safeAnalysis.canonicalNarrationContract && typeof safeAnalysis.canonicalNarrationContract === 'object'
-    ? safeAnalysis.canonicalNarrationContract
-    : {};
   const eventPacket = safeAnalysis.deterministicEventPacket && typeof safeAnalysis.deterministicEventPacket === 'object'
     ? safeAnalysis.deterministicEventPacket
     : {};
@@ -26673,19 +26670,28 @@ function chartGuruNarrationDebugMarkup(analysis = {}, chartCoach = null){
     ['Validation', validation],
     ['Validation codes', codes.length ? `[${codes.join(', ')}]` : '[]'],
     ['Retry count', Number(narration.retryCount || 0) ? '1' : '0'],
-    ['Contract phase', String(contract.phase || 'unknown')],
+    // These values are a server response-boundary snapshot. Never fall back to
+    // a rehydrated/stored analysis contract here: that would mix generations.
+    ['Contract phase', String(narration.contractPhase ?? 'unavailable')],
     ['Packet phase', String(eventPacket.currentPhase || 'unknown')],
-    ['Dominant event', String(narration.dominantEventKey || eventPacket.dominantEventKey || contract.dominantEvent || 'unknown')],
-    ['Next required event', String(contract.nextRequiredEvent || 'unknown')],
-    ['Contract version', String(narration.contractVersion || contract.version || 'unknown')],
+    ['Dominant event', String(narration.dominantEvent ?? 'unavailable')],
+    ['Next required event', String(narration.nextRequiredEvent ?? 'unavailable')],
+    ['Contract version', String(narration.contractVersion || 'unavailable')],
     ['Prose request ID', String(narration.requestId || 'unavailable')],
     ['Prose timestamp', String(narration.completedAt || 'unavailable')]
   ];
-  const trace = narration.pipelineTrace && typeof narration.pipelineTrace === 'object' ? narration.pipelineTrace : {};
-  if(Object.keys(trace).length){
+  const phaseRepair = narration.phaseRepair && typeof narration.phaseRepair === 'object' ? narration.phaseRepair : {};
+  if(Object.keys(phaseRepair).length){
     rows.push(
-      ['Phase repair', `${String(trace.phaseBeforeRepair || 'unknown')} → ${String(trace.phaseAfterRepair || 'unknown')} (${String(trace.phaseRepairSource || 'unknown')})`],
-      ['Function version', String(trace.functionVersion || 'unavailable')]
+      ['Phase repair', `${String(phaseRepair.before || 'unknown')} → ${String(phaseRepair.after || 'unknown')} (${String(phaseRepair.source || 'unknown')})`],
+      ['Function version', String(narration.functionVersion || 'unavailable')],
+      ['Function endpoint', String(narration.functionEndpoint || 'unavailable')],
+      ['Request origin', String(narration.requestOrigin || 'unavailable')],
+      ['Request host', String(narration.requestHost || 'unavailable')],
+      ['Deploy URL', String(narration.deployUrl || 'unavailable')],
+      ['Deploy ID', String(narration.deployId || 'unavailable')],
+      ['Commit ref', String(narration.commitRef || 'unavailable')],
+      ['Netlify context', String(narration.context || 'unavailable')]
     );
   }
   return renderDebugSectionMarkup('Chart Guru Narration', rows.map(([label, value]) => ({label, value})));
