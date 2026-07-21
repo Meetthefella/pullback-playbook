@@ -271,7 +271,7 @@ async function runNetlifyCanonicalizationRegression(){
   assert.ok(/Return extractedFromImage, trustedMarketContext, canonicalValues/i.test(String(firstRequest.instructions || '')), 'The canonical analysis request should remain intact');
   assert.ok(!/Return extractedFromImage, trustedMarketContext, canonicalValues/i.test(String(secondRequest.instructions || '')), 'Final prose request should not carry the full non-prose output contract');
   const finalPromptText = (((secondRequest.input || [])[0] || {}).content || []).find(part => part && part.type === 'input_text');
-  assert.ok(finalPromptText && /current_location_unresolved|clearer_support/.test(String(finalPromptText.text || '')), 'Final prose prompt should receive the canonical narration contract only');
+  assert.ok(finalPromptText && /"phase"\s*:\s*"(?:unknown|current_location_unresolved)"|clearer_support/.test(String(finalPromptText.text || '')), 'Final prose prompt should receive the canonical narration contract only');
   assert.strictEqual(body.analysis.canonicalValues.price, 200.09, 'Canonical price must come from trusted market context');
   assert.strictEqual(body.analysis.canonicalValues.ma20, 205.74, 'Canonical 20MA must come from trusted market context');
   assert.strictEqual(body.analysis.canonicalValues.ma50, 209.99, 'Canonical 50MA must come from trusted market context');

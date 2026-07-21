@@ -495,7 +495,7 @@ function normalizeDeterministicEventPacket(value = {}){
 }
 
 const NARRATION_ENUMS = {
-  phase:new Set(['at_support','responding_from_support','stalled_after_response','extended_from_support','away_from_support','support_failed','repairing_structure','current_location_unresolved']),
+  phase:new Set(['at_support','responding_from_support','stalled_after_response','extended_from_support','away_from_support','support_failed','repairing_structure','current_location_unresolved','unknown']),
   structure:new Set(['intact','weakening','broken','unknown']),
   support:new Set(['testing','held','failed','not_tested','unknown']),
   buyerResponse:new Set(['none','present','confirmed','failed','unknown']),
@@ -524,18 +524,42 @@ function narrationVolumeState(value = ''){
   return ({expanding:'constructive',constructive:'constructive',contracting:'light',diminishing:'light',light:'light',average:'mixed',normal:'mixed',mixed:'mixed',weak:'weak',heavy:'heavy'})[normaliseString(value, '').trim().toLowerCase()] || 'unknown';
 }
 
+function narrationPacketEventKeys(packet = {}){
+  const source = safeObject(packet);
+  return [...new Set([
+    source.dominantEventKey, source.primaryStoryKey, source.recentStoryKey,
+    ...(normalizeStringSequence(source.eventSequence)), ...(normalizeStringSequence(source.storyEvents))
+  ].map(value => normaliseString(value, '').trim().toLowerCase()).filter(Boolean))];
+}
+
+function projectNarrationPhaseFromPacket(eventPacket = {}){
+  const packet = normalizeDeterministicEventPacket(eventPacket);
+  const support = safeObject(packet.supportState);
+  const interaction = normalizeNarrationEnum(support.interaction, NARRATION_ENUMS.support, 'unknown');
+  const followThrough = normalizeNarrationEnum(packet.followThroughState || String(packet.confirmationSemantic || '').replace('follow_through_', ''), NARRATION_ENUMS.followThrough, 'unknown');
+  const responsePresent = ['present','confirmed'].includes(normalizeNarrationEnum(packet.buyerResponseState, NARRATION_ENUMS.buyerResponse, packet.buyerResponseSemantic === 'response_present' ? 'present' : 'unknown'));
+  const control = normalizeNarrationEnum(packet.buyerControlState, NARRATION_ENUMS.buyerControl, 'unknown');
+  const keys = narrationPacketEventKeys(packet);
+  const has = key => keys.includes(key);
+  const explicitPhase = normalizeNarrationEnum(packet.currentPhase, NARRATION_ENUMS.phase, '');
+  if(interaction === 'failed' || packet.supportSemantic === 'support_failed' || has('support_failed') || has('support_failed_test')) return 'support_failed';
+  if(followThrough === 'stalled' || packet.confirmationSemantic === 'follow_through_stalled' || has('rebound_stalled') || has('follow_through_stalled') || has('stalled_after_support_response')) return 'stalled_after_response';
+  if(explicitPhase && explicitPhase !== 'unknown') return explicitPhase;
+  if(support.currentlyActive === true && ['testing','held'].includes(interaction)) return (responsePresent || ['developing','emerging','confirmed'].includes(control)) ? 'responding_from_support' : 'at_support';
+  if(has('early_rebound_from_20ma') || has('early_rebound_from_50ma') || (packet.supportSemantic === 'support_present' && (responsePresent || ['developing','emerging','confirmed'].includes(control)))) return 'responding_from_support';
+  if(has('extended_after_run') || has('rebound_extended')) return 'extended_from_support';
+  if(packet.supportSemantic === 'support_absent') return 'away_from_support';
+  if(packet.supportSemantic === 'support_present' || ['testing','held'].includes(interaction)) return 'at_support';
+  return 'unknown';
+}
+
 function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
   // Compatibility adapter for pre-contract payloads only. A supplied v1 contract is
   // deliberately never rebuilt here; the renderer consumes it as client authority.
   const packet = normalizeDeterministicEventPacket(eventPacket);
   const extra = safeObject(source);
   const supportState = safeObject(packet.supportState);
-  const inferredPhase = packet.supportSemantic === 'support_failed'
-    ? 'support_failed'
-    : (packet.supportSemantic === 'support_absent'
-      ? 'away_from_support'
-      : (packet.buyerResponseSemantic === 'response_present' ? 'responding_from_support' : (packet.supportSemantic === 'support_present' ? 'at_support' : 'current_location_unresolved')));
-  const phase = normalizeNarrationEnum(packet.currentPhase, NARRATION_ENUMS.phase, inferredPhase);
+  const phase = projectNarrationPhaseFromPacket(packet);
   const mappedStructure = narrationStructureState(extra.structure || extra.structureState);
   const structure = mappedStructure !== 'unknown' ? mappedStructure : (packet.dominantEventKey === 'structure_breaking_down' ? 'broken' : 'unknown');
   const support = normalizeNarrationEnum(supportState.interaction, NARRATION_ENUMS.support,
@@ -582,9 +606,18 @@ function buildCanonicalNarrationContract(eventPacket = {}, source = {}){
 
 function selectCanonicalNarrationContractForRenderer(suppliedContract, legacyEventPacket = {}, legacySource = {}){
   const supplied = safeObject(suppliedContract);
-  // Preserve the exact supplied object: validation may reject it, but no server
-  // compatibility helper may rewrite its phase or support authority.
-  if(Object.keys(supplied).length) return supplied;
+  // Preserve valid supplied authority. An unknown phase is the narrow exception:
+  // deterministic chronology must not be discarded before narration is rendered.
+  if(Object.keys(supplied).length){
+    const projectedPhase = projectNarrationPhaseFromPacket(legacyEventPacket);
+    if(String(supplied.phase || '').trim().toLowerCase() === 'unknown' && projectedPhase !== 'unknown'){
+      return buildCanonicalNarrationContract(legacyEventPacket, {
+        ...legacySource,
+        verdict:supplied.verdict || legacySource.verdict
+      });
+    }
+    return supplied;
+  }
   return buildCanonicalNarrationContract(legacyEventPacket, legacySource);
 }
 
@@ -598,6 +631,11 @@ function validateCanonicalNarrationContract(contract = {}){
   if(!['20ma','50ma','200ma','unknown'].includes(normaliseString(support.type, 'unknown'))) errors.push('support_type_unknown');
   if(!['active_testing_support','active_held_support','failed_support','off_support','unknown'].includes(normaliseString(support.semantic, 'unknown'))) errors.push('support_semantic_unknown');
   if(support.currentlyActive !== true && support.currentlyActive !== false && support.currentlyActive !== null && support.currentlyActive !== undefined) errors.push('support_currently_active_invalid');
+  const recognisedPhaseEvidence = value.followThrough === 'stalled'
+    || support.interaction === 'failed'
+    || (['testing','held'].includes(support.interaction) && ['present','confirmed'].includes(value.buyerResponse))
+    || (support.interaction === 'held' && ['developing','emerging','confirmed'].includes(value.buyerControl));
+  if(value.phase === 'unknown' && recognisedPhaseEvidence) errors.push('phase_unknown_with_recognized_evidence');
   // A stalled rebound can follow an initially confirmed buyer response and control.
   // Only a confirmed continuation conflicts with the current stalled follow-through.
   if(value.phase === 'stalled_after_response' && value.followThrough === 'confirmed') errors.push('stalled_follow_through_confirmed_conflict');
@@ -677,6 +715,17 @@ function namedActiveSupportContradictionCode(text = '', support = {}){
   return '';
 }
 
+function historicalSupportContradictionCode(text = '', support = {}){
+  const aliases = activeSupportAliases(support);
+  if(!aliases.length) return '';
+  const target = `(?:the\\s+)?(?:${aliases.join('|')})`;
+  const value = String(text || '');
+  if(new RegExp(`\\b(?:away from|off)\\s+${target}\\b`, 'i').test(value)) return 'unsupported_away_from_historical_support';
+  if(new RegExp(`\\b(?:no longer|not)\\s+(?:sitting\\s+)?near\\s+${target}\\b`, 'i').test(value)) return 'unsupported_not_near_historical_support';
+  if(new RegExp(`\\b(?:(?:watch|wait) for )?(?:price to )?(?:needs? to |must |first )?(?:return|pull back|pullback|fresh pullback|move)(?:\\s+back)?(?:\\s+into|\\s+to|\\s+toward)?\\s+${target}\\b`, 'i').test(value)) return 'unsupported_return_to_historical_support';
+  return '';
+}
+
 function validateNarrationProseAgainstContract(response = {}, contract = {}){
   const prose = normalizeFlatStringFields(response, FINAL_PROSE_REQUIRED_FIELDS);
   const text = Object.values(prose).join(' ').toLowerCase();
@@ -684,8 +733,13 @@ function validateNarrationProseAgainstContract(response = {}, contract = {}){
   const support = safeObject(contract.support);
   const activeSupport = support.currentlyActive === true
     || ['active_testing_support','active_held_support'].includes(normaliseString(support.semantic, ''))
-    || (['at_support','responding_from_support','stalled_after_response'].includes(contract.phase)
+    || ((['at_support','responding_from_support'].includes(contract.phase)
+      || (contract.phase === 'stalled_after_response' && support.currentlyActive !== false))
       && ['testing','held'].includes(support.interaction));
+  const historicalSupport = !activeSupport
+    && contract.phase === 'stalled_after_response'
+    && ['testing','held'].includes(support.interaction)
+    && !!activeSupportAliases(support).length;
   const supportAliases = activeSupportAliases(support);
   const namedActiveSupport = supportAliases.length ? new RegExp(`(?:the\\s+)?(?:${supportAliases.join('|')})`, 'i') : null;
   const hasActiveSupportContext = () => {
@@ -698,7 +752,8 @@ function validateNarrationProseAgainstContract(response = {}, contract = {}){
   const phaseWords = {
     at_support:/support/, responding_from_support:/support|respond/, stalled_after_response:/stalled|follow-through|follow through/,
     extended_from_support:/extended|away from/, away_from_support:/away from|clearer support/,
-    support_failed:/support.*fail|failed support/, repairing_structure:/repair|damage/, current_location_unresolved:/location.*clear|clear.*location/
+    support_failed:/support.*fail|failed support/, repairing_structure:/repair|damage/, current_location_unresolved:/location.*clear|clear.*location/,
+    unknown:/location.*clear|clear.*location|support.*unclear|unclear.*support/
   };
   if(phaseWords[contract.phase] && !phaseWords[contract.phase].test(prose.chartStory.toLowerCase())) errors.push('chart_story_phase_missing');
   if(activeSupport){
@@ -715,6 +770,12 @@ function validateNarrationProseAgainstContract(response = {}, contract = {}){
     if(!hasActiveSupportContext()) errors.push('active_support_context_missing');
   } else if(!['extended_from_support','away_from_support'].includes(contract.phase) && /\b(?:away from|extended from|extension)\s+(?:the\s+)?support\b/i.test(text)) {
     errors.push('unsupported_extension_language');
+  }
+  if(historicalSupport){
+    const namedContradiction = historicalSupportContradictionCode(text, support);
+    if(namedContradiction) errors.push(namedContradiction);
+    if(/\b(?:not\s+(?:sitting\s+)?near|not\s+at)\s+(?:an?\s+)?support(?:\s+(?:area|level))?\b/i.test(text)) errors.push('unsupported_not_near_historical_support');
+    if(/\b(?:there is|there's|no|not)\s+(?:an?\s+)?(?:active\s+)?support\s+(?:test|testing|interaction)\b/i.test(text)) errors.push('unsupported_no_support_test');
   }
   if(contract.buyerControl !== 'confirmed' && /\bbuyers?\s+(?:are|have)\s+(?:in\s+)?control\b|\bcontrol has returned\b/.test(text)) errors.push(contract.buyerControl === 'developing' ? 'developing_control_described_as_confirmed' : 'unsupported_buyer_control_language');
   if(contract.buyerControl === 'confirmed' && /buyers? still need to prove control|buyer control is not convincing|buyers? have not taken control|no buyer control/i.test(text)) errors.push('confirmed_buyer_control_denied');
@@ -2526,6 +2587,7 @@ exports.__test = {
   buildProductionAnalysisInstructionLines,
   normalizeDeterministicEventPacket,
   buildCanonicalNarrationContract,
+  projectNarrationPhaseFromPacket,
   selectCanonicalNarrationContractForRenderer,
   validateCanonicalNarrationContract,
   buildCanonicalNarrationRendererInput,

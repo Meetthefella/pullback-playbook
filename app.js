@@ -37719,7 +37719,28 @@ function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
   const narrationStructureState = value => ({strong:'intact',intact:'intact',developing_clean:'intact',developing:'intact',weak:'weakening',weakening:'weakening',broken:'broken'})[String(value || '').trim().toLowerCase()] || 'unknown';
   const narrationTrendState = value => ({strong:'healthy',healthy:'healthy',acceptable:'healthy',weak:'weak',broken:'broken'})[String(value || '').trim().toLowerCase()] || 'unknown';
   const narrationVolumeState = value => ({expanding:'constructive',constructive:'constructive',contracting:'light',diminishing:'light',light:'light',average:'mixed',normal:'mixed',mixed:'mixed',weak:'weak',heavy:'heavy'})[String(value || '').trim().toLowerCase()] || 'unknown';
-  const phase = allowed(packet.currentPhase, ['at_support','responding_from_support','stalled_after_response','extended_from_support','away_from_support','support_failed','repairing_structure','current_location_unresolved']);
+  const narrationEventKeys = [...new Set([
+    packet.dominantEventKey, packet.primaryStoryKey, packet.recentStoryKey,
+    ...(Array.isArray(packet.eventSequence) ? packet.eventSequence : []),
+    ...(Array.isArray(packet.storyEvents) ? packet.storyEvents : [])
+  ].map(value => String(value || '').trim().toLowerCase()).filter(Boolean))];
+  const hasNarrationEvent = key => narrationEventKeys.includes(key);
+  const supportInteraction = String(packet.supportState && packet.supportState.interaction || '').trim().toLowerCase();
+  const packetFollowThrough = String(packet.followThroughState || packet.confirmationSemantic || '').trim().toLowerCase().replace('follow_through_', '');
+  const packetResponse = String(packet.buyerResponseState || packet.buyerResponseSemantic || '').trim().toLowerCase();
+  const packetControl = String(packet.buyerControlState || '').trim().toLowerCase();
+  const explicitPhase = allowed(packet.currentPhase, ['at_support','responding_from_support','stalled_after_response','extended_from_support','away_from_support','support_failed','repairing_structure','current_location_unresolved'], '');
+  const phase = (() => {
+    if(supportInteraction === 'failed' || packet.supportSemantic === 'support_failed' || hasNarrationEvent('support_failed') || hasNarrationEvent('support_failed_test')) return 'support_failed';
+    if(packetFollowThrough === 'stalled' || packet.confirmationSemantic === 'follow_through_stalled' || hasNarrationEvent('rebound_stalled') || hasNarrationEvent('follow_through_stalled') || hasNarrationEvent('stalled_after_support_response')) return 'stalled_after_response';
+    if(explicitPhase) return explicitPhase;
+    if(packet.supportState && packet.supportState.currentlyActive === true && ['testing','held'].includes(supportInteraction)) return ['present','confirmed','response_present'].includes(packetResponse) || ['developing','emerging','confirmed'].includes(packetControl) ? 'responding_from_support' : 'at_support';
+    if(hasNarrationEvent('early_rebound_from_20ma') || hasNarrationEvent('early_rebound_from_50ma') || (packet.supportSemantic === 'support_present' && (['present','confirmed','response_present'].includes(packetResponse) || ['developing','emerging','confirmed'].includes(packetControl)))) return 'responding_from_support';
+    if(hasNarrationEvent('extended_after_run') || hasNarrationEvent('rebound_extended')) return 'extended_from_support';
+    if(packet.supportSemantic === 'support_absent') return 'away_from_support';
+    if(packet.supportSemantic === 'support_present' || ['testing','held'].includes(supportInteraction)) return 'at_support';
+    return 'unknown';
+  })();
   const nextByPhase = {at_support:'support_hold',responding_from_support:'follow_through',stalled_after_response:'follow_through',extended_from_support:'pullback_or_reset',away_from_support:'clearer_support',support_failed:'repair',repairing_structure:'repair',current_location_unresolved:'clearer_support'};
   const structure = narrationStructureState(context.structureState) !== 'unknown'
     ? narrationStructureState(context.structureState)

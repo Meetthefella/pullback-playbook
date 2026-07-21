@@ -84,6 +84,49 @@ const stalled = hooks.buildCanonicalNarrationContract({
   supportState:{interaction:'held'}, buyerControlState:'emerging', confirmationSemantic:'follow_through_unconfirmed', evidenceFactIds:['support','stall']
 }, {structure:'intact', nextRequiredEvent:'follow_through'});
 stalled.support = {type:'50ma', label:'50-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'};
+
+const amznStylePacket = {
+  dominantEventKey:'early_rebound_from_20ma',
+  primaryStoryKey:'early_rebound_from_20ma',
+  recentStoryKey:'early_rebound_from_20ma',
+  dominantEventLabel:'Early rebound from 20-day average',
+  eventSequence:['support_held_at_20ma','buyers_responded','rebound_stalled'],
+  storyEvents:['support_held_at_20ma','buyers_responded','buyer_control_emerging','rebound_stalled'],
+  supportState:{type:'20ma', label:'20-day average', interaction:'held', currentlyActive:false, semantic:'unknown'},
+  supportSemantic:'support_present',
+  buyerResponseSemantic:'response_present',
+  buyerResponseState:'present',
+  buyerControlState:'developing',
+  followThroughState:'stalled',
+  confirmationSemantic:'follow_through_stalled',
+  currentPhase:'unknown',
+  evidenceFactIds:['support_20ma','buyers_responded','rebound_stalled']
+};
+const amznStyleContract = hooks.buildCanonicalNarrationContract(amznStylePacket, {structure:'intact', verdict:'watch'});
+assert.strictEqual(amznStyleContract.phase, 'stalled_after_response', 'stalled deterministic chronology must outrank an unknown phase');
+assert.strictEqual(amznStyleContract.support.type, '20ma', 'the historical 20MA support type must survive contract projection');
+assert.strictEqual(amznStyleContract.support.label, '20-day average', 'the historical 20MA label must survive contract projection');
+assert.strictEqual(amznStyleContract.buyerResponse, 'present', 'buyer response must remain separate from buyer control');
+assert.strictEqual(amznStyleContract.buyerControl, 'developing', 'developing buyer control must survive contract projection');
+assert.strictEqual(amznStyleContract.followThrough, 'stalled', 'stalled follow-through must survive contract projection');
+assert.strictEqual(amznStyleContract.nextRequiredEvent, 'follow_through', 'a stalled response must require follow-through rather than a new support test');
+assert.strictEqual(hooks.projectNarrationPhaseFromPacket(amznStylePacket), 'stalled_after_response', 'packet phase projection must recognise the AMZN-style chronology');
+const repairedSuppliedContract = hooks.selectCanonicalNarrationContractForRenderer({...amznStyleContract, phase:'unknown'}, amznStylePacket, {structure:'intact', verdict:'watch'});
+assert.strictEqual(repairedSuppliedContract.phase, 'stalled_after_response', 'a supplied unknown phase must be repaired from deterministic chronology before rendering');
+assert.ok(hooks.validateCanonicalNarrationContract({...amznStyleContract, phase:'unknown'}).errors.includes('phase_unknown_with_recognized_evidence'), 'unknown phase must fail validation when stalled chronology is already proven');
+const historicalSupportContradictions = [
+  'Price is not sitting near a support area right now.',
+  'Price is away from the 20-day average.',
+  'Watch for price to move back into the 20-day average before the setup becomes relevant.',
+  'No support test occurred.'
+];
+for(const sentence of historicalSupportContradictions){
+  const response = {chartStory:'Buyers responded from the 20-day average, but follow-through has stalled.', whyItMatters:'The rebound did not progress.', setupLocation:sentence, learningPoint:'A stalled rebound needs renewed participation.', whatNext:'Watch for buyers to follow through with another firm close.'};
+  assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, amznStyleContract).ok, false, `historical 20MA support contradiction must fail: ${sentence}`);
+}
+const genuinelyUnknownContract = hooks.buildCanonicalNarrationContract({}, {structure:'unknown', verdict:'watch'});
+assert.strictEqual(genuinelyUnknownContract.phase, 'unknown', 'incomplete evidence may remain unknown when no recognised chronology exists');
+assert.strictEqual(hooks.validateCanonicalNarrationContract(genuinelyUnknownContract).ok, true, 'a genuinely unknown contract must remain renderable');
 const stalledAfterConfirmedControl = {...stalled, buyerResponse:'confirmed', buyerControl:'confirmed', followThrough:'stalled'};
 assert.strictEqual(hooks.validateCanonicalNarrationContract(stalledAfterConfirmedControl).ok, true, 'confirmed initial buyer control must be valid when follow-through later stalls');
 assert.ok(
