@@ -226,6 +226,36 @@ for(const sentence of ['Price is below the 20-day average while testing the 50-d
 }
 
 const amat = {...stalled, phase:'responding_from_support', support:{type:'20ma', label:'20-day average', interaction:'testing', currentlyActive:true, semantic:'active_testing_support'}, followThrough:'unconfirmed'};
+const amznContinuationProse = {
+  chartStory:'Price pulled back into the 20-day average and buyers have started to respond from support.',
+  whyItMatters:'The first rebound is encouraging, but it still needs proof.',
+  setupLocation:'Price is testing the current support context near the 20-day average.',
+  learningPoint:'An early response needs continuation before traders can trust it.',
+  whatNext:'Watch for price to hold above the 20-day average and build on the recent rebound.'
+};
+assert.strictEqual(hooks.validateNarrationProseAgainstContract(amznContinuationProse, amat).ok, true, 'AMZN-style hold-and-build wording must satisfy follow-through without requiring literal phrasing');
+assert.ok(hooks.validateNarrationProseAgainstContract({...amznContinuationProse, whatNext:'Watch for price to hold above the 20-day average.'}, amat).errors.includes('next_required_event_missing'), 'a support hold alone must not be mistaken for follow-through');
+const followThroughCases = [
+  {label:'20-day average', type:'20ma', whatNext:'Watch for price to hold above the 20-day average and build on the rebound.', pass:true},
+  {label:'50-day average', type:'50ma', whatNext:'Buyers now need to stay above the 50-day average and continue the recovery.', pass:true},
+  {label:'200-day average', type:'200ma', whatNext:'Look for price to remain over support and gain further traction.', pass:true},
+  {label:'20-day average', type:'20ma', whatNext:'The next step is for buyers to confirm the bounce with continued strength.', pass:true},
+  {label:'20-day average', type:'20ma', whatNext:'Watch for price to hold above the 20-day average.', pass:false},
+  {label:'20-day average', type:'20ma', whatNext:'Watch for price to hold above the 20-day average. Buyers previously built on the rebound.', pass:false},
+  {label:'50-day average', type:'50ma', whatNext:'Watch for price to stay over support. The rebound did not build on.', pass:false},
+  {label:'50-day average', type:'50ma', whatNext:'Price held above the 50-day average and continued higher last week.', pass:false},
+  {label:'200-day average', type:'200ma', whatNext:'Watch for support to hold, although the rebound has stalled.', pass:false}
+];
+for(const testCase of followThroughCases){
+  const contract = {...amat, support:{type:testCase.type, label:testCase.label, interaction:'testing', currentlyActive:true, semantic:'active_testing_support'}};
+  const prose = {...amznContinuationProse, chartStory:'Price is responding from support.', setupLocation:`Price is testing support near the ${testCase.label}.`, whatNext:testCase.whatNext};
+  const validation = hooks.validateNarrationProseAgainstContract(prose, contract);
+  const diagnosticEvidence = hooks.narrationNextRequiredEventEvidence(prose, contract);
+  assert.strictEqual(validation.ok, testCase.pass, `${testCase.type}: sentence-scoped follow-through validation must ${testCase.pass ? 'accept' : 'reject'} “${testCase.whatNext}”`);
+  assert.strictEqual(diagnosticEvidence.matched, testCase.pass, `${testCase.type}: diagnostic next-event status must match validator status for “${testCase.whatNext}”`);
+  if(!testCase.pass) assert.ok(validation.errors.includes('next_required_event_missing'), `${testCase.type}: rejected follow-through prose must retain next-event failure`);
+  if(testCase.pass) assert.ok(!validation.errors.includes('next_required_event_missing'), `${testCase.type}: validated follow-through prose must not report a missing next event`);
+}
 for(const sentence of ['Price is away from the 20-day average.', 'Price is not near support.', 'Buyers have not responded.', 'Wait for a pullback to the 20-day average.']){
   const response = {chartStory:'Price is responding from support.', whyItMatters:'The response needs proof.', setupLocation:sentence, learningPoint:'Early responses need confirmation.', whatNext:'Watch for buyers to follow through.'};
   assert.strictEqual(hooks.validateNarrationProseAgainstContract(response, amat).ok, false, `AMAT contradiction must fail: ${sentence}`);
@@ -275,8 +305,8 @@ for(const phase of ['away_from_support','extended_from_support']){
   assert.strictEqual(fallback.retryCount, 1, 'a fallback after an invalid retry must report one retry');
   const missingNextEvent = {...valid, whatNext:'Watch the next candle for a better signal.'};
   assert.ok(hooks.validateNarrationProseAgainstContract(missingNextEvent, stalled).errors.includes('next_required_event_missing'), 'renderer prose must preserve the contract nextRequiredEvent in whatNext');
-  assert.strictEqual(hooks.narrationNextRequiredEventEvidence('Watch for buyers to build on the rebound.', 'follow_through').classification, 'possible_wording_too_narrow', 'diagnostics must distinguish a plausible follow-through synonym from an omitted event');
-  assert.strictEqual(hooks.narrationNextRequiredEventEvidence('Watch the next candle.', 'follow_through').classification, 'llm_omitted_required_event', 'diagnostics must distinguish an LLM omission from a wording mismatch');
+  assert.strictEqual(hooks.narrationNextRequiredEventEvidence({whatNext:'Watch for buyers to build on the rebound.'}, stalled).classification, 'matched', 'approved build-on-rebound wording must satisfy follow-through');
+  assert.strictEqual(hooks.narrationNextRequiredEventEvidence({whatNext:'Watch the next candle.'}, stalled).classification, 'llm_omitted_required_event', 'diagnostics must distinguish an LLM omission from a wording mismatch');
   assert.strictEqual(hooks.narrationDebugSource('openai'), 'canonical_llm', 'debug metadata must label canonical LLM prose consistently');
   assert.strictEqual(hooks.narrationDebugValidationStatus('recovered'), 'passed', 'a valid retry must report final validation as passed');
   assert.strictEqual(hooks.narrationDebugValidationStatus('invalid_contract'), 'failed', 'an invalid contract must report validation failure');

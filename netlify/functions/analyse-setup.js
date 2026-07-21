@@ -933,16 +933,15 @@ function validateNarrationProseAgainstContract(response = {}, contract = {}){
   if(contract.followThrough === 'stalled' && /improving rebound|rebound is improving/.test(text)) errors.push('stalled_follow_through_improvement_language');
   if(contract.phase === 'stalled_after_response' && /new pullback|reset|pull back again/.test(prose.whatNext.toLowerCase())) errors.push('stalled_response_reset_instruction');
   if(contract.phase === 'responding_from_support' && /\b(?:buyers? (?:have )?(?:not|haven't|did not|didn't) respond(?:ed)?|no buyer response)\b/i.test(text)) errors.push('buyer_response_denied');
-  const nextEventEvidence = narrationNextRequiredEventEvidence(prose.whatNext, contract.nextRequiredEvent);
+  const nextEventEvidence = narrationNextRequiredEventEvidence(prose, contract);
   if(nextEventEvidence.required && !nextEventEvidence.matched) errors.push('next_required_event_missing');
   return {ok:errors.length === 0, errors};
 }
 
-function narrationNextRequiredEventEvidence(whatNext = '', nextRequiredEvent = ''){
-  const value = normaliseString(whatNext, '').toLowerCase();
-  const event = normaliseString(nextRequiredEvent, 'unknown');
+function narrationNextRequiredEventEvidence(prose = {}, contract = {}){
+  const value = normaliseString(typeof prose === 'string' ? prose : safeObject(prose).whatNext, '').toLowerCase();
+  const event = normaliseString(safeObject(contract).nextRequiredEvent, 'unknown');
   const patterns = {
-    follow_through:/follow-through|follow through|another firm close/,
     repair:/repair|rebuild/,
     pullback_or_reset:/pullback|reset/,
     clearer_support:/clearer support|support area/,
@@ -951,16 +950,43 @@ function narrationNextRequiredEventEvidence(whatNext = '', nextRequiredEvent = '
   const semanticAlternatives = {
     // Logged only: this is deliberately not accepted as a contract match until
     // real renderer output proves that the existing wording is too narrow.
-    follow_through:/another (?:strong|constructive|positive) close|buyers?.{0,48}\b(?:build|add|continue|carry)\b.{0,48}\b(?:move|rebound|advance)|\b(?:move|rebound|advance).{0,48}\b(?:build|continue|carry)\b/
+    follow_through:/another (?:strong|constructive|positive) close|buyers?[^.!?]{0,48}\b(?:build|add|continue|carry)\b[^.!?]{0,48}\b(?:move|rebound|advance)|\b(?:move|rebound|advance)[^.!?]{0,48}\b(?:build|continue|carry)\b/
   };
-  const required = !!patterns[event];
-  const matched = !required || patterns[event].test(value);
+  const sentences = value.match(/[^.!?]+(?:[.!?]+|$)/g) || (value ? [value] : []);
+  const supportAliases = activeSupportAliases(safeObject(contract).support);
+  const supportReference = new RegExp(`\\b(?:support|${supportAliases.join('|') || 'support'})\\b`, 'i');
+  const instruction = /\b(?:watch(?:\s+for)?|look\s+for|wait\s+for|the\s+next\s+step\s+is|buyers?\s+(?:now\s+)?need(?:s)?\s+to|price\s+needs?\s+to|need(?:s)?\s+to|seek)\b/i;
+  const constructiveHold = /\b(?:hold|stay|remain)\s+(?:above|over|at)\b/i;
+  const directFollowThrough = /\bfollow[-\s]?through\b|\banother\s+(?:firm|strong|constructive)\s+close\b/i;
+  const continuation = /\b(?:build(?:ing)?\s+on|continu(?:e|es|ed|ing)|extend(?:s|ed|ing)?|strengthen(?:s|ed|ing)?|develop(?:s|ed|ing)?|follow[-\s]?through|confirm(?:s|ed|ing)?|gain(?:s|ed|ing)?\s+(?:further\s+)?traction|carr(?:y|ies|ied|ying)[^.!?]{0,32}\bhigher|continued\s+strength)\b/i;
+  const continuationObject = /\b(?:rebound|bounce|move|recovery|response|advance|buying\s+strength|buyer\s+control)\b/i;
+  const negatedContinuation = /\b(?:did\s+not|didn't|not|no|failed|fail(?:ed|ing)?|stalled|lacked|lacking)\b[^.!?]{0,64}\b(?:build(?:ing)?\s+on|continu(?:e|es|ed|ing)|extend(?:s|ed|ing)?|strengthen(?:s|ed|ing)?|develop(?:s|ed|ing)?|follow[-\s]?through|confirm(?:s|ed|ing)?|gain(?:s|ed|ing)?\s+(?:further\s+)?traction|carr(?:y|ies|ied|ying))\b|\b(?:rebound|bounce|move|recovery|response|advance)\b[^.!?]{0,48}\b(?:failed|stalled|lacked|did\s+not|didn't)\b/i;
+  const followThroughSentence = sentence => {
+    const hasInstruction = instruction.test(sentence);
+    const hasHold = constructiveHold.test(sentence);
+    const hasSupport = supportReference.test(sentence);
+    const hasContinuation = continuation.test(sentence);
+    const hasObject = continuationObject.test(sentence);
+    if(!hasInstruction || !hasContinuation || negatedContinuation.test(sentence)) return false;
+    if(directFollowThrough.test(sentence)) return true;
+    // A hold/stay/remain instruction must name the relevant support in that
+    // same sentence; a pure continuation instruction can name its canonical
+    // object (bounce, recovery, buyer control) instead.
+    return hasHold ? hasSupport : hasObject;
+  };
+  const required = event === 'follow_through' || !!patterns[event];
+  const matched = event === 'follow_through'
+    ? sentences.some(followThroughSentence)
+    : (!required || patterns[event].test(value));
+  const possibleAlternative = event === 'follow_through'
+    && sentences.some(sentence => semanticAlternatives.follow_through.test(sentence));
   return {
     nextRequiredEvent:event,
     required,
     matched,
-    classification:matched ? 'matched' : (semanticAlternatives[event] && semanticAlternatives[event].test(value) ? 'possible_wording_too_narrow' : 'llm_omitted_required_event'),
-    whatNext:value
+    classification:matched ? 'matched' : (possibleAlternative ? 'possible_wording_too_narrow' : 'llm_omitted_required_event'),
+    whatNext:value,
+    sentences
   };
 }
 
@@ -996,9 +1022,10 @@ async function renderCanonicalNarrationWithRetry(contract, requestRenderer, logC
   const firstResult = unpackRendererResult(await requestRenderer(finalPrompt, 'chart_guru_final_prose'));
   const first = firstResult.prose;
   const firstValidation = validateNarrationProseAgainstContract(first, contract);
+  const firstNextEventEvidence = narrationNextRequiredEventEvidence(first, contract);
   console.log('[CHART_GURU_NARRATION_RENDERER_RESPONSE]', JSON.stringify({
     ...safeObject(logContext), contractObject:undefined, ...rendererTrace, attempt:0, nextRequiredEvent:contract.nextRequiredEvent,
-    rawResponse:firstResult.rawResponse, response:first, nextEventEvidence:narrationNextRequiredEventEvidence(first && first.whatNext, contract.nextRequiredEvent), validation:firstValidation
+    rawResponse:firstResult.rawResponse, response:first, nextEventEvidence:firstNextEventEvidence, validation:firstValidation
   }));
   if(firstValidation.ok) return {prose:first, source:'openai', errors, retryCount:0, rendererContractSnapshot:rendererTrace.rendererContract, rendererReceivesRepairedContract:rendererTrace.rendererReceivesRepairedContract};
   errors.push(...firstValidation.errors.map(code => `first:${code}`));
@@ -1009,9 +1036,10 @@ async function renderCanonicalNarrationWithRetry(contract, requestRenderer, logC
   const retryResult = unpackRendererResult(await requestRenderer(retryPrompt, 'chart_guru_final_prose_retry'));
   const retry = retryResult.prose;
   const retryValidation = validateNarrationProseAgainstContract(retry, contract);
+  const retryNextEventEvidence = narrationNextRequiredEventEvidence(retry, contract);
   console.log('[CHART_GURU_NARRATION_RENDERER_RESPONSE]', JSON.stringify({
     ...safeObject(logContext), contractObject:undefined, ...rendererTrace, attempt:1, nextRequiredEvent:contract.nextRequiredEvent,
-    rawResponse:retryResult.rawResponse, response:retry, nextEventEvidence:narrationNextRequiredEventEvidence(retry && retry.whatNext, contract.nextRequiredEvent), validation:retryValidation
+    rawResponse:retryResult.rawResponse, response:retry, nextEventEvidence:retryNextEventEvidence, validation:retryValidation
   }));
   if(retryValidation.ok) return {prose:retry, source:'retry', errors, retryCount:1, rendererContractSnapshot:rendererTrace.rendererContract, rendererReceivesRepairedContract:rendererTrace.rendererReceivesRepairedContract};
   errors.push(...retryValidation.errors.map(code => `retry:${code}`));
