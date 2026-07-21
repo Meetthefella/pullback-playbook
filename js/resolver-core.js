@@ -2339,6 +2339,25 @@
     const presentationUpgradeBlocked = promotionWasAttempted
       && guardedForPresentation !== requestedBeforeGuards
       && guardBlockers.length > 0;
+    const canonicalNextRequiredEvent = String(supportAuthority.supportTestState || '').toLowerCase() === 'failed'
+      ? 'repair'
+      : (guardedVerdict.entry_gate_pass === true
+        ? 'execute_if_trigger_valid'
+        : (guardedVerdict.confirmation_gate_pass === false
+          ? 'confirmation'
+          : (guardedVerdict.buyer_control_gate_pass === false ? 'buyer_control' : 'review_setup')));
+    const canonicalNextAction = canonicalNextRequiredEvent === 'repair'
+      ? 'Wait for the setup to repair before reviewing it again.'
+      : (canonicalNextRequiredEvent === 'execute_if_trigger_valid'
+        ? 'Execute only if the trigger remains valid.'
+        : (canonicalNextRequiredEvent === 'buyer_control'
+          ? 'Wait for buyers to prove control before considering an entry.'
+          : (canonicalNextRequiredEvent === 'confirmation'
+            ? 'Wait for stronger confirmation before considering an entry.'
+            : 'Review setup inputs')));
+    const canonicalDecisiveBlocker = canonicalFinalVerdict === 'entry'
+      ? ''
+      : (reason || trackedReason || viability.mainBlocker || '');
     return {
       base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
@@ -2453,6 +2472,14 @@
       reject_blocked_by_incomplete_inputs:viability.rejectBlockedByIncompleteInputs === true,
       viability_visual_bucket:viability.visualBucket || '',
       main_blocker:reason || trackedReason || viability.mainBlocker || '',
+      canonicalDecisionProjection:{
+        verdict:canonicalFinalVerdict,
+        canonicalVerdict:canonicalFinalVerdict,
+        decisiveBlocker:canonicalDecisiveBlocker,
+        primaryReason:canonicalDecisiveBlocker,
+        nextRequiredEvent:canonicalNextRequiredEvent,
+        nextAction:canonicalNextAction
+      },
       primary_blocker_source:fallingKnifeApplied
         ? 'falling_knife'
         : ((resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver')))),

@@ -10118,8 +10118,12 @@ function buildSharedReviewTrackPresentation(record, options = {}){
           : verdictLabel(effectiveCanonicalVerdict || 'watch')))
     )
   ).trim();
+  const resolverDecisionProjection = globalVerdict.canonicalDecisionProjection && typeof globalVerdict.canonicalDecisionProjection === 'object'
+    ? globalVerdict.canonicalDecisionProjection
+    : null;
   const nextAction = String(
-    projectionActionGuidance
+    resolverDecisionProjection && resolverDecisionProjection.nextAction
+    || projectionActionGuidance
     || (preserveTrackedLifecycleCanonicalVerdict
       ? verdictLabel(effectiveCanonicalVerdict || 'watch')
       : '')
@@ -10130,15 +10134,22 @@ function buildSharedReviewTrackPresentation(record, options = {}){
         ? 'Wait for stronger confirmation before considering entry.'
         : String(visibleModel.nextAction || '').trim()))
   ).trim();
-  const mainBlocker = String(simplifiedState.mainBlocker || visibleModel.mainBlocker || globalVerdict.reason || '').trim();
+  const mainBlocker = String(
+    resolverDecisionProjection && (resolverDecisionProjection.decisiveBlocker || resolverDecisionProjection.primaryReason)
+    || simplifiedState.mainBlocker
+    || visibleModel.mainBlocker
+    || globalVerdict.reason
+    || ''
+  ).trim();
   const planVisible = trackRenderModel && typeof trackRenderModel.planVisible === 'boolean'
     ? trackRenderModel.planVisible === true
     : (effectiveCanonicalVerdict === 'entry'
       ? true
       : (visibleModel.planVisible === true || simplifiedState.planVisible === true));
-  const resolvedPrimaryReason = String(projectionAuthority
-    ? 'Buyers are in control and the setup is ready to act on.'
-    : (
+  let resolvedPrimaryReason = String(
+    (projectionAuthority
+      ? 'Buyers are in control and the setup is ready to act on.'
+      : (
       (trackRenderModel && trackRenderModel.primaryReason)
       || (preserveTrackedLifecycleCanonicalVerdict
         ? (effectiveCanonicalVerdict === 'entry'
@@ -10148,9 +10159,9 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       || (effectiveCanonicalVerdict === 'entry'
         ? 'Buyers are in control and the setup is ready to act on.'
         : (effectiveCanonicalVerdict === 'near_entry'
-          ? String(visibleModel.primaryReason || 'The setup is close, but confirmation still needs to improve.').trim()
+        ? String(visibleModel.primaryReason || 'The setup is close, but confirmation still needs to improve.').trim()
           : String(visibleModel.primaryReason || mainBlocker || '').trim()))
-    )
+    ))
   ).trim();
   const planStatus = String(
     (trackRenderModel && trackRenderModel.planStatus)
@@ -10168,6 +10179,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       resolvedContract:{planStatusKey:planStatus},
       derivedStates:semanticDerivedStates,
       globalVerdict,
+      resolverDecisionProjection,
       authoritativeBlockerText:String(
         (trackRenderModel && trackRenderModel.mainBlocker)
         || visibleModel.mainBlocker
@@ -10180,6 +10192,9 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const trackDecisionSemantics = trackDecisionProjection && trackDecisionProjection.semantics
     ? trackDecisionProjection.semantics
     : null;
+  if(trackDecisionProjection && String(trackDecisionProjection.primaryReason || '').trim()){
+    resolvedPrimaryReason = String(trackDecisionProjection.primaryReason).trim();
+  }
   const trackDecisionSummary = String(
     trackDecisionSemantics && typeof trackDecisionSummaryFromSemantics === 'function'
       ? trackDecisionSummaryFromSemantics(trackDecisionSemantics, headline || '')
@@ -10192,7 +10207,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     : resolvedPrimaryReason;
   const trackNextAction = terminalTrackState
     ? 'Wait for the chart to repair before considering a new pullback entry.'
-    : String(nextAction || '').trim();
+    : String(trackDecisionProjection && trackDecisionProjection.nextAction || nextAction || '').trim();
   const trackPlanSummary = String(
     (trackRenderModel && trackRenderModel.planSummary)
     || (effectiveCanonicalVerdict === 'entry'
@@ -10214,7 +10229,8 @@ function buildSharedReviewTrackPresentation(record, options = {}){
       )
     ).trim(),
     actionLabel:String(
-    projectionActionGuidance
+    trackDecisionProjection && trackDecisionProjection.nextAction
+    || projectionActionGuidance
     || (preserveTrackedLifecycleCanonicalVerdict
       ? verdictLabel(effectiveCanonicalVerdict || 'watch')
       : '')
@@ -10229,7 +10245,7 @@ function buildSharedReviewTrackPresentation(record, options = {}){
     statusText:headline,
     primaryReason:resolvedPrimaryReason,
     mainBlocker,
-    nextAction,
+    nextAction:trackNextAction,
     planVisible,
     planStatus,
     planSummary:trackPlanSummary,
@@ -22209,6 +22225,7 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
       };
     }
     if(planVerdictContract){
+      const decision = resolved && resolved.debug && resolved.debug.resolvedState && resolved.debug.resolvedState.canonicalDecisionProjection;
       resolved.contractFingerprint = String(planVerdictContract.contractFingerprint || '');
       if(surfaceKey === 'scan'){
         const contractBucket = normalizeVisualBucketForPairing(
@@ -22223,6 +22240,21 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
           resolved.tone = String(contractBucket || resolved.tone || 'monitor').trim().toLowerCase() || 'monitor';
         }
       }
+      // Copy authority is resolved once with the verdict. Do not let Scan,
+      // Review, or Track reconstruct a conflicting blocker from their local
+      // presentation state.
+      if(decision && typeof decision === 'object'){
+        resolved.canonicalDecisionProjection = decision;
+        const decisiveBlocker = String(decision.decisiveBlocker || '').trim();
+        const semanticReason = String(decision.primaryReason || '').trim();
+        if(decisiveBlocker || semanticReason){
+          resolved.mainBlocker = decisiveBlocker || semanticReason;
+          resolved.decisionSummary = semanticReason || decisiveBlocker;
+        }
+        if(String(decision.nextAction || '').trim()){
+          resolved.actionLabel = String(decision.nextAction).trim();
+        }
+      }
       resolved.debug = {
         ...(resolved.debug || {}),
         planVerdictContract:{
@@ -22230,6 +22262,7 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
           canonicalVisualBucket:planVerdictContract.canonicalVisualBucket,
           planAuthority:planVerdictContract.planAuthority,
           lifecycleAuthority:planVerdictContract.lifecycleAuthority,
+          canonicalDecisionProjection:decision || null,
           contractFingerprint:planVerdictContract.contractFingerprint
         }
       };
@@ -24878,7 +24911,8 @@ function buildAuthoritativeDecisionProjection({
   globalVerdict = null,
   storyContext = null,
   authoritativeBlockerText = '',
-  analysis = null
+  analysis = null,
+  resolverDecisionProjection = null
 } = {}){
   const item = record && typeof record === 'object' ? record : null;
   const resolveDerivedStates = typeof analysisDerivedStatesFromRecord === 'function'
@@ -24892,6 +24926,11 @@ function buildAuthoritativeDecisionProjection({
     : (item ? resolveGlobalVerdict(item) : {});
   const contract = resolvedContract && typeof resolvedContract === 'object'
     ? resolvedContract
+    : {};
+  // Resolver facts are authoritative inputs. This helper still owns the
+  // surface semantics that turn those facts into phase-aware UI guidance.
+  const resolverDecision = resolverDecisionProjection && typeof resolverDecisionProjection === 'object'
+    ? resolverDecisionProjection
     : {};
   const explicitAnalysis = analysis && typeof analysis === 'object'
     ? analysis
@@ -24920,15 +24959,51 @@ function buildAuthoritativeDecisionProjection({
       derivedStates:derived,
       globalVerdict:global,
       storyContext:authoritativeStoryContext,
-      authoritativeBlockerText
+      authoritativeBlockerText:String(
+        resolverDecision.decisiveBlocker
+        || resolverDecision.primaryReason
+        || authoritativeBlockerText
+        || ''
+      ).trim()
     })
     : null;
   const safeSemantics = semantics && typeof semantics === 'object' ? semantics : null;
+  const canonicalVerdict = String(
+    resolverDecision.verdict
+    || resolverDecision.canonicalVerdict
+    || safeSemantics && safeSemantics.finalVerdict
+    || normalizeGlobalVerdictKey(finalVerdict || global.final_verdict || global.finalVerdict || 'watch')
+  ).trim();
+  const semanticPrimaryReason = safeSemantics && typeof sharedDecisionSummaryFromSemantics === 'function'
+    ? String(sharedDecisionSummaryFromSemantics(safeSemantics, '') || '').trim()
+    : '';
+  const primaryReason = canonicalVerdict === 'entry'
+    ? 'Buyers are in control and the setup is ready to act on.'
+    : String(
+      semanticPrimaryReason
+      || resolverDecision.primaryReason
+      || resolverDecision.decisiveBlocker
+      || ''
+    ).trim();
+  const nextAction = safeSemantics && typeof reviewNextActionFromDecisionSemantics === 'function'
+    ? String(reviewNextActionFromDecisionSemantics(safeSemantics, {
+      legacySemanticNextAction:String(resolverDecision.nextAction || '').trim()
+    }) || '').trim()
+    : String(resolverDecision.nextAction || '').trim();
   return {
     storyContext:authoritativeStoryContext,
     semantics:safeSemantics,
+    resolverDecisionProjection:resolverDecision,
     normalizedAnalysis:normalizedAnalysis || null,
-    canonicalVerdict:String(safeSemantics && safeSemantics.finalVerdict || normalizeGlobalVerdictKey(finalVerdict || global.final_verdict || global.finalVerdict || 'watch')).trim(),
+    // The decision projection is the copy authority shared by Scan, Review,
+    // and Track. Surface-specific presentation may change layout, but must not
+    // substitute a different blocker or required next event.
+    verdict:canonicalVerdict,
+    canonicalVerdict,
+    decisiveBlocker:String(resolverDecision.decisiveBlocker || safeSemantics && safeSemantics.blockerSummary || '').trim(),
+    primaryReason,
+    nextRequiredEvent:String(safeSemantics && safeSemantics.nextRequiredEvent || '').trim(),
+    nextAction,
     currentPhase:String(safeSemantics && safeSemantics.currentPhase || '').trim(),
     actionability:String(safeSemantics && safeSemantics.actionability || '').trim(),
     decisiveReason:String(safeSemantics && safeSemantics.decisiveReason || '').trim(),
@@ -27417,30 +27492,10 @@ function chartGuruSupportAuthority(globalVerdict = {}, derivedStates = {}, canon
 
 function chartGuruExplicitResolverSupportContext(record = {}, globalVerdict = {}){
   const explicit = globalVerdict && typeof globalVerdict === 'object' ? globalVerdict : {};
-  let resolvedState = {};
-  try{
-    const simplified = typeof resolveSimplifiedStateForSurface === 'function'
-      ? resolveSimplifiedStateForSurface(record, 'review', {log:false, source:'chart_guru_support_authority'})
-      : null;
-    resolvedState = simplified && simplified.debug && simplified.debug.resolvedState && typeof simplified.debug.resolvedState === 'object'
-      ? simplified.debug.resolvedState
-      : {};
-  }catch(error){
-    resolvedState = {};
-  }
-  const checks = resolvedState.buyer_control_gate_checks && typeof resolvedState.buyer_control_gate_checks === 'object'
-    ? resolvedState.buyer_control_gate_checks
-    : {};
   const usable = (value, allowed) => {
     const normalized = String(value || '').trim().toLowerCase();
     return allowed.includes(normalized) ? normalized : '';
   };
-  const supportContext = usable(checks.support_context, ['20ma_support', '50ma_support'])
-    || usable(resolvedState.support_context, ['20ma_support', '50ma_support']);
-  const supportTestState = usable(checks.support_test_state, ['held', 'testing', 'failed'])
-    || usable(resolvedState.support_test_state, ['held', 'testing', 'failed']);
-  const buyerControlState = usable(checks.buyer_control_state, ['confirmed', 'emerging'])
-    || usable(resolvedState.buyer_control_state, ['confirmed', 'emerging']);
   const explicitSupportContext = usable(explicit.support_context, ['20ma_support', '50ma_support'])
     || usable(explicit.supportContext, ['20ma_support', '50ma_support'])
     || usable(explicit.support_type, ['20ma_support', '50ma_support'])
@@ -27451,9 +27506,9 @@ function chartGuruExplicitResolverSupportContext(record = {}, globalVerdict = {}
     || usable(explicit.buyerControlState, ['confirmed', 'emerging']);
   return {
     ...explicit,
-    ...(explicitSupportContext || supportContext ? {support_context:explicitSupportContext || supportContext} : {}),
-    ...(explicitSupportTestState || supportTestState ? {support_test_state:explicitSupportTestState || supportTestState} : {}),
-    ...(explicitBuyerControlState || buyerControlState ? {buyer_control_state:explicitBuyerControlState || buyerControlState} : {})
+    ...(explicitSupportContext ? {support_context:explicitSupportContext} : {}),
+    ...(explicitSupportTestState ? {support_test_state:explicitSupportTestState} : {}),
+    ...(explicitBuyerControlState ? {buyer_control_state:explicitBuyerControlState} : {})
   };
 }
 
@@ -32080,6 +32135,9 @@ function buildResolvedReviewDisplayModel({
       rr:'Priced'
     };
   const diagnosticsMessage = String(semantic.blocker || semantic.primaryReason || simplified.mainBlocker || simplified.planStatus || 'No actionable plan yet.').trim();
+  const resolverDecisionProjection = global.canonicalDecisionProjection && typeof global.canonicalDecisionProjection === 'object'
+    ? global.canonicalDecisionProjection
+    : null;
   const decisionProjection = typeof buildAuthoritativeDecisionProjection === 'function'
     ? buildAuthoritativeDecisionProjection({
       record:item,
@@ -32087,12 +32145,13 @@ function buildResolvedReviewDisplayModel({
       resolvedContract:{planStatusKey:plan.status || ''},
       derivedStates:derived,
       globalVerdict:global,
+      resolverDecisionProjection,
       authoritativeBlockerText:String(semantic.blocker || semantic.primaryReason || diagnosticsMessage || '').trim(),
       analysis:analysisState && analysisState.normalizedAnalysis && typeof analysisState.normalizedAnalysis === 'object'
         ? analysisState.normalizedAnalysis
       : null
     })
-    : null;
+    : resolverDecisionProjection;
   const authoritativeStoryContext = decisionProjection && decisionProjection.storyContext
     ? decisionProjection.storyContext
     : (typeof buildCanonicalStoryContextForRecord === 'function'
@@ -32120,12 +32179,13 @@ function buildResolvedReviewDisplayModel({
   const decisionSemantics = decisionProjection && decisionProjection.semantics
     ? decisionProjection.semantics
     : null;
-  const nextActionLabel = typeof reviewNextActionFromDecisionSemantics === 'function'
+  const nextActionLabel = String(decisionProjection && decisionProjection.nextAction || '').trim()
+    || (typeof reviewNextActionFromDecisionSemantics === 'function'
     ? reviewNextActionFromDecisionSemantics(decisionSemantics, {
       legacySemanticNextAction:String(semantic.nextAction || '').trim(),
       legacySimplifiedActionLabel:String(simplified.actionLabel || '').trim()
     })
-    : (String(semantic.nextAction || simplified.actionLabel || '').trim() || 'Review setup inputs');
+    : (String(semantic.nextAction || simplified.actionLabel || '').trim() || 'Review setup inputs'));
   const planUI = {
     showPlan:semantic.showPlanFields === true,
     showRR:semantic.showPlanMetrics === true,
@@ -32191,7 +32251,10 @@ function buildResolvedReviewDisplayModel({
       fallbackSummary:fallbackDecisionSummary
     }) || '').trim()
     : '';
-  const decisionSummary = semanticDecisionSummary || canonicalStorySummary || fallbackDecisionSummary;
+  const decisionSummary = String(decisionProjection && decisionProjection.primaryReason || '').trim()
+    || semanticDecisionSummary
+    || canonicalStorySummary
+    || fallbackDecisionSummary;
   const compactTradeStatusLine = (supportTestCopy && !pricedButNotReady)
     ? supportTestCopy.tradeStatus
     : String(rawTradeStatus.line1 || diagnosticsMessage || 'No actionable trade yet.').trim();
@@ -52722,6 +52785,47 @@ function resolveGlobalVerdict(record, deps = {}){
     derivedStates,
     globalVerdict:verdict
   });
+  // Keep the resolver projection independent of Chart Guru. Story construction
+  // consumes this output; it must never be needed to resolve a verdict.
+  const resolverProjection = verdict.canonicalDecisionProjection && typeof verdict.canonicalDecisionProjection === 'object'
+    ? verdict.canonicalDecisionProjection
+    : {};
+  const decisiveBlocker = normalizeGlobalVerdictKey(verdict.final_verdict || 'watch') === 'entry'
+    ? ''
+    : String(
+      resolverProjection.decisiveBlocker
+      || verdict.main_blocker
+      || verdict.mainBlocker
+      || verdict.reason
+      || authorityResolvedContract && (authorityResolvedContract.blockerReason || authorityResolvedContract.reasonSummary)
+      || ''
+    ).trim();
+  const supportTestState = String(verdict.support_test_state || '').trim().toLowerCase();
+  const nextRequiredEvent = supportTestState === 'failed'
+    ? 'repair'
+    : (verdict.entry_gate_pass === true
+      ? 'execute_if_trigger_valid'
+      : (verdict.confirmation_gate_pass === false
+        ? 'confirmation'
+        : (verdict.buyer_control_gate_pass === false ? 'buyer_control' : 'review_setup')));
+  const nextAction = nextRequiredEvent === 'repair'
+    ? 'Wait for the setup to repair before reviewing it again.'
+    : (nextRequiredEvent === 'execute_if_trigger_valid'
+      ? 'Execute only if the trigger remains valid.'
+      : (nextRequiredEvent === 'buyer_control'
+        ? 'Wait for buyers to prove control before considering an entry.'
+        : (nextRequiredEvent === 'confirmation'
+          ? 'Wait for stronger confirmation before considering an entry.'
+          : 'Review setup inputs')));
+  verdict.canonicalDecisionProjection = {
+    ...resolverProjection,
+    verdict:normalizeGlobalVerdictKey(verdict.final_verdict || 'watch'),
+    canonicalVerdict:normalizeGlobalVerdictKey(verdict.final_verdict || 'watch'),
+    decisiveBlocker,
+    primaryReason:decisiveBlocker,
+    nextRequiredEvent,
+    nextAction
+  };
   if(!verdict.cumulativePenaltyTrace || !Array.isArray(verdict.cumulativePenaltyTrace.sources)){
     verdict.cumulativePenaltyTrace = resolverDeps.buildCumulativePenaltyTrace(item, {
       analysis:authorityResolvedContract,

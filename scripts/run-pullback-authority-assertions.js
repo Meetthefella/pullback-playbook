@@ -832,8 +832,24 @@ function runDiagnosticsAndSnapshotAssertions(appSource, appSandbox){
     },
     currentTesterId(){ return 'tester'; },
     currentBuildVersion(){ return 'test-build'; },
+    currentBuildInfo(){
+      return {
+        appVersion:'test-app',
+        buildVersion:'test-build',
+        assetId:'test-asset',
+        buildTimestamp:'2026-07-19T00:00:00.000Z',
+        commitSha:'',
+        chartGuru:{
+          deterministicContractVersion:'test-contract',
+          interpretationPromptVersion:'test-interpretation',
+          finalPromptVersion:'test-final',
+          renderVersion:'test-render'
+        }
+      };
+    },
     activeWorkspaceTab(){ return 'track'; },
     currentVisibleReviewDiagnostics(){ return {}; },
+    buildChartGuruAuditSnapshot(){ return null; },
     currentReviewStateHealthSnapshot(){ return {}; },
     currentPaperTradeDebugSnapshotForTicker(){ return null; },
     currentPolicyDiagnostics(){ return {}; },

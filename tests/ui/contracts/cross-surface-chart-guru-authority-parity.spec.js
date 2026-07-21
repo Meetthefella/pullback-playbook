@@ -52,6 +52,11 @@ test('one canonical record keeps a Watch verdict across Scan, Review, and Track 
     const scan = resolveSimplifiedStateForSurface(record, 'scan', {log:false, source:'cross_surface_authority_parity'});
     const review = resolveSimplifiedStateForSurface(record, 'review', {log:false, source:'cross_surface_authority_parity'});
     const track = resolveSimplifiedStateForSurface(record, 'track', {log:false, source:'cross_surface_authority_parity'});
+    const trackSemantic = buildSharedReviewTrackPresentation(record, {
+      source:'cross_surface_authority_parity',
+      simplifiedState:track,
+      globalVerdict:resolveGlobalVerdict(record)
+    });
     const coach = buildDeterministicChartCoach(record, {
       canonicalValues:{price:100, ma20:100.2, ma50:96, ma200:85, volume:1000000},
       trustedMarketContext:{currentPrice:100, ma20:100.2, ma50:96, ma200:85, volume:1000000}
@@ -92,6 +97,15 @@ test('one canonical record keeps a Watch verdict across Scan, Review, and Track 
       scanBlocker:scan.mainBlocker,
       reviewBlocker:review.mainBlocker,
       trackBlocker:track.mainBlocker,
+      scanDecision:scan.canonicalDecisionProjection,
+      reviewDecision:review.canonicalDecisionProjection,
+      trackDecision:track.canonicalDecisionProjection,
+      trackSemantic:{
+        actionability:trackSemantic.trackActionability,
+        phase:trackSemantic.trackCurrentPhase,
+        blocker:trackSemantic.trackBlocker,
+        nextAction:trackSemantic.trackNextAction
+      },
       support:coach.diagnostics.narrativeContext.support,
       buyerControl:coach.diagnostics.narrativeContext.buyerControl,
       story:coach.primaryStory && coach.primaryStory.key,
@@ -106,7 +120,21 @@ test('one canonical record keeps a Watch verdict across Scan, Review, and Track 
   expect(String(state.scanDisplay).toLowerCase()).toMatch(/watch|monitor/);
   expect(String(state.reviewDisplay).toLowerCase()).toMatch(/watch|monitor/);
   expect(String(state.trackDisplay).toLowerCase()).toMatch(/watch|monitor/);
-  expect([state.scanBlocker, state.reviewBlocker, state.trackBlocker].join(' ').toLowerCase()).toMatch(/price|plan|risk|entry/);
+  expect(state.scanDecision).toBeTruthy();
+  expect(state.reviewDecision).toBeTruthy();
+  expect(state.trackDecision).toBeTruthy();
+  expect(state.scanDecision.verdict).toBe('watch');
+  expect(state.reviewDecision.verdict).toBe('watch');
+  expect(state.trackDecision.verdict).toBe('watch');
+  expect(state.scanBlocker).toBe(state.scanDecision.decisiveBlocker || state.scanDecision.primaryReason);
+  expect(state.reviewBlocker).toBe(state.reviewDecision.decisiveBlocker || state.reviewDecision.primaryReason);
+  expect(state.trackBlocker).toBe(state.trackDecision.decisiveBlocker || state.trackDecision.primaryReason);
+  expect(state.scanDecision.nextRequiredEvent).toBe(state.reviewDecision.nextRequiredEvent);
+  expect(state.scanDecision.nextRequiredEvent).toBe(state.trackDecision.nextRequiredEvent);
+  expect(state.trackSemantic.actionability).not.toBe('');
+  expect(state.trackSemantic.phase).not.toBe('');
+  expect(state.trackSemantic.blocker).not.toBe('');
+  expect(state.trackSemantic.nextAction).not.toBe('');
   expect(state.support.level).toBe('20ma_support');
   expect(state.support.interaction).toBe('held');
   expect(state.support.currentlyActive).toBe(true);
