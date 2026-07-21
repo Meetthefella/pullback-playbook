@@ -26681,6 +26681,13 @@ function chartGuruNarrationDebugMarkup(analysis = {}, chartCoach = null){
     ['Prose request ID', String(narration.requestId || 'unavailable')],
     ['Prose timestamp', String(narration.completedAt || 'unavailable')]
   ];
+  const trace = narration.pipelineTrace && typeof narration.pipelineTrace === 'object' ? narration.pipelineTrace : {};
+  if(Object.keys(trace).length){
+    rows.push(
+      ['Phase repair', `${String(trace.phaseBeforeRepair || 'unknown')} → ${String(trace.phaseAfterRepair || 'unknown')} (${String(trace.phaseRepairSource || 'unknown')})`],
+      ['Function version', String(trace.functionVersion || 'unavailable')]
+    );
+  }
   return renderDebugSectionMarkup('Chart Guru Narration', rows.map(([label, value]) => ({label, value})));
 }
 
@@ -37783,7 +37790,10 @@ function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
 }
 
 function canonicalNarrationEarlyReboundEventKey(value = ''){
-  const match = String(value || '').trim().match(/\bearly rebound from (?:the )?(20|50|200)(?:(?:\s*ma)|(?:[- ]day)?\s+average)\b/i);
+  const text = String(value || '').trim();
+  const enumMatch = text.match(/^early_rebound_from_(20|50|200)ma$/i);
+  if(enumMatch) return `early_rebound_from_${enumMatch[1]}ma`;
+  const match = text.match(/\bearly rebound from (?:the )?(20|50|200)(?:(?:\s*ma)|(?:[- ]day)?\s+average)\b/i);
   return match ? `early_rebound_from_${match[1]}ma` : '';
 }
 

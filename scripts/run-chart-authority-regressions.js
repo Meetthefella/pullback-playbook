@@ -226,7 +226,7 @@ async function runNetlifyCanonicalizationRegression(){
   const {handler, __test} = require(modulePath);
   const normalizedInterpretation = __test.normalizeTraderInterpretation(traderInterpretation, {});
   assert.ok(/early repair attempt/i.test(normalizedInterpretation.traderRead), 'Legacy trader-interpretation normalization remains directly covered without an outbound request');
-  const invokeHandler = async sequence => {
+  const invokeHandler = async (sequence, payloadOverrides = {}) => {
     const fetchCalls = [];
     global.fetch = async (url, options = {}) => {
       fetchCalls.push({url, options});
@@ -249,7 +249,8 @@ async function runNetlifyCanonicalizationRegression(){
         payload:{
           ticker:'NVDA',
           marketStatus:'S&P above 50 MA',
-          trustedMarketContext
+          trustedMarketContext,
+          ...payloadOverrides
         },
         prompt:'Return JSON only.'
       })
@@ -289,6 +290,51 @@ async function runNetlifyCanonicalizationRegression(){
   assert.strictEqual(body.analysis.chartCoach && body.analysis.chartCoach.recentStory && body.analysis.chartCoach.recentStory.key, 'openai_two_step_narrative', 'Canonical narration should retain compatible recentStory metadata server-side');
   assert.ok(Array.isArray(body.analysis.chartCoach && body.analysis.chartCoach.diagnostics && body.analysis.chartCoach.diagnostics.priorityOrder), 'Two-step success should emit chartCoach diagnostics server-side');
   assert.strictEqual(body.analysis.chartGuruOpenAiFallbackReason, '', 'Successful two-step Chart Guru should not set a fallback reason');
+
+  // HTTP-handler regression for the exact stale v1 payload observed in the
+  // browser: phase and next event arrive unknown while the packet already proves
+  // an early 20MA response. The final renderer prompt and returned diagnostics
+  // must both use the repaired object.
+  const respondingPacket = {
+    dominantEventKey:'early_rebound_from_20ma',
+    dominantEventLabel:'Early rebound from 20MA',
+    currentPhase:'responding_from_support',
+    supportSemantic:'support_present',
+    supportState:{type:'20ma', label:'20-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'},
+    buyerResponseState:'present', buyerControlState:'developing', followThroughState:'not_started',
+    eventSequence:['support_held_at_20ma','buyers_responded'], evidenceFactIds:['support_held_at_20ma','buyers_responded']
+  };
+  const staleV1Contract = {
+    version:'chart-guru-narration-contract-v1', phase:'unknown', dominantEvent:'early_rebound_from_20ma', eventSequence:[],
+    structure:'intact', support:{type:'20ma', label:'20-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'},
+    buyerResponse:'present', buyerControl:'developing', followThrough:'not_started', trend:'healthy', volume:'mixed', market:'supportive',
+    dominantBlocker:'follow_through', nextRequiredEvent:'unknown', verdict:'watch', evidenceFactIds:[]
+  };
+  const respondingProse = {
+    chartStory:'Buyers are responding from the 20-day average, but control is still developing.',
+    whyItMatters:'The response is constructive, although it still needs follow-through.',
+    setupLocation:'The relevant location is the current support context near the 20-day average.',
+    learningPoint:'An initial response needs follow-through before it becomes reliable.',
+    whatNext:'Watch for follow-through with another firm close.'
+  };
+  const repairedHttpRun = await invokeHandler([
+    {payload:{output_text:JSON.stringify(aiPayload)}},
+    {payload:{output_text:JSON.stringify(respondingProse)}}
+  ], {deterministicEventPacket:respondingPacket, canonicalNarrationContract:staleV1Contract});
+  const repairedPrompt = JSON.parse(repairedHttpRun.fetchCalls[1].options.body || '{}');
+  const repairedPromptText = (((repairedPrompt.input || [])[0] || {}).content || []).find(part => part && part.type === 'input_text');
+  assert.match(String(repairedPromptText && repairedPromptText.text || ''), /"phase"\s*:\s*"responding_from_support"/, 'HTTP renderer prompt must receive the repaired phase');
+  assert.match(String(repairedPromptText && repairedPromptText.text || ''), /"nextRequiredEvent"\s*:\s*"follow_through"/, 'HTTP renderer prompt must receive the repaired next event');
+  const repairedAnalysis = repairedHttpRun.body.analysis;
+  const repairedDiagnostics = repairedAnalysis.chartCoach && repairedAnalysis.chartCoach.diagnostics && repairedAnalysis.chartCoach.diagnostics.narration;
+  assert.strictEqual(repairedAnalysis.canonicalNarrationContract.phase, 'responding_from_support', 'HTTP response must persist the repaired phase');
+  assert.notStrictEqual(repairedAnalysis.canonicalNarrationContract.nextRequiredEvent, 'unknown', 'HTTP response must persist a resolved next event');
+  assert.strictEqual(repairedDiagnostics.validationStatus, 'passed', 'Repaired HTTP contract must validate before rendering');
+  assert.deepStrictEqual(repairedDiagnostics.validationErrors, [], 'Repaired HTTP contract must have no validation codes');
+  assert.strictEqual(repairedDiagnostics.retryCount, 0, 'Repaired HTTP narration must not retry');
+  assert.strictEqual(repairedDiagnostics.pipelineTrace.phaseBeforeRepair, 'unknown', 'Diagnostics must retain the incoming phase snapshot');
+  assert.strictEqual(repairedDiagnostics.pipelineTrace.phaseAfterRepair, 'responding_from_support', 'Diagnostics must retain the repaired phase snapshot');
+  assert.strictEqual(repairedDiagnostics.pipelineTrace.rendererReceivesRepairedContract, true, 'Renderer must receive the final repaired contract object');
 
   const malformedResponseRun = await invokeHandler([
     {payload:{output_text:'{"broken": true'}}

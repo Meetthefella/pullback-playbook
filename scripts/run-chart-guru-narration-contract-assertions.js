@@ -135,6 +135,16 @@ for(const dominantEvent of ['Early rebound from 20MA', 'Early rebound from 20 MA
   assert.strictEqual(hooks.validateCanonicalNarrationContract(repaired).ok, true, `${dominantEvent}: repaired contract must remain valid`);
   assert.ok(hooks.validateCanonicalNarrationContract({...repaired, nextRequiredEvent:'unknown'}).errors.includes('phase_next_event_mismatch'), `${dominantEvent}: a repaired phase must still reject a contradictory next event`);
 }
+for(const dominantEvent of ['early_rebound_from_20ma', 'early_rebound_from_50ma', 'early_rebound_from_200ma']){
+  const repaired = hooks.selectCanonicalNarrationContractForRenderer(contractOnlyUnknown(dominantEvent), {}, {});
+  assert.strictEqual(repaired.phase, 'responding_from_support', `${dominantEvent}: canonical event enum must repair an unknown contract-only phase`);
+  assert.strictEqual(repaired.nextRequiredEvent, 'follow_through', `${dominantEvent}: canonical event enum must derive the next event`);
+}
+const respondingPacketForInvariant = {...amznStylePacket, currentPhase:'responding_from_support', followThroughState:'not_started', confirmationSemantic:'follow_through_not_started', eventSequence:['support_held_at_20ma','buyers_responded']};
+const unresolvedRespondingContract = {...contractOnlyUnknown('early_rebound_from_20ma'), support:{type:'20ma', label:'20-day average', interaction:'held', currentlyActive:true, semantic:'active_held_support'}};
+const unresolvedErrors = hooks.validateCanonicalNarrationContract(unresolvedRespondingContract, respondingPacketForInvariant).errors;
+assert.ok(unresolvedErrors.includes('phase_mismatch_with_packet'), 'A known packet phase may not validate against an unknown contract phase');
+assert.ok(unresolvedErrors.includes('phase_missing_for_dominant_event'), 'A recognised early-rebound event may not validate with an unknown contract phase');
 const unrelatedContractOnly = contractOnlyUnknown('Momentum remains mixed after recent volatility');
 assert.strictEqual(hooks.selectCanonicalNarrationContractForRenderer(unrelatedContractOnly, {}, {}).phase, 'unknown', 'unrelated dominant-event text must not manufacture a recognised phase');
 assert.ok(hooks.validateCanonicalNarrationContract({...amznStyleContract, phase:'unknown'}).errors.includes('phase_unknown_with_recognized_evidence'), 'unknown phase must fail validation when stalled chronology is already proven');
