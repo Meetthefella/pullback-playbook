@@ -26649,18 +26649,7 @@ function renderChartCoachMarkup(display = {}){
   }).join('');
 }
 
-function chartGuruNarrationDebugEnabled(){
-  if(!debugFlagEnabled('PP_DEBUG_CHART_GURU_NARRATION')) return false;
-  try{
-    const hostname = String(window && window.location && window.location.hostname || '').trim().toLowerCase();
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
-  }catch(error){
-    return false;
-  }
-}
-
 function chartGuruNarrationDebugMarkup(analysis = {}, chartCoach = null){
-  if(!chartGuruNarrationDebugEnabled()) return '';
   const safeAnalysis = analysis && typeof analysis === 'object' ? analysis : {};
   const safeCoach = chartCoach && typeof chartCoach === 'object' ? chartCoach : {};
   const narration = safeCoach.diagnostics && safeCoach.diagnostics.narration && typeof safeCoach.diagnostics.narration === 'object'
@@ -26672,6 +26661,7 @@ function chartGuruNarrationDebugMarkup(analysis = {}, chartCoach = null){
   const eventPacket = safeAnalysis.deterministicEventPacket && typeof safeAnalysis.deterministicEventPacket === 'object'
     ? safeAnalysis.deterministicEventPacket
     : {};
+  if(!Object.keys(narration).length) return '';
   const source = String(narration.narrationSource || narration.proseSource || 'unknown').trim().toLowerCase() === 'openai'
     ? 'canonical_llm'
     : String(narration.narrationSource || narration.proseSource || 'unknown').trim();
@@ -48549,6 +48539,9 @@ function renderReviewWorkspace(options = {}){
     && aiSummaryPreview !== 'No Chart Guru saved yet.'
     && !chartVerificationBlocksAiReview
     && !aiAnalysisSuppressedByChartMismatch;
+  const chartGuruNarrationDebug = aiSummaryVisible && analysisState.normalizedAnalysis
+    ? chartGuruNarrationDebugMarkup(analysisState.normalizedAnalysis, analysisState.normalizedAnalysis.chartCoach)
+    : '';
   if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
     analyseDisabled = true;
     analyseLabel = 'Confirm chart first';
@@ -48598,9 +48591,6 @@ function renderReviewWorkspace(options = {}){
     {label:'lastReviewedAt', value:record.review.lastReviewedAt || '(none)'}
   ]);
   const reviewStateHealthDebug = (window.PP_FORCE_STATE_DEBUG === true) ? reviewDebugCompact : '';
-  const chartGuruNarrationDebug = advancedOpen
-    ? chartGuruNarrationDebugMarkup(analysisState.normalizedAnalysis, analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.chartCoach)
-    : '';
   const reviewDebugInternal = (window.PP_FORCE_STATE_DEBUG === true)
     ? renderAdvancedDebugMarkup([
       {label:'Review Legacy State', value:JSON.stringify(reviewLegacyState || {}, null, 0) || '(none)'},
@@ -48636,7 +48626,7 @@ function renderReviewWorkspace(options = {}){
         </div>
       </div>`
     : '';
-  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDiagnosticBundlePanel}${chartGuruNarrationDebug}${reviewStateHealthDebug}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
+  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDiagnosticBundlePanel}${reviewStateHealthDebug}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
@@ -48824,6 +48814,7 @@ function renderReviewWorkspace(options = {}){
     <div class="panelbox review-section review-section--confidence ${escapeHtml(analysisPanelClass)}">
       <div class="reviewsectionhead"><strong>Technical Context</strong></div>
       <div class="summary review-technical-line" id="reviewTechnicalContextLine">${escapeHtml(technicalContextLine)}</div>
+      ${chartGuruNarrationDebug}
       <div class="review-action-row review-action-row--top"><button class="primary" id="analyseActiveBtn" ${analyseDisabled ? 'disabled' : ''}>${escapeHtml(analyseLabel)}</button><button class="ghost" id="resetReviewBtn">Remove</button></div>
       ${dedupedPlanRealismSummary ? `<div class="summary" id="planRealismSummary">${escapeHtml(effectivePlanUi.showPlan ? planRealismSummary : dedupedPlanRealismSummary)}</div>` : ''}
       ${aiSummaryVisible ? `<details class="responsepanel compact-open-on-demand" id="reviewResponse" data-tour="ai-summary" ${analysisResponseOpen}>
