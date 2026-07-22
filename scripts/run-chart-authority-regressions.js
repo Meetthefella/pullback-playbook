@@ -575,6 +575,8 @@ function runDeterministicCandleFallbackRegression(){
     'chartGuruSupportAuthority',
     'chartGuruExplicitResolverSupportContext',
     'chartGuruValidatedCanonicalPhase',
+    'chartGuruSupportEpisodeFromHistory',
+    'chartGuruPostSupportHigh',
     'buildCanonicalChartStoryContext',
     'chartGuruSemanticEnvelopeFromNarrativeContext',
     'chartGuruSemanticEnvelopeCompatibilityForStoryKey',
@@ -613,6 +615,10 @@ function runDeterministicCandleFallbackRegression(){
     'isGenericTradePlanCommentary',
     'canonicalVolumeParticipationForState',
     'buildCanonicalStoryContextForRecord',
+    'canonicalReviewTechnicalStructureLabelFromStoryContext',
+    'canonicalReviewTechnicalPullbackLabelFromStoryContext',
+    'canonicalReviewTechnicalBuyerLabelFromStoryContext',
+    'canonicalScanTechnicalSummaryFromStoryContext',
     'canonicalBuyerStatesFromStoryContext',
     'canonicalDecisionSummaryFromStoryContext',
     'canonicalNonChartBlockerSummary',
@@ -908,6 +914,306 @@ function runDeterministicCandleFallbackRegression(){
   assert.ok(/well beyond|extended away|no longer an active support test|moved well beyond/i.test(extendedReviewRead.text), 'Review prose must describe the post-support extension state.');
   assert.ok(!/Support is reacting|Buyers emerging|buyer control is not convincing yet/i.test(extendedReviewRead.text), 'Review prose must not fall back to stale active-support wording once the rebound is extended.');
   assert.strictEqual(extendedReviewRead.selectedSummarySource, 'deterministic_chart_coach', 'Fresh deterministic fallback should keep the generated deterministic source.');
+
+  // FROG regression: a previous 50MA rebound may remain in chronology, but a
+  // substantial retracement must not leave the current canonical phase extended.
+  // This input is deliberately oldest-first. The production normalizer must make
+  // that direction explicit and anchor the original 50MA touch, not the later
+  // retracement back inside the same tolerance.
+  const frogSupportEpisodeHistory = [
+    {date:'2026-07-15', open:82.0, high:82.4, low:80.9, close:81.7, volume:1250000},
+    {date:'2026-07-16', open:82.1, high:87.5, low:81.8, close:86.4, volume:1300000},
+    {date:'2026-07-17', open:86.8, high:94.0, low:85.9, close:92.8, volume:1350000},
+    {date:'2026-07-18', open:93.2, high:98.9, low:91.6, close:97.1, volume:1400000},
+    {date:'2026-07-19', open:91.6, high:90.3, low:82.9, close:84.5, volume:1100000},
+    {date:'2026-07-20', open:85.0, high:87.0, low:84.0, close:86.56, volume:1000000}
+  ].map(candle => ({...candle, ma50:81.62}));
+  const frogSupportEpisode = sandbox.chartGuruSupportEpisodeFromHistory({supportContext:'50ma', historySequence:frogSupportEpisodeHistory}, 81.62);
+  assert.strictEqual(frogSupportEpisode.historyOrdering, 'newest_first', 'Support-episode selection must normalize production history direction explicitly.');
+  assert.strictEqual(frogSupportEpisode.supportEvent.timestamp, '2026-07-15', 'The original 50MA touch, rather than the later revisit, must anchor the rebound episode.');
+  assert.strictEqual(frogSupportEpisode.postSupportHigh.timestamp, '2026-07-18', 'The rally high after the original support event must remain in the measured window.');
+  assert.strictEqual(frogSupportEpisode.postSupportHigh.value, 98.9, 'Post-support extension must use the actual rally high.');
+  assert.strictEqual(frogSupportEpisode.laterRevisits.length, 1, 'The later 50MA revisit must be recorded and rejected instead of replacing the rebound origin.');
+  assert.ok(/rejected/.test(frogSupportEpisode.laterRevisits[0].reason), 'A single-candle post-revisit bounce must not be treated as a new support response.');
+  assert.strictEqual(sandbox.chartGuruSupportEpisodeFromHistory({supportContext:'50ma', historySequence:[]}, 81.62), null, 'Missing history must fail conservatively without inventing a support episode.');
+  const frogRetracedRecord = {
+    marketData:{price:86.56, ma20:89.39, ma50:81.62, ma200:59.51, history:frogSupportEpisodeHistory},
+    _globalVerdict:{
+      final_verdict:'watch',
+      structure_state:'strong',
+      structure_eligibility:'alive',
+      support_context:'50ma',
+      support_test_state:'held',
+      buyer_control_state:'emerging',
+      bounce_state:'developing',
+      stabilisation_state:'present',
+      pullback_zone:'extended',
+      setup_location_state:'extended',
+      current_phase:'extended_from_support'
+    },
+    _derivedStates:{
+      structureState:'strong',
+      structureEligibility:'alive',
+      setupLocationState:'extended',
+      pullbackZone:'extended',
+      bounceState:'developing',
+      stabilisationState:'present',
+      volumeState:'weak',
+      supportContext:'50ma',
+      supportTestState:'held',
+      buyerControlState:'emerging',
+      evaluationScanType:'50MA'
+    }
+  };
+  const frogRetracedAnalysis = {
+    canonicalValues:{price:86.56, ma20:89.39, ma50:81.62, ma200:59.51, volume:1000000},
+    trustedMarketContext:{
+      avgVolume30d:1400000,
+      recentCandleSequence:[
+        {date:'2026-07-21', open:85.0, high:87.0, low:84.0, close:86.56, volume:1000000},
+        {date:'2026-07-20', open:83.4, high:90.3, low:82.9, close:85.5, volume:900000},
+        {date:'2026-07-19', open:91.6, high:93.1, low:86.4, close:88.0, volume:1100000},
+        {date:'2026-07-18', open:96.4, high:98.9, low:92.5, close:93.2, volume:1150000}
+      ]
+    }
+  };
+  const frogRetracedStory = sandbox.buildCanonicalStoryContextForRecord(frogRetracedRecord, {
+    globalVerdict:frogRetracedRecord._globalVerdict,
+    derivedStates:frogRetracedRecord._derivedStates,
+    analysis:frogRetracedAnalysis
+  });
+  assert.strictEqual(frogRetracedStory.currentPhase, 'stalled_after_response', 'A material retracement must supersede stale extended-from-support authority.');
+  assert.strictEqual(frogRetracedStory.buyerControl.state, 'emerging', 'Explicit developing buyer control must outrank a derived continuation upgrade.');
+  assert.strictEqual(frogRetracedStory.followThrough.state, 'stalled', 'The current FROG-style response must retain stalled follow-through.');
+  assert.ok(frogRetracedStory.storyEvents.includes('historical_rebound_extended'), 'The earlier extension should remain chronology, not current phase.');
+  assert.ok(frogRetracedStory.diagnostics.phaseDecision.extensionMateriallyRetraced, 'Phase diagnostics must expose the retracement that rejected extension.');
+  assert.strictEqual(frogRetracedStory.diagnostics.phaseDecision.supportEvent.timestamp, '2026-07-15', 'Phase diagnostics must expose the selected initial support event.');
+  assert.strictEqual(frogRetracedStory.diagnostics.phaseDecision.postSupportHighDetails.timestamp, '2026-07-18', 'Phase diagnostics must expose the post-support rally high.');
+  assert.strictEqual(frogRetracedStory.diagnostics.phaseDecision.historyOrdering, 'newest_first', 'Phase diagnostics must expose the normalized history ordering.');
+  assert.strictEqual(frogRetracedStory.diagnostics.phaseDecision.laterSupportRevisits.length, 1, 'Phase diagnostics must expose rejected later MA revisits.');
+  assert.strictEqual(sandbox.canonicalReviewTechnicalPullbackLabelFromStoryContext(frogRetracedStory), 'Pullback underway', 'Review must not label a historical 50MA response as the current location.');
+  assert.ok(/Pullback underway/.test(sandbox.canonicalScanTechnicalSummaryFromStoryContext(frogRetracedStory)), 'Scan and Review technical context must consume the same current phase.');
+  const frogRetracedCoach = sandbox.buildDeterministicChartCoach(frogRetracedRecord, frogRetracedAnalysis, {
+    globalVerdict:frogRetracedRecord._globalVerdict,
+    derivedStates:frogRetracedRecord._derivedStates
+  });
+  const frogRetracedPacket = sandbox.buildDeterministicEventPacketFromChartCoach(frogRetracedCoach);
+  assert.strictEqual(frogRetracedPacket.currentPhase, 'stalled_after_response', 'The Chart Guru packet must carry the current stalled phase, not the historical extension.');
+  assert.strictEqual(frogRetracedPacket.followThroughState, 'stalled', 'The Chart Guru packet must preserve stalled follow-through for narration projection.');
+  const frogRetracedRead = sandbox.finalDisplayedAnalysisChartRead(frogRetracedRecord, frogRetracedAnalysis);
+  assert.ok(/stalled|follow-through/i.test(frogRetracedRead.text), 'Deterministic Review prose must preserve the current stalled-follow-through state.');
+  assert.ok(!/extended away|well beyond|no longer an active support test/i.test(frogRetracedRead.text), 'FROG-style retracement prose must not claim price has run away from support.');
+
+  // A genuinely new 50MA response must become the relevant episode only after
+  // it has its own multi-candle departure from the later touch.
+  const secondSupportEpisodeHistory = [
+    {date:'2026-07-10', open:82.1, high:82.6, low:80.9, close:81.7},
+    {date:'2026-07-11', open:82.2, high:91.0, low:81.9, close:89.5},
+    {date:'2026-07-12', open:89.7, high:97.5, low:88.9, close:96.8},
+    {date:'2026-07-18', open:87.0, high:85.0, low:81.1, close:82.0},
+    {date:'2026-07-19', open:82.4, high:86.0, low:82.0, close:85.2},
+    {date:'2026-07-20', open:85.5, high:89.4, low:84.9, close:88.7}
+  ].map(candle => ({...candle, ma50:81.62}));
+  const secondSupportEpisode = sandbox.chartGuruSupportEpisodeFromHistory({supportContext:'50ma', historySequence:secondSupportEpisodeHistory}, 81.62);
+  assert.strictEqual(secondSupportEpisode.supportEvent.timestamp, '2026-07-18', 'A later MA touch becomes the selected episode only after its own ordered response is present.');
+  assert.strictEqual(secondSupportEpisode.postSupportHigh.timestamp, '2026-07-20', 'The new episode must measure its own post-touch high.');
+
+  // Current measured location must win over a stale legacy extension label for
+  // either supported moving average. The older rebound remains chronology; it
+  // must not supply a buyer response for the newest support test.
+  [
+    {type:'20ma', label:'20-day average', maKey:'ma20', otherMaKey:'ma50', otherMa:96},
+    {type:'50ma', label:'50-day average', maKey:'ma50', otherMaKey:'ma20', otherMa:104}
+  ].forEach(({type, label, maKey, otherMaKey, otherMa}) => {
+    const supportLevel = 100;
+    const historicalExtension = [
+      {date:'2026-07-01', open:100.2, high:100.8, low:99.7, close:100.1},
+      {date:'2026-07-02', open:104.2, high:106.1, low:104.1, close:104.8},
+      {date:'2026-07-03', open:106.5, high:110.0, low:106.2, close:108.4},
+      {date:'2026-07-04', open:101.5, high:102.0, low:99.8, close:100.8}
+    ].map(candle => ({...candle, [maKey]:supportLevel}));
+    const baseContext = {
+      supportContext:type,
+      supportTestState:'held',
+      structureIntact:true,
+      extendedAfterRun:true,
+      historicalExtendedAfterRun:true,
+      currentPrice:100.8,
+      ma200:90,
+      historySequence:historicalExtension,
+      [maKey]:supportLevel,
+      [otherMaKey]:otherMa
+    };
+    const returnToSupportStory = sandbox.buildCanonicalChartStoryContext(baseContext);
+    assert.ok(returnToSupportStory.storyEvents.includes('historical_rebound_extended'), `${type}: the earlier extension must remain chronology.`);
+    assert.strictEqual(returnToSupportStory.buyerResponse.state, 'absent', `${type}: historical extension alone must not become a current buyer response.`);
+    assert.strictEqual(returnToSupportStory.support.currentlyActive, true, `${type}: a measured return within the active-support threshold must override stale extended-after-run state.`);
+    assert.strictEqual(returnToSupportStory.currentPhase, 'at_support', `${type}: a return without a fresh buyer response must be an active support test.`);
+    assert.strictEqual(returnToSupportStory.diagnostics.phaseDecision.latestSupportEpisode.supportEvent.timestamp, '2026-07-04', `${type}: the phase trace must retain the later current MA contact even before it has a response.`);
+    assert.strictEqual(returnToSupportStory.diagnostics.phaseDecision.latestSupportEpisode.responseDetected, false, `${type}: the latest current MA contact must not borrow response authority from the old episode.`);
+    assert.strictEqual(returnToSupportStory.diagnostics.phaseDecision.buyerResponseSource, 'none', `${type}: historical response must not become current buyer-response authority.`);
+    assert.strictEqual(sandbox.canonicalReviewTechnicalPullbackLabelFromStoryContext(returnToSupportStory), `Testing ${label}`, `${type}: Review must name the active returned-to-support moving average.`);
+
+    const respondingFromSupportStory = sandbox.buildCanonicalChartStoryContext({
+      ...baseContext,
+      currentPrice:102,
+      historySequence:[
+        ...historicalExtension,
+        {date:'2026-07-05', open:100.7, high:104.0, low:100.5, close:102.0},
+        {date:'2026-07-06', open:101.8, high:104.2, low:101.0, close:102.0}
+      ]
+    });
+    assert.strictEqual(respondingFromSupportStory.support.currentlyActive, true, `${type}: fresh buyer evidence must not lose the active current support location.`);
+    assert.strictEqual(respondingFromSupportStory.diagnostics.phaseDecision.supportEvent.timestamp, '2026-07-04', `${type}: the selected support event must advance to Episode 2 after its dated rebound.`);
+    assert.strictEqual(respondingFromSupportStory.diagnostics.phaseDecision.latestSupportEpisode.supportEvent.timestamp, '2026-07-04', `${type}: the phase trace must identify Episode 2 as the latest support episode.`);
+    assert.strictEqual(respondingFromSupportStory.diagnostics.phaseDecision.latestSupportEpisode.responseDetected, true, `${type}: dated candles after Episode 2 must prove its fresh response.`);
+    assert.strictEqual(respondingFromSupportStory.buyerResponse.state, 'present', `${type}: the latest support response must supply current buyer-response state.`);
+    assert.strictEqual(respondingFromSupportStory.buyerResponse.source, 'latest_support_episode_history', `${type}: current buyer response must be sourced from Episode 2 history, not top-level state.`);
+    assert.strictEqual(respondingFromSupportStory.diagnostics.phaseDecision.buyerResponseSource, 'latest_support_episode_history', `${type}: the phase trace must identify Episode 2 as the buyer-response source.`);
+    assert.strictEqual(respondingFromSupportStory.currentPhase, 'responding_from_support', `${type}: fresh buyer evidence at active support must advance the canonical phase.`);
+    assert.strictEqual(sandbox.canonicalReviewTechnicalPullbackLabelFromStoryContext(respondingFromSupportStory), `Responding at ${label}`, `${type}: Review must project the current support response rather than historical extension chronology.`);
+
+    const soldOffResponseStory = sandbox.buildCanonicalChartStoryContext({
+      ...baseContext,
+      currentPrice:95,
+      historySequence:[
+        ...historicalExtension,
+        {date:'2026-07-05', open:100.7, high:104.0, low:100.5, close:102.0, [maKey]:supportLevel},
+        {date:'2026-07-06', open:101.8, high:104.2, low:101.0, close:102.0, [maKey]:supportLevel},
+        {date:'2026-07-07', open:99, high:99.5, low:94.5, close:95, [maKey]:supportLevel}
+      ]
+    });
+    assert.strictEqual(soldOffResponseStory.buyerResponse.state, 'absent', `${type}: a later selloff must demote the episode response from current authority.`);
+    assert.notStrictEqual(soldOffResponseStory.buyerResponse.source, 'latest_support_episode_history', `${type}: a failed response must not keep the current-history authority source.`);
+    assert.strictEqual(soldOffResponseStory.buyerResponse.validity, 'chronology_only', `${type}: the response must remain chronology-only after the selloff.`);
+
+    const materiallyRetracedStall = sandbox.buildCanonicalChartStoryContext({
+      ...baseContext,
+      currentPrice:104,
+      bounceState:'developing',
+      recentlyLeftSupportZone:true
+    });
+    assert.strictEqual(materiallyRetracedStall.currentPhase, 'stalled_after_response', `${type}: a response that has materially retraced from the historical high must remain stalled.`);
+    assert.strictEqual(materiallyRetracedStall.diagnostics.phaseDecision.extensionMateriallyRetraced, true, `${type}: the trace must explicitly record material retracement before Review says pullback.`);
+    assert.strictEqual(sandbox.canonicalReviewTechnicalPullbackLabelFromStoryContext(materiallyRetracedStall), 'Pullback underway', `${type}: material retracement must produce the pullback label.`);
+
+    const stalledAwayFromSupport = sandbox.buildCanonicalChartStoryContext({
+      ...baseContext,
+      currentPrice:104,
+      historySequence:[],
+      bounceState:'developing',
+      recentlyLeftSupportZone:true
+    });
+    assert.strictEqual(stalledAwayFromSupport.currentPhase, 'stalled_after_response', `${type}: a genuine stalled rebound away from support must retain its stalled phase.`);
+    assert.strictEqual(stalledAwayFromSupport.diagnostics.phaseDecision.extensionMateriallyRetraced, false, `${type}: no measured retracement means Review must not imply a pullback.`);
+    assert.strictEqual(sandbox.canonicalReviewTechnicalPullbackLabelFromStoryContext(stalledAwayFromSupport), `Stalled after ${label}`, `${type}: a stalled rebound without material retracement must keep its precise support label.`);
+
+    const driftHistory = [
+      {date:'2026-08-01', open:100, high:101, low:99.5, close:100, [maKey]:80},
+      {date:'2026-08-02', open:102, high:105, low:101, close:104, [maKey]:90},
+      {date:'2026-08-03', open:104, high:106, low:103, close:105, [maKey]:90},
+      {date:'2026-08-04', open:103, high:104, low:99.8, close:100.5, [maKey]:100},
+      {date:'2026-08-05', open:100.5, high:104, low:100, close:102, [maKey]:100},
+      {date:'2026-08-06', open:102, high:104.5, low:101, close:102, [maKey]:100}
+    ];
+    const driftEpisode = sandbox.chartGuruSupportEpisodeFromHistory({supportContext:type, historySequence:driftHistory}, 100);
+    assert.strictEqual(driftEpisode.supportEvent.timestamp, '2026-08-04', `${type}: an old candle near today's MA but far from its own MA must be rejected.`);
+    assert.strictEqual(driftEpisode.supportEvent.maSource, 'per_candle', `${type}: supplied contemporaneous MA must win over current-MA proximity.`);
+
+    const historicalTouchWithMaDrift = [
+      // The close is nearest today's MA (100), but the low is the genuine
+      // interaction with this candle's own MA (80).
+      {date:'2026-08-10', open:102, high:105, low:80, close:101, [maKey]:80},
+      {date:'2026-08-11', open:101, high:125, low:100, close:110, [maKey]:95},
+      {date:'2026-08-12', open:110, high:120, low:108, close:112, [maKey]:100}
+    ];
+    const historicalTouchEpisode = sandbox.chartGuruSupportEpisodeFromHistory({supportContext:type, historySequence:historicalTouchWithMaDrift}, 100);
+    assert.strictEqual(historicalTouchEpisode.supportEvent.timestamp, '2026-08-10', `${type}: a low touching its contemporaneous MA must be recognised despite the close being nearer today's MA.`);
+    assert.strictEqual(historicalTouchEpisode.supportEvent.price, 80, `${type}: the contemporaneous-MA interaction must identify the low, not the close, as the contact price.`);
+    assert.strictEqual(historicalTouchEpisode.postSupportHigh.timestamp, '2026-08-11', `${type}: the post-support high must remain anchored to the contemporaneous-MA touch.`);
+    const driftRetracementStory = sandbox.buildCanonicalChartStoryContext({
+      ...baseContext,
+      currentPrice:105,
+      historySequence:historicalTouchWithMaDrift
+    });
+    assert.strictEqual(driftRetracementStory.diagnostics.phaseDecision.extensionMateriallyRetraced, true, `${type}: retracement must continue to use the selected contemporaneous-MA episode high.`);
+
+    const closeNearTodayButNotHistoricalMa = [
+      {date:'2026-08-20', open:102, high:105, low:90, close:101, [maKey]:80},
+      {date:'2026-08-21', open:101, high:106, low:94, close:103, [maKey]:90},
+      {date:'2026-08-22', open:103, high:107, low:96, close:104, [maKey]:100}
+    ];
+    const nonContactEpisode = sandbox.chartGuruSupportEpisodeFromHistory({supportContext:type, historySequence:closeNearTodayButNotHistoricalMa}, 100);
+    assert.strictEqual(nonContactEpisode.supportEvent, null, `${type}: a close near today's MA without interaction with its own MA must not become a support contact.`);
+
+    const unavailableEpisode = sandbox.chartGuruSupportEpisodeFromHistory({supportContext:type, historySequence:driftHistory.slice(0, 3).map(({ma20, ma50, ...candle}) => candle)}, 100);
+    assert.strictEqual(unavailableEpisode.supportEvent, null, `${type}: insufficient close history without per-candle MA must not invent a historical episode.`);
+    assert.strictEqual(unavailableEpisode.historicalInferenceSkipped, true, `${type}: unavailable MA evidence must be explicit in the trace.`);
+  });
+
+  // A recent high is not support chronology. With insufficient dated 50MA
+  // evidence, it must remain separate from the retracement authority and leave
+  // an explicit extended-from-support phase intact.
+  const incomplete50MaHistory = [
+    {date:'2026-09-01', open:104, high:108, low:103, close:106},
+    {date:'2026-09-02', open:106, high:110, low:104, close:107},
+    {date:'2026-09-03', open:107, high:109, low:103, close:105}
+  ];
+  const incomplete50MaContext = {
+    supportContext:'50ma',
+    supportTestState:'held',
+    structureIntact:true,
+    recentlyLeftSupportZone:true,
+    extendedAfterRun:true,
+    currentPrice:105,
+    ma50:100,
+    ma20:104,
+    historySequence:incomplete50MaHistory,
+    recentSequence:[{date:'2026-09-03', high:118}],
+    bounceState:'developing',
+    weakVolume:true,
+    authoritativeCurrentPhase:'extended_from_support',
+    phaseAuthoritySource:'canonical_resolver'
+  };
+  const unanchoredRecentHighStory = sandbox.buildCanonicalChartStoryContext(incomplete50MaContext);
+  const unanchoredTrace = unanchoredRecentHighStory.diagnostics.phaseDecision;
+  assert.strictEqual(unanchoredTrace.supportEpisodeEstablished, false, 'Insufficient 50MA history must not establish a support episode.');
+  assert.strictEqual(unanchoredTrace.recentHigh, 118, 'The generic recent high may remain visible as chart context.');
+  assert.strictEqual(unanchoredTrace.anchoredPostSupportHigh, null, 'A generic recent high must not populate the anchored post-support high.');
+  assert.strictEqual(unanchoredTrace.postSupportHighSource, 'unavailable', 'The trace must identify the missing post-support-high authority.');
+  assert.strictEqual(unanchoredTrace.retracementAvailable, false, 'Retracement must be unavailable without an anchored support high.');
+  assert.strictEqual(unanchoredTrace.retracementFromPostSupportHighPct, null, 'An unanchored recent high must not produce a retracement measurement.');
+  assert.strictEqual(unanchoredTrace.extensionMateriallyRetraced, false, 'Unanchored context must not manufacture material retracement.');
+  assert.strictEqual(unanchoredTrace.retracementPhaseOverrideApplied, false, 'No retracement phase override may run without anchored authority.');
+  assert.match(unanchoredTrace.retracementUnavailableReason, /insufficient contemporaneous MA history/i, 'The trace must explain why historical retracement authority is unavailable.');
+  assert.strictEqual(unanchoredRecentHighStory.currentPhase, 'extended_from_support', 'An unanchored recent high must not supersede the authoritative extension phase.');
+
+  const explicitPostSupportHighStory = sandbox.buildCanonicalChartStoryContext({
+    ...incomplete50MaContext,
+    postSupportHigh:118
+  });
+  const explicitHighTrace = explicitPostSupportHighStory.diagnostics.phaseDecision;
+  assert.strictEqual(explicitHighTrace.anchoredPostSupportHigh, 118, 'A trusted explicit post-support high must be accepted.');
+  assert.strictEqual(explicitHighTrace.postSupportHighSource, 'explicit_post_support_high', 'The explicit high authority must be recorded.');
+  assert.strictEqual(explicitHighTrace.retracementAvailable, true, 'A trusted explicit high may enable retracement calculation.');
+  assert.strictEqual(explicitHighTrace.extensionMateriallyRetraced, true, 'The explicit anchored high must allow material-retracement detection.');
+  assert.strictEqual(explicitHighTrace.retracementPhaseOverrideApplied, true, 'Material retracement from an explicit anchored high may supersede extension authority.');
+  assert.strictEqual(explicitPostSupportHighStory.currentPhase, 'stalled_after_response', 'The independently evidenced stalled response should replace the extension phase only after anchored retracement is available.');
+
+  const validatedEpisodeHighStory = sandbox.buildCanonicalChartStoryContext({
+    supportContext:'50ma',
+    supportTestState:'held',
+    structureIntact:true,
+    recentlyLeftSupportZone:true,
+    currentPrice:86.56,
+    ma50:81.62,
+    historySequence:frogSupportEpisodeHistory
+  });
+  const validatedEpisodeTrace = validatedEpisodeHighStory.diagnostics.phaseDecision;
+  assert.strictEqual(validatedEpisodeTrace.supportEpisodeEstablished, true, 'A dated per-candle MA episode must establish support chronology.');
+  assert.strictEqual(validatedEpisodeTrace.postSupportHighSource, 'validated_support_episode', 'A measured episode high must retain its episode authority.');
+  assert.strictEqual(validatedEpisodeTrace.anchoredPostSupportHigh, 98.9, 'Only the high after the selected support event may anchor retracement.');
+  assert.strictEqual(validatedEpisodeTrace.retracementAvailable, true, 'A validated support episode must permit anchored retracement measurement.');
 
   const completedContinuationRecord = {
     marketData:{price:288.3, ma20:273.251, ma50:269.7692, ma200:250},

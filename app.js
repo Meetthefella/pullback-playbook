@@ -24555,6 +24555,7 @@ function buildCanonicalStoryContextForRecord(record = {}, options = {}){
     latestDirection:facts.latestDirection,
     bodyDescriptor:chartCoachBodyDescriptor(facts.latest),
     recentSequence:Array.isArray(facts.recent) ? facts.recent : [],
+    historySequence:item.marketData && Array.isArray(item.marketData.history) ? item.marketData.history : [],
     structureIntact:['strong', 'intact', 'developing_clean'].includes(structureState)
       || ['alive', 'messy'].includes(structureEligibility),
     structureBroken:['broken', 'failed', 'dead', 'invalid'].includes(structureState)
@@ -24577,6 +24578,9 @@ function buildCanonicalStoryContextForRecord(record = {}, options = {}){
     supportTestState:supportAuthority.authoritative ? supportAuthority.supportTestState : supportTestState,
     buyerControlState:supportAuthority.authoritative ? supportAuthority.buyerControlState : buyerControlState,
     authoritativeCurrentPhase:supportAuthority.authoritative ? supportAuthority.currentPhase : '',
+    activeSupportAuthoritySource:supportAuthority.authoritative ? 'explicit_canonical' : 'deterministic_derivation',
+    supportInteractionAuthoritySource:supportAuthority.authoritative ? 'explicit_canonical' : 'deterministic_derivation',
+    phaseAuthoritySource:supportAuthority.authoritative && supportAuthority.currentPhase ? 'explicit_canonical' : 'deterministic_derivation',
     bounceState,
     stabilisationState,
     reclaimConfirmed:derivedStates.candleEvidenceReclaimedPriorDayHigh === true
@@ -24613,11 +24617,14 @@ function canonicalReviewTechnicalStructureLabelFromStoryContext(storyContext = {
 
 function canonicalReviewTechnicalPullbackLabelFromStoryContext(storyContext = {}){
   const support = storyContext.support && typeof storyContext.support === 'object' ? storyContext.support : {};
+  const phaseDecision = storyContext.diagnostics && storyContext.diagnostics.phaseDecision && typeof storyContext.diagnostics.phaseDecision === 'object'
+    ? storyContext.diagnostics.phaseDecision
+    : {};
   const supportLabel = String(support.label || 'support').trim() || 'support';
   const currentPhase = String(storyContext.currentPhase || '').trim();
   if(currentPhase === 'support_failed') return `${supportLabel} failed`;
   if(currentPhase === 'extended_from_support') return `Extended from ${supportLabel}`;
-  if(currentPhase === 'stalled_after_response') return `Stalled after ${supportLabel}`;
+  if(currentPhase === 'stalled_after_response') return phaseDecision.extensionMateriallyRetraced === true ? 'Pullback underway' : `Stalled after ${supportLabel}`;
   if(currentPhase === 'responding_from_support') return `Responding at ${supportLabel}`;
   if(currentPhase === 'at_support') return `Testing ${supportLabel}`;
   if(currentPhase === 'current_location_unresolved') return `${supportLabel} unresolved`;
@@ -26697,6 +26704,98 @@ function chartGuruNarrationDebugMarkup(analysis = {}, chartCoach = null){
   return renderDebugSectionMarkup('Chart Guru Narration', rows.map(([label, value]) => ({label, value})));
 }
 
+function canonicalPhaseDecisionDebugMarkup(analysis = {}, chartCoach = null){
+  const safeCoach = chartCoach && typeof chartCoach === 'object' ? chartCoach : {};
+  const story = safeCoach.storyContext && typeof safeCoach.storyContext === 'object'
+    ? safeCoach.storyContext
+    : (safeCoach.diagnostics && safeCoach.diagnostics.storyContext && typeof safeCoach.diagnostics.storyContext === 'object'
+      ? safeCoach.diagnostics.storyContext
+      : {});
+  const decision = story.diagnostics && story.diagnostics.phaseDecision && typeof story.diagnostics.phaseDecision === 'object'
+    ? story.diagnostics.phaseDecision
+    : {};
+  if(!Object.keys(decision).length) return '';
+  const pct = value => Number.isFinite(Number(value)) ? `${(Number(value) * 100).toFixed(2)}%` : 'unavailable';
+  const averages = decision.movingAverages && typeof decision.movingAverages === 'object' ? decision.movingAverages : {};
+  const distances = averages.distancePct && typeof averages.distancePct === 'object' ? averages.distancePct : {};
+  const support = decision.activeSupport && typeof decision.activeSupport === 'object' ? decision.activeSupport : {};
+  const supportEvent = decision.supportEvent && typeof decision.supportEvent === 'object' ? decision.supportEvent : {};
+  const latestSupportEpisode = decision.latestSupportEpisode && typeof decision.latestSupportEpisode === 'object' ? decision.latestSupportEpisode : {};
+  const latestSupportEvent = latestSupportEpisode.supportEvent && typeof latestSupportEpisode.supportEvent === 'object' ? latestSupportEpisode.supportEvent : {};
+  const postSupportHighDetails = decision.postSupportHighDetails && typeof decision.postSupportHighDetails === 'object' ? decision.postSupportHighDetails : {};
+  const laterSupportRevisits = Array.isArray(decision.laterSupportRevisits) ? decision.laterSupportRevisits : [];
+  const narration = safeCoach.diagnostics && safeCoach.diagnostics.narration && typeof safeCoach.diagnostics.narration === 'object'
+    ? safeCoach.diagnostics.narration
+    : {};
+  const validationCodes = Array.isArray(narration.validationErrors) ? narration.validationErrors.map(value => String(value || '').trim()).filter(Boolean) : [];
+  const validationConflictFields = validationCodes.length
+    ? validationCodes.map(code => {
+      if(code === 'away_phase_active_support_conflict') return `phase=${String(story.currentPhase || 'unknown')}, support.currentlyActive=${String(story.support && story.support.currentlyActive)}, support.interaction=${String(story.support && story.support.interaction || 'unknown')}`;
+      if(/away_from_active_support|not_near_active_support|return_to_active_support/.test(code)) return `phase=${String(story.currentPhase || 'unknown')}, support.label=${String(story.support && story.support.label || 'unknown')}, support.currentlyActive=${String(story.support && story.support.currentlyActive)}`;
+      return `${code}: see canonical narration contract and rendered prose`;
+    }).join('\n')
+    : 'none';
+  const candidates = (Array.isArray(decision.candidates) ? decision.candidates : []).map(candidate => {
+    const value = candidate && typeof candidate === 'object' ? candidate : {};
+    return `${String(value.phase || 'unknown')}: ${value.accepted === true ? 'accepted' : 'rejected'} — ${String(value.reason || 'unavailable')}`;
+  });
+  return renderDebugSectionMarkup('Canonical Phase Decision', [
+    {label:'Current price', value:decision.currentPrice ?? 'unavailable'},
+    {label:'20MA', value:averages.ma20 ?? 'unavailable'},
+    {label:'Distance from 20MA', value:pct(distances.ma20)},
+    {label:'Absolute distance from 20MA', value:pct(Math.abs(Number(distances.ma20)))},
+    {label:'50MA', value:averages.ma50 ?? 'unavailable'},
+    {label:'Distance from 50MA', value:pct(distances.ma50)},
+    {label:'Absolute distance from 50MA', value:pct(Math.abs(Number(distances.ma50)))},
+    {label:'200MA', value:averages.ma200 ?? 'unavailable'},
+    {label:'Distance from 200MA', value:pct(distances.ma200)},
+    {label:'Absolute distance from 200MA', value:pct(Math.abs(Number(distances.ma200)))},
+    {label:'Selected active support', value:support.label || 'unavailable'},
+    {label:'Active-support source', value:support.source || 'unavailable'},
+    {label:'Support interaction', value:support.interaction || 'unavailable'},
+    {label:'Support-interaction source', value:support.interactionSource || 'unavailable'},
+    {label:'Raw/proposed phase', value:decision.rawPhase || 'unavailable'},
+    {label:'Final canonical phase', value:decision.finalPhase || 'unavailable'},
+    {label:'Phase authority/source', value:decision.phaseSource || 'unavailable'},
+    {label:'Dominant event', value:decision.dominantEvent || 'unavailable'},
+    {label:'Dominant-event source', value:decision.dominantEventSource || 'unavailable'},
+    {label:'Buyer response', value:decision.buyerResponse || 'unavailable'},
+    {label:'Buyer-response source', value:decision.buyerResponseSource || 'unavailable'},
+    {label:'Buyer control', value:decision.buyerControl || 'unavailable'},
+    {label:'Follow-through', value:decision.followThrough || 'unavailable'},
+    {label:'Next required event', value:decision.nextRequiredEvent || 'unavailable'},
+    {label:'History ordering used', value:decision.historyOrdering || 'unavailable'},
+    {label:'Support episode identifier', value:decision.supportEpisodeId || 'unavailable'},
+    {label:'Latest support episode identifier', value:latestSupportEpisode.id || 'unavailable'},
+    {label:'Latest support-event timestamp/index', value:latestSupportEvent.timestamp ? `${latestSupportEvent.timestamp} / ${latestSupportEvent.index ?? 'unavailable'}` : (latestSupportEvent.index ?? 'unavailable')},
+    {label:'Latest episode response detected', value:latestSupportEpisode.responseDetected === true ? 'true' : (latestSupportEpisode.responseDetected === false ? 'false' : 'unavailable')},
+    {label:'Selected support-event timestamp/index', value:supportEvent.timestamp ? `${supportEvent.timestamp} / ${supportEvent.index ?? 'unavailable'}` : (supportEvent.index ?? 'unavailable')},
+    {label:'Selected support-event price', value:supportEvent.price ?? 'unavailable'},
+    {label:'Support-event MA value', value:supportEvent.maValue ?? 'unavailable'},
+    {label:'Support-event selection reason', value:decision.supportEventSelectionReason || 'unavailable'},
+    {label:'Later MA revisits', value:laterSupportRevisits.length ? laterSupportRevisits.map(revisit => `${revisit.timestamp || 'undated'} / ${revisit.index ?? 'unavailable'}: ${revisit.reason || 'unavailable'}`).join('\n') : 'none'},
+    {label:'Post-support high timestamp/index/value', value:postSupportHighDetails.timestamp ? `${postSupportHighDetails.timestamp} / ${postSupportHighDetails.index ?? 'unavailable'} / ${postSupportHighDetails.value ?? 'unavailable'}` : (postSupportHighDetails.value ?? 'unavailable')},
+    {label:'Recent high (chart context only)', value:decision.recentHigh ?? 'unavailable'},
+    {label:'Anchored post-support high', value:decision.anchoredPostSupportHigh ?? 'unavailable'},
+    {label:'Post-support high', value:decision.postSupportHigh ?? 'unavailable'},
+    {label:'Post-support-high authority', value:decision.postSupportHighSource || 'unavailable'},
+    {label:'Support episode established', value:decision.supportEpisodeEstablished === true ? 'true' : 'false'},
+    {label:'Maximum extension', value:pct(decision.maximumExtensionPct)},
+    {label:'Current extension', value:pct(decision.currentExtensionPct)},
+    {label:'Retracement from high', value:pct(decision.retracementFromPostSupportHighPct)},
+    {label:'Retracement available', value:decision.retracementAvailable === true ? 'true' : 'false'},
+    {label:'Retracement unavailable reason', value:decision.retracementUnavailableReason || 'none'},
+    {label:'Retracement phase override applied', value:decision.retracementPhaseOverrideApplied === true ? 'true' : 'false'},
+    {label:'Historical events used', value:decision.historicalEventsUsed === true ? 'true' : 'false'},
+    {label:'Candle geometry influenced', value:decision.imageEvidenceInfluenced === true ? 'true' : 'false'},
+    {label:'Volume evidence influenced', value:decision.volumeEvidenceInfluenced === true ? 'true' : 'false'},
+    {label:'Field resolution order', value:decision.resolutionOrder || 'unavailable'},
+    {label:'Transition candidates', value:candidates.length ? candidates.join('\n') : 'unavailable'},
+    {label:'Narration validation codes', value:validationCodes.length ? `[${validationCodes.join(', ')}]` : '[]'},
+    {label:'Validation conflict fields', value:validationConflictFields}
+  ]);
+}
+
 function sanitizeChartCoachForDisplay(chartCoach = null, setup = {}){
   const safe = chartCoach && typeof chartCoach === 'object' ? chartCoach : null;
   if(!safe) return null;
@@ -27634,6 +27733,168 @@ function chartGuruValidatedCanonicalPhase(phase = '', {supportInteraction = '', 
     : '';
 }
 
+function chartGuruSupportEpisodeFromHistory(context = {}, supportReferenceLevel = null){
+  const explicitHigh = numericOrNull(context.postSupportHigh ?? context.maximumPriceSinceSupport ?? context.maximumExtensionPrice);
+  if(Number.isFinite(explicitHigh)){
+    return {
+      historyOrdering:'explicit_high_only',
+      supportEvent:null,
+      postSupportHigh:{index:null, timestamp:null, value:explicitHigh},
+      selectionReason:'explicit post-support high',
+      laterRevisits:[]
+    };
+  }
+  const supportType = chartGuruResolvedSupportType(context);
+  const maPeriod = supportType === '20ma' ? 20 : (supportType === '50ma' ? 50 : null);
+  if(!maPeriod) return null;
+  const history = Array.isArray(context.historySequence) ? context.historySequence : [];
+  // normalizeCandleSequenceOrder sorts dated production history newest-first:
+  // index 0 is now, and increasing indexes move backward in time.
+  const ordered = normalizeCandleSequenceOrder(history).candles;
+  if(!ordered.length) return null;
+  const supportTolerance = 0.04;
+  const maKey = supportType === '20ma' ? 'ma20' : 'ma50';
+  const suppliedMaKeys = supportType === '20ma' ? ['ma20', 'sma20', 'sma_20'] : ['ma50', 'sma50', 'sma_50'];
+  const rollingMaAt = index => {
+    const closes = ordered.slice(index, index + maPeriod).map(candle => numericOrNull(candle && candle.close));
+    return closes.length === maPeriod && closes.every(Number.isFinite)
+      ? closes.reduce((sum, close) => sum + close, 0) / maPeriod
+      : null;
+  };
+  const contacts = ordered.map((candle, index) => {
+    const suppliedMa = suppliedMaKeys.map(key => numericOrNull(candle && candle[key])).find(Number.isFinite);
+    const derivedMa = Number.isFinite(suppliedMa) ? null : rollingMaAt(index);
+    const maValue = Number.isFinite(suppliedMa) ? suppliedMa : derivedMa;
+    const maSource = Number.isFinite(suppliedMa) ? 'per_candle' : (Number.isFinite(derivedMa) ? 'derived_rolling' : 'unavailable');
+    const close = numericOrNull(candle && candle.close);
+    const low = numericOrNull(candle && candle.low);
+    // Historical interaction is evaluated against the MA that existed on this
+    // candle. Today's support level is only relevant to current location and
+    // must never choose which historical OHLC value represents the touch.
+    const price = Number.isFinite(maValue)
+      ? [close, low]
+        .filter(Number.isFinite)
+        .sort((left, right) => Math.abs(left - maValue) - Math.abs(right - maValue))[0] ?? null
+      : null;
+    return {
+      candle,
+      index,
+      price,
+      maValue,
+      maSource,
+      distancePct:Number.isFinite(price) && Number.isFinite(maValue) && maValue !== 0 ? Math.abs(price - maValue) / Math.abs(maValue) : null,
+      isContact:Number.isFinite(price) && Number.isFinite(maValue) && Math.abs(price - maValue) / Math.abs(maValue) <= supportTolerance
+    };
+  });
+  const episodes = [];
+  contacts.forEach(contact => {
+    if(!contact.isContact) return;
+    const previous = episodes[episodes.length - 1];
+    if(previous && contact.index === previous.endIndex + 1){
+      previous.endIndex = contact.index;
+      previous.contacts.push(contact);
+      return;
+    }
+    episodes.push({startIndex:contact.index, endIndex:contact.index, contacts:[contact]});
+  });
+  const supportEpisodeMaSource = contacts.some(contact => contact.maSource === 'per_candle')
+    ? 'per_candle'
+    : (contacts.some(contact => contact.maSource === 'derived_rolling') ? 'derived_rolling' : 'unavailable');
+  const candidates = episodes.map((episode, ordinal) => {
+    // Contacts are stored newest-first. The oldest contact is the initial test
+    // that began this episode; a rebound candle can still wick into the MA and
+    // must not replace that origin merely because it is the newest contact.
+    const supportEvent = episode.contacts[episode.contacts.length - 1];
+    const postSupport = ordered.slice(0, supportEvent.index)
+      .map((candle, index) => ({candle, index, high:numericOrNull(candle && candle.high)}))
+      .filter(entry => Number.isFinite(entry.high));
+    const postSupportHigh = postSupport.reduce((best, entry) => !best || entry.high > best.high ? entry : best, null);
+    const materialResponseCandles = postSupport.filter(entry => {
+      const close = numericOrNull(entry.candle && entry.candle.close);
+      return Number.isFinite(close) && close >= supportEvent.maValue * 1.015;
+    });
+    // A single candle after a later MA revisit is not enough to replace the
+    // established rebound episode. Require an ordered, multi-candle departure
+    // from the touch so a retracement back into the MA cannot erase its own
+    // preceding rally high.
+    const responseDetected = !!(postSupportHigh
+      && postSupportHigh.high >= supportEvent.maValue * 1.035
+      && materialResponseCandles.length >= 2);
+    return {
+      id:`support_episode_${ordinal + 1}`,
+      supportEvent,
+      responseThreshold:supportEvent.maValue * 1.015,
+      postSupportHigh,
+      responseDetected,
+      responseCandleCount:materialResponseCandles.length,
+      selectionReason:responseDetected
+        ? 'MA contact followed by a material multi-candle rebound'
+        : 'rejected: later MA revisit has no material multi-candle post-touch response'
+    };
+  });
+  const timestampFor = candle => String(candle && (candle.datetime || candle.timestamp || candle.date) || '').trim() || null;
+  const projectEpisode = candidate => candidate ? {
+    id:candidate.id,
+    supportEvent:{
+      id:candidate.id,
+      index:candidate.supportEvent.index,
+      timestamp:timestampFor(candidate.supportEvent.candle),
+      price:candidate.supportEvent.price,
+      maValue:candidate.supportEvent.maValue,
+      maSource:candidate.supportEvent.maSource,
+      distancePct:candidate.supportEvent.distancePct,
+      selectionReason:candidate.selectionReason
+    },
+    postSupportHigh:candidate.postSupportHigh ? {
+      index:candidate.postSupportHigh.index,
+      timestamp:timestampFor(candidate.postSupportHigh.candle),
+      value:candidate.postSupportHigh.high
+    } : null,
+    responseDetected:candidate.responseDetected === true,
+    responseThreshold:candidate.responseThreshold,
+    responseCandleCount:candidate.responseCandleCount,
+    selectionReason:candidate.selectionReason
+  } : null;
+  // Episodes are newest-first. The first with a real response is the current
+  // rebound episode; a newer unresponsive revisit cannot replace its origin.
+  const selected = candidates.find(candidate => candidate.responseDetected);
+  const latestEpisode = projectEpisode(candidates[0]);
+  if(!selected) return {
+    historyOrdering:'newest_first',
+    supportEpisodeMaSource,
+    historicalInferenceSkipped:supportEpisodeMaSource === 'unavailable',
+    supportEvent:null,
+    postSupportHigh:null,
+    selectionReason:'unresolved: no qualifying support episode',
+    laterRevisits:[],
+    latestEpisode
+  };
+  const selectedEpisode = projectEpisode(selected);
+  return {
+    historyOrdering:'newest_first',
+    supportEpisodeMaSource,
+    historicalInferenceSkipped:false,
+    supportEvent:selectedEpisode.supportEvent,
+    postSupportHigh:selectedEpisode.postSupportHigh,
+    selectionReason:selected.selectionReason,
+    laterRevisits:candidates
+      .filter(candidate => candidate.supportEvent.index < selected.supportEvent.index)
+      .map(candidate => ({
+        id:candidate.id,
+        index:candidate.supportEvent.index,
+        timestamp:timestampFor(candidate.supportEvent.candle),
+        price:candidate.supportEvent.price,
+        reason:candidate.selectionReason
+      })),
+    latestEpisode
+  };
+}
+
+function chartGuruPostSupportHigh(context = {}, supportReferenceLevel = null){
+  const episode = chartGuruSupportEpisodeFromHistory(context, supportReferenceLevel);
+  return numericOrNull(episode && episode.postSupportHigh && episode.postSupportHigh.value);
+}
+
 function buildCanonicalChartStoryContext(context = {}){
   const supportType = chartGuruResolvedSupportType(context);
   const supportContext = String(context.supportContext || '').trim().toLowerCase();
@@ -27643,11 +27904,76 @@ function buildCanonicalChartStoryContext(context = {}){
   const supportReferenceLevel = chartGuruSupportReferenceLevel(context, supportType);
   const supportDistancePct = chartGuruSupportDistancePct(context, supportType);
   const supportDistanceMeasured = Number.isFinite(supportDistancePct);
+  const currentPrice = numericOrNull(context.currentPrice);
   const supportDistanceThresholdPct = supportType === '50ma' ? 0.03 : 0.025;
   const materiallyAwayFromSupport = supportDistanceMeasured && supportDistancePct > supportDistanceThresholdPct;
+  const currentExtensionPct = Number.isFinite(currentPrice) && Number.isFinite(supportReferenceLevel) && supportReferenceLevel !== 0
+    ? (currentPrice - supportReferenceLevel) / Math.abs(supportReferenceLevel)
+    : null;
+  const recentHighs = (Array.isArray(context.recentSequence) ? context.recentSequence : [])
+    .map(candle => numericOrNull(candle && candle.high))
+    .filter(Number.isFinite);
+  const recentHigh = recentHighs.length ? Math.max(...recentHighs) : null;
+  const supportEpisode = chartGuruSupportEpisodeFromHistory(context, supportReferenceLevel);
+  const historyPostSupportHigh = numericOrNull(supportEpisode && supportEpisode.postSupportHigh && supportEpisode.postSupportHigh.value);
+  const historyWasProvided = Array.isArray(context.historySequence) && context.historySequence.length > 0;
+  const explicitPostSupportHigh = numericOrNull(context.postSupportHigh ?? context.maximumPriceSinceSupport ?? context.maximumExtensionPrice);
+  const supportEpisodeEstablished = !!(
+    supportEpisode
+    && supportEpisode.supportEvent
+    && Number.isFinite(historyPostSupportHigh)
+  );
+  // A generic recent maximum is chart context, not support chronology. Extension
+  // and retracement calculations require either the selected episode's measured
+  // high or a trusted explicit post-support high from the canonical pipeline.
+  const postSupportHighSource = Number.isFinite(explicitPostSupportHigh)
+    ? 'explicit_post_support_high'
+    : (supportEpisodeEstablished ? 'validated_support_episode' : 'unavailable');
+  const anchoredPostSupportHigh = postSupportHighSource === 'explicit_post_support_high'
+    ? explicitPostSupportHigh
+    : (postSupportHighSource === 'validated_support_episode' ? historyPostSupportHigh : null);
+  const postSupportHigh = anchoredPostSupportHigh;
+  const maximumExtensionPct = Number.isFinite(anchoredPostSupportHigh) && Number.isFinite(supportReferenceLevel) && supportReferenceLevel !== 0
+    ? (anchoredPostSupportHigh - supportReferenceLevel) / Math.abs(supportReferenceLevel)
+    : null;
+  const retracementAvailable = Number.isFinite(anchoredPostSupportHigh)
+    && Number.isFinite(currentPrice)
+    && Number.isFinite(supportReferenceLevel)
+    && anchoredPostSupportHigh > supportReferenceLevel;
+  const retracementUnavailableReason = retracementAvailable
+    ? ''
+    : (!Number.isFinite(anchoredPostSupportHigh)
+      ? (supportEpisode && supportEpisode.historicalInferenceSkipped
+        ? 'insufficient contemporaneous MA history and no explicit post-support high'
+        : (historyWasProvided ? 'no validated support episode or explicit post-support high' : 'no validated support episode or explicit post-support high'))
+      : (!Number.isFinite(currentPrice) ? 'current price unavailable' : (!Number.isFinite(supportReferenceLevel) ? 'support reference unavailable' : 'anchored post-support high is not above support')));
+  const retracementFromPostSupportHighPct = retracementAvailable
+    ? Math.max(0, (anchoredPostSupportHigh - currentPrice) / (anchoredPostSupportHigh - supportReferenceLevel))
+    : null;
+  const historicalExtensionObserved = Number.isFinite(maximumExtensionPct) && maximumExtensionPct >= 0.035;
+  // Historical scanner location is chronology. A material retracement means the
+  // current phase must be derived from today's price and candle evidence instead.
+  const extensionMateriallyRetraced = historicalExtensionObserved
+    && Number.isFinite(retracementFromPostSupportHighPct)
+    && retracementFromPostSupportHighPct >= 0.5;
+  const latestSupportEpisode = supportEpisode && supportEpisode.latestEpisode && typeof supportEpisode.latestEpisode === 'object'
+    ? supportEpisode.latestEpisode
+    : null;
+  const historicalResponseFromLatestEpisode = !!(
+    latestSupportEpisode
+    && latestSupportEpisode.responseDetected === true
+    && supportEpisode
+    && supportEpisode.supportEvent
+    && latestSupportEpisode.supportEvent
+    && latestSupportEpisode.supportEvent.id === supportEpisode.supportEvent.id
+  );
+  const explicitBuyerResponsePresent = chartGuruBuyerResponsePresent(context);
+  let buyerResponsePresent = explicitBuyerResponsePresent;
+  let buyerResponseSource = explicitBuyerResponsePresent ? 'explicit_current_evidence' : 'none';
+  let buyerResponseValidity = explicitBuyerResponsePresent ? 'explicit_current_evidence' : 'not_observed';
+  let buyerResponseInvalidationReason = '';
   const buyerControlState = String(context.buyerControlState || '').trim().toLowerCase();
   const supportTestState = String(context.supportTestState || '').trim().toLowerCase();
-  const buyerResponsePresent = chartGuruBuyerResponsePresent(context);
   const recentSupportResponsePresent = chartGuruRecentSupportResponsePresent(context);
   const terminalCurrentFailure = context.structureBroken === true || context.failedBounce === true || supportTestState === 'failed';
   const confirmedContinuationEvidence = !!(
@@ -27692,13 +28018,37 @@ function buildCanonicalChartStoryContext(context = {}){
     supportContextRecognized
     && !context.recentlyLeftSupportZone
     && !context.offLevelWithoutStructureDamage
-    && !context.extendedAfterRun
+    // A legacy extension label describes prior location. When today's price can
+    // be measured back inside the active-support threshold, current location
+    // must win; keep the legacy guard only for callers without a measurement.
+    && (!context.extendedAfterRun || (supportDistanceMeasured && !materiallyAwayFromSupport))
     && !materiallyAwayFromSupport
     && ['testing', 'held'].includes(supportInteraction)
   );
+  const episodeResponseThreshold = numericOrNull(latestSupportEpisode && latestSupportEpisode.responseThreshold);
+  const episodeResponsePriceValid = Number.isFinite(currentPrice)
+    && Number.isFinite(episodeResponseThreshold)
+    && currentPrice >= episodeResponseThreshold;
+  const episodeResponseCurrentValid = historicalResponseFromLatestEpisode
+    && episodeResponsePriceValid
+    && supportCurrentlyActive
+    && supportTestState !== 'failed'
+    && context.failedBounce !== true
+    && context.structureBroken !== true;
+  if(episodeResponseCurrentValid){
+    buyerResponsePresent = true;
+    buyerResponseSource = 'latest_support_episode_history';
+    buyerResponseValidity = 'current_valid';
+  }else if(historicalResponseFromLatestEpisode && !explicitBuyerResponsePresent){
+    buyerResponseValidity = 'chronology_only';
+    buyerResponseInvalidationReason = !episodeResponsePriceValid
+      ? 'current_price_below_episode_response_threshold'
+      : (!supportCurrentlyActive ? 'support_not_currently_active' : (supportTestState === 'failed' || context.failedBounce === true || context.structureBroken === true ? 'terminal_support_or_structure_failure' : 'response_not_current'));
+  }
   const extensionEvidencePresent = !!(
-    supportDistanceMeasured
-    && supportDistancePct >= 0.035
+    Number.isFinite(currentExtensionPct)
+    && currentExtensionPct >= 0.035
+    && !extensionMateriallyRetraced
     && recentSupportResponsePresent
     && (
       confirmedContinuationEvidence
@@ -27713,8 +28063,9 @@ function buildCanonicalChartStoryContext(context = {}){
     && !context.failedBounce
     && context.structureIntact === true
     && (
-      context.extendedAfterRun === true
-      || extensionEvidencePresent
+      extensionEvidencePresent
+      // Only use a legacy extension label when no current price can resolve it.
+      || (context.extendedAfterRun === true && !supportDistanceMeasured)
     )
   );
   const reboundStalled = !!(
@@ -27733,11 +28084,15 @@ function buildCanonicalChartStoryContext(context = {}){
       || context.weakVolume === true
     )
   );
+  // Canonical buyer control is explicit state first. Candle evidence can fill a
+  // missing value, but must not silently promote an explicitly developing state.
   const buyerControlSemantic = terminalCurrentFailure
     ? 'failed'
     : (buyerControlState === 'confirmed'
     ? 'confirmed'
-    : (confirmedContinuationEvidence ? 'confirmed' : (buyerResponsePresent ? 'emerging' : 'none')));
+    : (['emerging', 'developing'].includes(buyerControlState)
+      ? 'emerging'
+      : (confirmedContinuationEvidence ? 'confirmed' : (buyerResponsePresent ? 'emerging' : 'none'))));
   const volumeState = String(context.volumeParticipation || chartGuruVolumeParticipationLabel(context) || '').trim().toLowerCase() || 'constructive';
   const pullbackQuality = context.failedBounce === true
     || context.structureBroken === true
@@ -27761,6 +28116,7 @@ function buildCanonicalChartStoryContext(context = {}){
   if(buyerResponsePresent) supportEvents.push('buyers_responded');
   if(buyerControlSemantic === 'emerging') supportEvents.push('buyer_control_emerging');
   if(buyerControlSemantic === 'confirmed') supportEvents.push('buyer_control_confirmed');
+  if(historicalExtensionObserved) supportEvents.push('historical_rebound_extended');
   if(reboundExtended) supportEvents.push('rebound_extended');
   if(reboundStalled) supportEvents.push('rebound_stalled');
   if(context.failedBounce === true) supportEvents.push('failed_bounce');
@@ -27802,13 +28158,19 @@ function buildCanonicalChartStoryContext(context = {}){
           : (!supportDistanceMeasured && supportContextRecognized
             ? 'current_location_unresolved'
             : (context.structureIntact === true ? 'away_from_support' : 'repairing_structure')))));
-  const currentPhase = chartGuruValidatedCanonicalPhase(context.authoritativeCurrentPhase, {
+  const validatedExplicitPhase = chartGuruValidatedCanonicalPhase(context.authoritativeCurrentPhase, {
     supportInteraction,
     supportCurrentlyActive,
     buyerResponsePresent,
     buyerControlState,
     reboundStalled
-  }) || deterministicCurrentPhase;
+  });
+  const explicitPhaseSupersededByRetracement = validatedExplicitPhase === 'extended_from_support'
+    && extensionMateriallyRetraced;
+  const retracementPhaseOverrideApplied = explicitPhaseSupersededByRetracement;
+  const currentPhase = explicitPhaseSupersededByRetracement
+    ? deterministicCurrentPhase
+    : (validatedExplicitPhase || deterministicCurrentPhase);
   const dominantEvent = context.failedBounce === true || supportInteraction === 'failed'
     ? 'support_failed'
     : (context.structureBroken === true
@@ -27881,7 +28243,10 @@ function buildCanonicalChartStoryContext(context = {}){
     },
     buyerResponse:{
       state:buyerResponsePresent ? 'present' : (supportInteraction === 'failed' ? 'failed' : (supportContextRecognized ? 'absent' : 'unknown')),
-      semantic:buyerResponseSemantic
+      semantic:buyerResponseSemantic,
+      source:buyerResponseSource,
+      validity:buyerResponseValidity,
+      invalidationReason:buyerResponseInvalidationReason
     },
     buyerControl:{
       state:buyerControlSemantic
@@ -27932,7 +28297,77 @@ function buildCanonicalChartStoryContext(context = {}){
       recentIndecision:context.bodyDescriptor === 'small' || context.latestDirection === 'flat',
       extensionEvidencePresent,
       reboundExtended,
-      reboundStalled
+      reboundStalled,
+      phaseDecision:{
+        currentPrice,
+        movingAverages:{
+          ma20:numericOrNull(context.ma20),
+          ma50:numericOrNull(context.ma50),
+          ma200:numericOrNull(context.ma200),
+          distancePct:{
+            ma20:Number.isFinite(currentPrice) && Number.isFinite(numericOrNull(context.ma20)) && numericOrNull(context.ma20) !== 0 ? (currentPrice - numericOrNull(context.ma20)) / Math.abs(numericOrNull(context.ma20)) : null,
+            ma50:Number.isFinite(currentPrice) && Number.isFinite(numericOrNull(context.ma50)) && numericOrNull(context.ma50) !== 0 ? (currentPrice - numericOrNull(context.ma50)) / Math.abs(numericOrNull(context.ma50)) : null,
+            ma200:Number.isFinite(currentPrice) && Number.isFinite(numericOrNull(context.ma200)) && numericOrNull(context.ma200) !== 0 ? (currentPrice - numericOrNull(context.ma200)) / Math.abs(numericOrNull(context.ma200)) : null
+          }
+        },
+        activeSupport:{
+          type:supportType || null,
+          label:supportType ? supportLabel : null,
+          source:String(context.activeSupportAuthoritySource || 'deterministic_derivation'),
+          interaction:supportInteraction || null,
+          interactionSource:String(context.supportInteractionAuthoritySource || 'deterministic_derivation'),
+          currentlyActive:supportCurrentlyActive
+        },
+        rawPhase:String(context.authoritativeCurrentPhase || '') || null,
+        rawPhaseSource:String(context.phaseAuthoritySource || 'deterministic_derivation'),
+        finalPhase:currentPhase,
+        phaseSource:explicitPhaseSupersededByRetracement ? 'deterministic_derivation_after_retracement' : (validatedExplicitPhase ? String(context.phaseAuthoritySource || 'explicit_canonical') : 'deterministic_derivation'),
+        dominantEvent,
+        dominantEventSource:'deterministic_derivation',
+        buyerResponse:buyerResponsePresent ? 'present' : 'none',
+        buyerResponseSource,
+        buyerResponseValidity,
+        buyerResponseInvalidationReason,
+        buyerControl:buyerControlSemantic,
+        followThrough:confirmationSemantic.replace('follow_through_', ''),
+        nextRequiredEvent:reboundExtended ? 'pullback_or_reset' : (reboundStalled || buyerResponsePresent ? 'follow_through' : (supportCurrentlyActive ? 'support_hold' : 'none')),
+        recentHigh,
+        anchoredPostSupportHigh,
+        postSupportHigh,
+        postSupportHighSource,
+        supportEpisodeEstablished,
+        postSupportHighDetails:postSupportHighSource === 'validated_support_episode' && supportEpisode && supportEpisode.postSupportHigh ? supportEpisode.postSupportHigh : null,
+        supportEvent:supportEpisode && supportEpisode.supportEvent ? supportEpisode.supportEvent : null,
+        supportEpisodeId:supportEpisode && supportEpisode.supportEvent ? supportEpisode.supportEvent.id : null,
+        supportEventSelectionReason:supportEpisode && supportEpisode.selectionReason ? supportEpisode.selectionReason : (historyWasProvided ? 'unresolved: no qualifying support episode' : 'unavailable: history not supplied'),
+        latestSupportEpisode,
+        supportEpisodeMaSource:supportEpisode && supportEpisode.supportEpisodeMaSource ? supportEpisode.supportEpisodeMaSource : 'unavailable',
+        historicalEpisodeInferenceSkipped:!!(supportEpisode && supportEpisode.historicalInferenceSkipped),
+        supportEventMaValue:supportEpisode && supportEpisode.supportEvent ? supportEpisode.supportEvent.maValue : null,
+        supportEventDistancePct:supportEpisode && supportEpisode.supportEvent ? supportEpisode.supportEvent.distancePct : null,
+        episodeResponseThreshold,
+        currentPriceVsEpisodeResponseThreshold:Number.isFinite(currentPrice) && Number.isFinite(episodeResponseThreshold) ? currentPrice - episodeResponseThreshold : null,
+        historyOrdering:supportEpisode && supportEpisode.historyOrdering ? supportEpisode.historyOrdering : (historyWasProvided ? 'newest_first_unresolved' : 'unavailable'),
+        laterSupportRevisits:supportEpisode && Array.isArray(supportEpisode.laterRevisits) ? supportEpisode.laterRevisits : [],
+        maximumExtensionPct,
+        currentExtensionPct,
+        retracementFromPostSupportHighPct,
+        retracementAvailable,
+        retracementUnavailableReason,
+        retracementPhaseOverrideApplied,
+        historicalExtensionObserved,
+        extensionMateriallyRetraced,
+        historicalEventsUsed:context.historicalExtendedAfterRun === true || historicalExtensionObserved,
+        imageEvidenceInfluenced:Array.isArray(context.recentSequence) && context.recentSequence.length > 0,
+        volumeEvidenceInfluenced:context.weakVolume === true || context.activeVolume === true,
+        resolutionOrder:'explicit canonical → canonical phase projection → deterministic derivation → legacy',
+        candidates:[
+          {phase:'extended_from_support', accepted:reboundExtended, reason:extensionMateriallyRetraced ? 'rejected: material retracement from post-support high' : (extensionEvidencePresent ? 'accepted: current extension remains material' : 'rejected: no current extension evidence')},
+          {phase:'stalled_after_response', accepted:reboundStalled, reason:reboundStalled ? 'accepted: buyers responded and follow-through stalled after leaving support' : 'rejected: stalled-response evidence incomplete'},
+          {phase:'responding_from_support', accepted:deterministicCurrentPhase === 'responding_from_support', reason:supportCurrentlyActive ? 'accepted when support is currently active and buyers responded' : 'rejected: support is not currently active'},
+          {phase:'at_support', accepted:deterministicCurrentPhase === 'at_support', reason:supportCurrentlyActive ? 'accepted when support is currently active without buyer response' : 'rejected: support is not currently active'}
+        ]
+      }
     },
     reboundExtended,
     reboundStalled,
@@ -29359,6 +29794,7 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     latestDirection,
     bodyDescriptor,
     recentSequence,
+    historySequence:item.marketData && Array.isArray(item.marketData.history) ? item.marketData.history : [],
     volumeRatio,
     near20,
     near50,
@@ -29401,7 +29837,10 @@ function buildDeterministicChartCoach(record = {}, analysis = {}, options = {}){
     supportContext:supportAuthority.authoritative ? supportAuthority.supportContext : String(derivedStates.supportContext || derivedStates.support_context || globalVerdict.support_context || globalVerdict.supportContext || '').trim().toLowerCase(),
     supportTestState:supportAuthority.authoritative ? supportAuthority.supportTestState : String(derivedStates.supportTestState || derivedStates.support_test_state || globalVerdict.support_test_state || globalVerdict.supportTestState || '').trim().toLowerCase(),
     buyerControlState:supportAuthority.authoritative ? supportAuthority.buyerControlState : String(derivedStates.buyerControlState || derivedStates.buyer_control_state || globalVerdict.buyer_control_state || globalVerdict.buyerControlState || '').trim().toLowerCase(),
-    authoritativeCurrentPhase:supportAuthority.authoritative ? supportAuthority.currentPhase : ''
+    authoritativeCurrentPhase:supportAuthority.authoritative ? supportAuthority.currentPhase : '',
+    activeSupportAuthoritySource:supportAuthority.authoritative ? 'explicit_canonical' : 'deterministic_derivation',
+    supportInteractionAuthoritySource:supportAuthority.authoritative ? 'explicit_canonical' : 'deterministic_derivation',
+    phaseAuthoritySource:supportAuthority.authoritative && supportAuthority.currentPhase ? 'explicit_canonical' : 'deterministic_derivation'
   };
   const greenRun = chartCoachRecentColorRun(recentSequence, 'green');
   const redRun = chartCoachRecentColorRun(recentSequence, 'red');
@@ -48618,6 +49057,9 @@ function renderReviewWorkspace(options = {}){
   const chartGuruNarrationDebug = aiSummaryVisible && analysisState.normalizedAnalysis
     ? chartGuruNarrationDebugMarkup(analysisState.normalizedAnalysis, analysisState.normalizedAnalysis.chartCoach)
     : '';
+  const canonicalPhaseDecisionDebug = analysisState.normalizedAnalysis
+    ? canonicalPhaseDecisionDebugMarkup(analysisState.normalizedAnalysis, analysisState.normalizedAnalysis.chartCoach)
+    : '';
   if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
     analyseDisabled = true;
     analyseLabel = 'Confirm chart first';
@@ -48702,7 +49144,7 @@ function renderReviewWorkspace(options = {}){
         </div>
       </div>`
     : '';
-  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDiagnosticBundlePanel}${reviewStateHealthDebug}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
+  const reviewDebug = advancedOpen ? `<details class="compact-details"><summary>Debug State</summary>${reviewDiagnosticBundlePanel}${canonicalPhaseDecisionDebug}${reviewStateHealthDebug}${reviewDebugInternal}${capitalSimulationControls}${reviewGatewayTrace}</details>` : '';
   const headerContextChip = resolvedContract.marketRegimeWeak
     ? {
       label:'⚠️ Weak market',
