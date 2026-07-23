@@ -4,6 +4,13 @@ const vm = require('vm');
 const assert = require('assert');
 
 const appSource = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
+const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+const appVersionMatch = appSource.match(/const APP_VERSION = '([^']+)'/);
+const appVersion = appVersionMatch && appVersionMatch[1];
+
+assert(appVersion, 'app.js must expose an APP_VERSION for cache-busted diagnostic-copy releases.');
+assert(indexSource.includes(`meta name="build-version" content="${appVersion}"`), 'The HTML build version must match app.js.');
+assert(indexSource.includes(`src="./app.js?v=${appVersion.slice(1)}"`), 'The app script URL must be cache-busted with the current build version.');
 
 function extractFunctionSource(name){
   const marker = `function ${name}`;

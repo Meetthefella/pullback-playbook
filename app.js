@@ -7,15 +7,15 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const reviewSessionKey = 'pullbackPlaybookReviewSessionV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.5.2';
-const APP_BUILD_TIMESTAMP = '2026-07-13T13:55:00Z';
+const APP_VERSION = 'v4.5.3';
+const APP_BUILD_TIMESTAMP = '2026-07-23T10:05:00Z';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
 const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
 const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
 const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.5.2',
+    version:'4.5.3',
     buildTimestamp:APP_BUILD_TIMESTAMP,
     assetId:`pullback-playbook-${APP_VERSION}-${APP_BUILD_TIMESTAMP}`,
     chartGuruDeterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
