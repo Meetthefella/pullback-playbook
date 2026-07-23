@@ -1060,7 +1060,9 @@
     if(checks.ma50_below_200ma) reasons.push('50MA is below the 200MA.');
     if(checks.market_blocked) reasons.push('Market conditions are too poor for this setup.');
     if(!checks.capital_ok) reasons.push('Capital fit is impossible at this risk level.');
-    if(!latePullbackGate.pass) reasons.push(...latePullbackGate.reasons);
+    // Near Entry is the monitored, priceable pullback phase. A late-location
+    // caution can still block a full Entry, but must not erase a valid
+    // recently-left-support pullback before its confirmation trigger arrives.
     const uniqueReasons = reasons.filter((reason, index) => reasons.indexOf(reason) === index);
     return {
       pass:uniqueReasons.length === 0,
@@ -2154,7 +2156,16 @@
       }
     }
     const latePullbackActive = latePullbackGateChecks.late_from_support === true;
-    if(latePullbackActive && trackedVerdict !== 'avoid' && trackedVerdict !== 'dead'){
+    // A late-location flag must not undo an already-qualified Near Entry.
+    // The Near Entry gate has independently confirmed a priceable pullback
+    // context (including the short window after price has left support).
+    if(
+      latePullbackActive
+      && guardedVerdict.near_entry_gate_pass !== true
+      && guardedVerdict.entry_gate_pass !== true
+      && trackedVerdict !== 'avoid'
+      && trackedVerdict !== 'dead'
+    ){
       trackedVerdict = 'watch';
       trackedReason = (latePullbackGateChecks && Array.isArray(guardedVerdict.late_pullback_gate_reasons) && guardedVerdict.late_pullback_gate_reasons[0])
         || 'The bounce has already moved too far from support for a low-risk pullback entry.';
@@ -3296,6 +3307,58 @@
             && result.structure_eligibility === 'alive'
             && result.near_entry_gate_pass === true
             && result.final_verdict !== 'avoid';
+        }
+      },
+      {
+        id:'priceable-pullback-in-progress-stays-near-entry-despite-late-location-flag',
+        record:{
+          ticker:'HWM',
+          setupScore:7,
+          baseScore:7,
+          displayScore:5,
+          reclaimsLevel:true,
+          derivedStates:{
+            structureState:'strong',
+            trendState:'intact',
+            bounceState:'attempt',
+            stabilisationState:'early',
+            volumeState:'weak',
+            pullbackZone:'left_20ma',
+            setupLocationState:'extended_from_support',
+            priceabilityState:'priceable',
+            candleEvidenceReclaimRangeMeaningful:true,
+            candleEvidenceReclaimedPriorDayHigh:true,
+            candleEvidenceHigherLowHold:true
+          },
+          effectivePlan:{entry:106, stop:100, firstTarget:120},
+          displayedPlan:{
+            status:'valid',
+            entry:106,
+            stop:100,
+            target:120,
+            tradeability:'tradable',
+            rewardRisk:{rrRatio:2.33},
+            riskFit:{risk_status:'acceptable'},
+            affordability:'acceptable',
+            capitalFit:{capital_fit:'acceptable'}
+          },
+          marketData:{price:105, ma20:100, ma50:97, ma200:92},
+          resolvedContract:{
+            finalVerdict:'Near Entry',
+            structuralState:'near_entry',
+            actionStateKey:'wait_for_confirmation',
+            planStatusKey:'valid',
+            tradeabilityVerdict:'Near Entry',
+            blockerReason:'Waiting for confirmation.',
+            reasonSummary:'Priceable pullback in progress.',
+            terminal:false,
+            baseVerdict:'near_entry'
+          }
+        },
+        assert(result){
+          return result.final_verdict === 'near_entry'
+            && result.near_entry_gate_pass === true
+            && result.late_pullback_gate_checks && result.late_pullback_gate_checks.late_from_support === true;
         }
       },
       {
