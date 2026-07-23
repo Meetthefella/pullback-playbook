@@ -27805,28 +27805,40 @@ function chartGuruSupportEpisodeFromHistory(context = {}, supportReferenceLevel 
     // that began this episode; a rebound candle can still wick into the MA and
     // must not replace that origin merely because it is the newest contact.
     const supportEvent = episode.contacts[episode.contacts.length - 1];
-    const postSupport = ordered.slice(0, supportEvent.index)
+    // `ordered` is newest-first: lower indexes are later in time. Exclude the
+    // complete contact episode (startIndex through endIndex) so the response
+    // window begins with the first true post-episode candle at startIndex - 1.
+    const postSupport = ordered.slice(0, episode.startIndex)
       .map((candle, index) => ({candle, index, high:numericOrNull(candle && candle.high)}))
       .filter(entry => Number.isFinite(entry.high));
     const postSupportHigh = postSupport.reduce((best, entry) => !best || entry.high > best.high ? entry : best, null);
-    const materialResponseCandles = postSupport.filter(entry => {
+    // `ordered` is newest-first, so reverse this local slice before validating
+    // the departure. Only an uninterrupted qualifying run immediately after
+    // the support episode can establish that episode's response.
+    const consecutiveResponseCandles = [];
+    for(const entry of postSupport.slice().reverse()){
       const close = numericOrNull(entry.candle && entry.candle.close);
-      return Number.isFinite(close) && close >= supportEvent.maValue * 1.015;
-    });
+      if(!Number.isFinite(close) || close < supportEvent.maValue * 1.015) break;
+      consecutiveResponseCandles.push(entry);
+    }
     // A single candle after a later MA revisit is not enough to replace the
     // established rebound episode. Require an ordered, multi-candle departure
     // from the touch so a retracement back into the MA cannot erase its own
     // preceding rally high.
     const responseDetected = !!(postSupportHigh
       && postSupportHigh.high >= supportEvent.maValue * 1.035
-      && materialResponseCandles.length >= 2);
+      && consecutiveResponseCandles.length >= 2);
     return {
       id:`support_episode_${ordinal + 1}`,
       supportEvent,
+      contactStartIndex:episode.startIndex,
+      contactEndIndex:episode.endIndex,
+      responseWindowStartIndex:episode.startIndex > 0 ? episode.startIndex - 1 : null,
       responseThreshold:supportEvent.maValue * 1.015,
       postSupportHigh,
       responseDetected,
-      responseCandleCount:materialResponseCandles.length,
+      responseCandleCount:consecutiveResponseCandles.length,
+      qualifyingResponseIndexes:consecutiveResponseCandles.map(entry => entry.index),
       selectionReason:responseDetected
         ? 'MA contact followed by a material multi-candle rebound'
         : 'rejected: later MA revisit has no material multi-candle post-touch response'
@@ -27845,6 +27857,9 @@ function chartGuruSupportEpisodeFromHistory(context = {}, supportReferenceLevel 
       distancePct:candidate.supportEvent.distancePct,
       selectionReason:candidate.selectionReason
     },
+    contactStartIndex:candidate.contactStartIndex,
+    contactEndIndex:candidate.contactEndIndex,
+    responseWindowStartIndex:candidate.responseWindowStartIndex,
     postSupportHigh:candidate.postSupportHigh ? {
       index:candidate.postSupportHigh.index,
       timestamp:timestampFor(candidate.postSupportHigh.candle),
@@ -27853,6 +27868,7 @@ function chartGuruSupportEpisodeFromHistory(context = {}, supportReferenceLevel 
     responseDetected:candidate.responseDetected === true,
     responseThreshold:candidate.responseThreshold,
     responseCandleCount:candidate.responseCandleCount,
+    qualifyingResponseIndexes:candidate.qualifyingResponseIndexes,
     selectionReason:candidate.selectionReason
   } : null;
   // Episodes are newest-first. The first with a real response is the current
@@ -27875,6 +27891,10 @@ function chartGuruSupportEpisodeFromHistory(context = {}, supportReferenceLevel 
     supportEpisodeMaSource,
     historicalInferenceSkipped:false,
     supportEvent:selectedEpisode.supportEvent,
+    contactStartIndex:selectedEpisode.contactStartIndex,
+    contactEndIndex:selectedEpisode.contactEndIndex,
+    responseWindowStartIndex:selectedEpisode.responseWindowStartIndex,
+    qualifyingResponseIndexes:selectedEpisode.qualifyingResponseIndexes,
     postSupportHigh:selectedEpisode.postSupportHigh,
     selectionReason:selected.selectionReason,
     laterRevisits:candidates
@@ -28009,6 +28029,10 @@ function buildCanonicalChartStoryContext(context = {}){
       || context.pullbackNear50 === true
       || context.near20 === 'near'
       || context.near50 === 'near'
+      // The exact proximity hint is deliberately tighter than the active
+      // support band. A measured price inside that wider, established band is
+      // still a live support context, not an away-from-support state.
+      || (supportDistanceMeasured && !materiallyAwayFromSupport)
       || buyerResponsePresent
     ) return 'testing';
     if(supportTestState === 'not_tested') return 'not_tested';

@@ -636,6 +636,148 @@ function runDeterministicCandleFallbackRegression(){
     vm.runInContext(extractFunctionSource(appSource, name), sandbox, {filename:`app.js#${name}`});
   });
 
+  const supportContextAt = ({type, price, supportTestState = 'not_tested', structureBroken = false, failedBounce = false, ma20 = 120, ma50 = 120}) => sandbox.buildCanonicalChartStoryContext({
+    currentPrice:price,
+    ma20:type === '20ma' ? 100 : ma20,
+    ma50:type === '50ma' ? 100 : ma50,
+    supportContext:type,
+    supportTestState,
+    structureIntact:!structureBroken,
+    structureBroken,
+    failedBounce,
+    buyerControlState:'none'
+  });
+  [
+    {label:'20MA exact-band', type:'20ma', price:101.4, active:true},
+    {label:'20MA wider active band', type:'20ma', price:102.0, active:true},
+    {label:'20MA threshold interior', type:'20ma', price:102.49, active:true},
+    {label:'20MA threshold exterior', type:'20ma', price:102.51, active:false},
+    {label:'50MA threshold interior', type:'50ma', price:102.99, active:true},
+    {label:'50MA threshold exterior', type:'50ma', price:103.01, active:false}
+  ].forEach(({label, type, price, active}) => {
+    const story = supportContextAt({type, price});
+    assert.strictEqual(story.support.currentlyActive, active, `${label}: active-support authority must use the shared MA-distance threshold.`);
+    assert.strictEqual(story.support.interaction, active ? 'testing' : 'not_tested', `${label}: support interaction must consume the active-support authority, not just the narrower proximity hint.`);
+    assert.strictEqual(story.currentPhase, active ? 'at_support' : 'away_from_support', `${label}: canonical phase must agree with support interaction.`);
+    assert.ok(!(story.support.currentlyActive && story.support.interaction === 'away_from_support'), `${label}: debug state must never call active support away from support.`);
+  });
+  const failedNearSupport = supportContextAt({type:'20ma', price:101.4, supportTestState:'failed'});
+  assert.strictEqual(failedNearSupport.support.interaction, 'failed', 'Failed support must override measured proximity.');
+  assert.strictEqual(failedNearSupport.currentPhase, 'support_failed', 'Failed support must override an otherwise active support band.');
+  const brokenNearSupport = supportContextAt({type:'50ma', price:101.4, structureBroken:true});
+  assert.strictEqual(brokenNearSupport.support.interaction, 'failed', 'Broken structure must override measured proximity.');
+  assert.strictEqual(brokenNearSupport.currentPhase, 'support_failed', 'Broken structure must retain the failed-support phase.');
+  const active50WithNear20 = supportContextAt({type:'50ma', price:102, ma20:102});
+  assert.strictEqual(active50WithNear20.support.type, '50ma', 'An unrelated 20MA proximity must not replace an active 50MA context.');
+  assert.strictEqual(active50WithNear20.support.referenceLevel, 100, 'The active 50MA context must retain its own support reference.');
+  const active20WithNear50 = supportContextAt({type:'20ma', price:102, ma50:102});
+  assert.strictEqual(active20WithNear50.support.type, '20ma', 'An unrelated 50MA proximity must not replace an active 20MA context.');
+  assert.strictEqual(active20WithNear50.support.referenceLevel, 100, 'The active 20MA context must retain its own support reference.');
+
+  const episodeFrom = historySequence => sandbox.chartGuruSupportEpisodeFromHistory({supportContext:'20ma', historySequence}, 100);
+  const candle = (date, close, high = close, low = close) => ({date, open:close, high, low, close, ma20:100});
+  const immediateResponse = episodeFrom([
+    candle('2026-01-01', 100, 100.5, 99.8),
+    candle('2026-01-02', 105, 106, 104.8),
+    candle('2026-01-03', 107, 108, 106.5)
+  ]);
+  assert.ok(immediateResponse.supportEvent, 'Two consecutive qualifying candles must establish a support episode.');
+  assert.strictEqual(immediateResponse.latestEpisode.responseDetected, true, 'Two consecutive qualifying candles immediately after support must validate a response.');
+  const immediateResponseStory = sandbox.buildCanonicalChartStoryContext({
+    currentPrice:102, ma20:100, supportContext:'20ma', supportTestState:'not_tested', structureIntact:true,
+    historySequence:[
+      candle('2026-01-01', 100, 100.5, 99.8),
+      candle('2026-01-02', 105, 106, 104.8),
+      candle('2026-01-03', 107, 108, 106.5)
+    ]
+  });
+  assert.strictEqual(immediateResponseStory.diagnostics.phaseDecision.supportEpisodeEstablished, true, 'A valid consecutive response must establish episode authority.');
+  assert.strictEqual(immediateResponseStory.diagnostics.phaseDecision.postSupportHighSource, 'validated_support_episode', 'A valid response must anchor its post-support high to the episode.');
+  assert.strictEqual(immediateResponseStory.diagnostics.phaseDecision.anchoredPostSupportHigh, 108, 'Episode-derived high authority must use the response episode high.');
+  assert.strictEqual(immediateResponseStory.diagnostics.phaseDecision.retracementAvailable, true, 'A validated episode high above support must make retracement measurable.');
+  assert.strictEqual(immediateResponseStory.currentPhase, 'responding_from_support', 'A valid response inside active support must project a coherent canonical phase.');
+  const multiContactResponse = episodeFrom([
+    candle('2026-01-10', 100, 100.5, 99.8),
+    candle('2026-01-11', 100.6, 101, 99.9),
+    candle('2026-01-12', 105, 106, 104.8),
+    candle('2026-01-13', 107, 108, 106.5)
+  ]);
+  assert.strictEqual(multiContactResponse.supportEvent.timestamp, '2026-01-10', 'The oldest candle must remain the selected support-event origin.');
+  assert.strictEqual(multiContactResponse.contactStartIndex, 2, 'The newest contact must define the response boundary in newest-first history.');
+  assert.strictEqual(multiContactResponse.contactEndIndex, 3, 'The oldest contact must remain the end of the newest-first contact range.');
+  assert.strictEqual(multiContactResponse.responseWindowStartIndex, 1, 'Response evaluation must begin immediately after the complete contact episode.');
+  assert.deepStrictEqual(Array.from(multiContactResponse.qualifyingResponseIndexes), [1, 0], 'Only the true post-episode consecutive response candles may be counted.');
+  assert.strictEqual(multiContactResponse.latestEpisode.responseDetected, true, 'A multi-candle support test followed by two consecutive responses must validate.');
+  const oneResponse = episodeFrom([
+    candle('2026-01-01', 100, 100.5, 99.8),
+    candle('2026-01-02', 105, 106, 104.8)
+  ]);
+  assert.strictEqual(oneResponse.supportEvent, null, 'One qualifying post-support candle must not validate a response episode.');
+  const multiContactOneResponse = episodeFrom([
+    candle('2026-01-20', 100, 100.5, 99.8),
+    candle('2026-01-21', 100.6, 101, 99.9),
+    candle('2026-01-22', 105, 106, 104.8)
+  ]);
+  assert.strictEqual(multiContactOneResponse.supportEvent, null, 'A multi-candle support test with one response candle must remain unvalidated.');
+  assert.strictEqual(multiContactOneResponse.latestEpisode.responseCandleCount, 1, 'Only the post-episode response candle may be counted.');
+  const interruptedResponse = episodeFrom([
+    candle('2026-02-01', 100, 100.5, 99.8),
+    candle('2026-02-02', 105, 106, 104.8),
+    candle('2026-02-03', 94, 95, 93),
+    candle('2026-02-04', 105, 106, 104.8),
+    candle('2026-02-05', 107, 108, 106.5)
+  ]);
+  assert.strictEqual(interruptedResponse.supportEvent, null, 'A non-qualifying interruption must break the response sequence.');
+  const multiContactInterruptedResponse = episodeFrom([
+    candle('2026-02-10', 100, 100.5, 99.8),
+    candle('2026-02-11', 100.6, 101, 99.9),
+    candle('2026-02-12', 105, 106, 104.8),
+    candle('2026-02-13', 94, 95, 93),
+    candle('2026-02-14', 107, 108, 106.5)
+  ]);
+  assert.strictEqual(multiContactInterruptedResponse.supportEvent, null, 'A non-qualifying post-episode candle must interrupt a multi-candle support response.');
+  assert.strictEqual(multiContactInterruptedResponse.latestEpisode.responseCandleCount, 1, 'Separated qualifying candles must not be combined after a multi-candle test.');
+  const contactAfterEpisode = episodeFrom([
+    candle('2026-02-20', 100, 100.5, 99.8),
+    candle('2026-02-21', 100.6, 101, 99.9),
+    candle('2026-02-22', 105, 106, 104.8),
+    candle('2026-02-23', 100.4, 100.8, 99.8),
+    candle('2026-02-24', 107, 108, 106.5)
+  ]);
+  assert.strictEqual(contactAfterEpisode.supportEvent, null, 'A new contact after the completed episode must interrupt the original response run.');
+  assert.strictEqual(contactAfterEpisode.latestEpisode.responseDetected, false, 'Only contacts inside the selected episode are skipped; later contacts remain interruptions.');
+  const laterRally = episodeFrom([
+    candle('2026-03-01', 100, 100.5, 99.8),
+    candle('2026-03-02', 94, 95, 93),
+    candle('2026-03-10', 105, 106, 104.8),
+    candle('2026-03-11', 107, 108, 106.5)
+  ]);
+  assert.strictEqual(laterRally.supportEvent, null, 'A later unrelated rally must not validate an old support contact.');
+  const newerResponse = episodeFrom([
+    candle('2026-04-01', 100, 100.5, 99.8),
+    candle('2026-04-02', 105, 106, 104.8),
+    candle('2026-04-03', 94, 95, 93),
+    candle('2026-04-10', 100, 100.5, 99.8),
+    candle('2026-04-11', 100.6, 101, 99.9),
+    candle('2026-04-12', 105, 106, 104.8),
+    candle('2026-04-13', 107, 109, 106.5)
+  ]);
+  assert.strictEqual(newerResponse.supportEvent.timestamp, '2026-04-10', 'A newer valid consecutive rebound must become the selected support episode.');
+  assert.strictEqual(newerResponse.latestEpisode.responseDetected, true, 'The newer multi-candle contact episode must validate from its own consecutive response.');
+  const noResponseStory = sandbox.buildCanonicalChartStoryContext({
+    currentPrice:102.6, ma20:100, supportContext:'20ma', supportTestState:'not_tested', structureIntact:true,
+    historySequence:[candle('2026-05-01', 100, 100.5, 99.8), candle('2026-05-02', 105, 106, 104.8)]
+  });
+  assert.strictEqual(noResponseStory.diagnostics.phaseDecision.postSupportHighSource, 'unavailable', 'No ordered rebound must leave post-support-high authority unavailable.');
+  assert.strictEqual(noResponseStory.diagnostics.phaseDecision.retracementAvailable, false, 'No ordered rebound must leave retracement unavailable.');
+  assert.strictEqual(noResponseStory.diagnostics.phaseDecision.retracementPhaseOverrideApplied, false, 'No ordered rebound must not trigger a retracement phase override.');
+  const explicitHighStory = sandbox.buildCanonicalChartStoryContext({
+    currentPrice:102.6, ma20:100, supportContext:'20ma', supportTestState:'not_tested', structureIntact:true,
+    historySequence:[candle('2026-05-01', 100, 100.5, 99.8)], postSupportHigh:110
+  });
+  assert.strictEqual(explicitHighStory.diagnostics.phaseDecision.postSupportHighSource, 'explicit_post_support_high', 'Trusted explicit post-support highs must remain independent authority.');
+  assert.strictEqual(explicitHighStory.diagnostics.phaseDecision.anchoredPostSupportHigh, 110, 'Trusted explicit post-support highs must remain available without a historical response episode.');
+
   const bounceRecord = {
     marketData:{price:200.09, ma20:205.74, ma50:209.99, ma200:190.84},
     _globalVerdict:{final_verdict:'watch'}
@@ -1011,7 +1153,7 @@ function runDeterministicCandleFallbackRegression(){
     {date:'2026-07-11', open:82.2, high:91.0, low:81.9, close:89.5},
     {date:'2026-07-12', open:89.7, high:97.5, low:88.9, close:96.8},
     {date:'2026-07-18', open:87.0, high:85.0, low:81.1, close:82.0},
-    {date:'2026-07-19', open:82.4, high:86.0, low:82.0, close:85.2},
+    {date:'2026-07-19', open:82.4, high:86.0, low:84.9, close:85.2},
     {date:'2026-07-20', open:85.5, high:89.4, low:84.9, close:88.7}
   ].map(candle => ({...candle, ma50:81.62}));
   const secondSupportEpisode = sandbox.chartGuruSupportEpisodeFromHistory({supportContext:'50ma', historySequence:secondSupportEpisodeHistory}, 81.62);
@@ -1059,7 +1201,7 @@ function runDeterministicCandleFallbackRegression(){
       currentPrice:102,
       historySequence:[
         ...historicalExtension,
-        {date:'2026-07-05', open:100.7, high:104.0, low:100.5, close:102.0},
+        {date:'2026-07-05', open:100.7, high:104.0, low:101.8, close:102.0},
         {date:'2026-07-06', open:101.8, high:104.2, low:101.0, close:102.0}
       ]
     });
@@ -1078,8 +1220,8 @@ function runDeterministicCandleFallbackRegression(){
       currentPrice:95,
       historySequence:[
         ...historicalExtension,
-        {date:'2026-07-05', open:100.7, high:104.0, low:100.5, close:102.0, [maKey]:supportLevel},
-        {date:'2026-07-06', open:101.8, high:104.2, low:101.0, close:102.0, [maKey]:supportLevel},
+        {date:'2026-07-05', open:100.7, high:104.0, low:101.8, close:102.0},
+        {date:'2026-07-06', open:101.8, high:104.2, low:101.0, close:102.0},
         {date:'2026-07-07', open:99, high:99.5, low:94.5, close:95, [maKey]:supportLevel}
       ]
     });
@@ -1113,8 +1255,8 @@ function runDeterministicCandleFallbackRegression(){
       {date:'2026-08-02', open:102, high:105, low:101, close:104, [maKey]:90},
       {date:'2026-08-03', open:104, high:106, low:103, close:105, [maKey]:90},
       {date:'2026-08-04', open:103, high:104, low:99.8, close:100.5, [maKey]:100},
-      {date:'2026-08-05', open:100.5, high:104, low:100, close:102, [maKey]:100},
-      {date:'2026-08-06', open:102, high:104.5, low:101, close:102, [maKey]:100}
+      {date:'2026-08-05', open:104.5, high:106, low:104.5, close:105, [maKey]:100},
+      {date:'2026-08-06', open:105, high:107, low:105, close:106, [maKey]:100}
     ];
     const driftEpisode = sandbox.chartGuruSupportEpisodeFromHistory({supportContext:type, historySequence:driftHistory}, 100);
     assert.strictEqual(driftEpisode.supportEvent.timestamp, '2026-08-04', `${type}: an old candle near today's MA but far from its own MA must be rejected.`);
