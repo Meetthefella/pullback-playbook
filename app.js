@@ -5348,6 +5348,141 @@ function buildTesterDiagnosticSnapshot(options = {}){
     ? getTickerRecord(trackTicker)
     : currentReviewDiagnosticRecord();
   try{
+    if(bundleMode === 'review_tester_bundle'){
+      // This is the handoff used most often in tester reports. Keep it focused:
+      // the former version copied the same large Review state at the root, in
+      // sections, and again via raw resolver records.
+      const shortText = (value, limit = 600) => String(value == null ? '' : value)
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, limit);
+      const shortList = (value, itemLimit = 6, textLimit = 240) => Array.isArray(value)
+        ? value.slice(0, itemLimit).map(item => shortText(item, textLimit)).filter(Boolean)
+        : [];
+      const review = currentVisibleReviewDiagnostics(record) || {};
+      const stateHealth = currentReviewStateHealthSnapshot(record) || {};
+      const chartVerification = currentReviewChartVerificationSnapshot(record) || {};
+      const paperTrade = record ? currentPaperTradeDebugSnapshotForTicker(record.ticker) : null;
+      const gateway = currentPaperGatewayDiagnostics() || {};
+      const contract = stateHealth.contract && typeof stateHealth.contract === 'object'
+        ? stateHealth.contract
+        : {};
+      const planAuthority = stateHealth.planAuthority && typeof stateHealth.planAuthority === 'object'
+        ? stateHealth.planAuthority
+        : {};
+      const compactSnapshot = {
+        diagnosticSchema:'review_tester_bundle.v2',
+        timestamp:new Date().toISOString(),
+        testerId:currentTesterId(),
+        buildVersion:currentBuildVersion(),
+        buildInfo:currentBuildInfo(),
+        activeWorkspace:String(activeWorkspaceTab() || ''),
+        panelTitle,
+        ticker:String(record && record.ticker || activeReviewTicker() || 'general'),
+        bundleMode:'review_tester_bundle',
+        bundleNote:'Compact Review tester handoff. Use a full debug export only when this summary cannot isolate the issue.',
+        omissions:[
+          'Raw persisted scan/setup/watchlist/lifecycle records',
+          'Duplicate Review and state-health copies',
+          'Full Chart Guru audit and plan-candidate histories'
+        ],
+        sections:{
+          review:{
+            currentVerdict:shortText(review.currentVerdict, 80),
+            currentTone:shortText(review.currentTone, 80),
+            visibleReviewStatus:shortText(review.visibleReviewStatus),
+            reviewWorkspaceStatus:shortText(review.reviewWorkspaceStatus),
+            chartVerificationStatus:review.chartVerificationStatus && typeof review.chartVerificationStatus === 'object'
+              ? {
+                phase:shortText(review.chartVerificationStatus.phase, 80),
+                status:shortText(review.chartVerificationStatus.status, 120),
+                requestId:shortText(review.chartVerificationStatus.requestId, 160),
+                imageId:shortText(review.chartVerificationStatus.imageId, 160)
+              }
+              : null
+          },
+          authority:{
+            sourceOfTruth:shortText(stateHealth.sourceOfTruth, 120),
+            canonicalVerdict:shortText(stateHealth.canonicalVerdict, 80),
+            visualBucket:shortText(stateHealth.visualBucket, 80),
+            tone:shortText(stateHealth.tone, 80),
+            contractFingerprint:shortText(contract.contractFingerprint || stateHealth.contractFingerprint, 160),
+            authorityContract:shortText(contract.contractDiagnostics && contract.contractDiagnostics.authorityContract, 120),
+            authoritySelectionSource:shortText(contract.contractDiagnostics && (contract.contractDiagnostics.canonicalAuthoritySelectionSource || contract.contractDiagnostics.authoritySelectionSource), 160),
+            primaryBlockerReason:shortText(stateHealth.primaryBlockerReason),
+            structureEligibility:shortText(stateHealth.structureEligibility, 80),
+            structureState:shortText(stateHealth.structureState, 80),
+            setupLocationState:shortText(stateHealth.setupLocationState, 80),
+            priceabilityState:shortText(stateHealth.priceabilityState, 80),
+            bounceState:shortText(stateHealth.bounceState, 80),
+            entryGatePass:stateHealth.entryGatePass === true,
+            nearEntryGatePass:stateHealth.nearEntryGatePass === true,
+            terminalAvoidApplied:stateHealth.terminalAvoidApplied === true,
+            divergenceDetected:stateHealth.divergenceDetected === true
+          },
+          plan:{
+            status:shortText(stateHealth.planStatus, 80),
+            resolvedRR:Number.isFinite(Number(stateHealth.resolvedRR)) ? Number(stateHealth.resolvedRR) : null,
+            authorityId:shortText(planAuthority.authorityId, 120),
+            source:shortText(planAuthority.source, 120),
+            reasonCode:shortText(planAuthority.reasonCode, 160),
+            actionable:planAuthority.actionable === true
+          },
+          chartVerification:{
+            phase:shortText(chartVerification.phase, 80),
+            status:shortText(chartVerification.status, 120),
+            decisionKey:shortText(chartVerification.decisionKey, 120),
+            summary:shortText(chartVerification.summary),
+            detail:shortText(chartVerification.detail),
+            aiAnalysisSuppressed:chartVerification.aiAnalysisSuppressed === true,
+            suppressionReason:shortText(chartVerification.suppressionReason, 240),
+            expectedTicker:shortText(chartVerification.expectedTicker, 80),
+            detectedTicker:shortText(chartVerification.detectedTicker, 80),
+            requestId:shortText(chartVerification.requestId, 160),
+            imageId:shortText(chartVerification.imageId, 160),
+            manualConfirmed:chartVerification.manualConfirmed === true,
+            diagnostics:shortList(chartVerification.diagnostics),
+            evidence:shortList(chartVerification.evidence),
+            missing:shortList(chartVerification.missing),
+            snapshotError:shortText(chartVerification.snapshotError, 240)
+          },
+          paperTrade:{
+            status:shortText(paperTrade && paperTrade.status, 120),
+            state:shortText(paperTrade && paperTrade.state, 120),
+            reason:shortText(paperTrade && (paperTrade.reason || paperTrade.reasonCode), 240)
+          },
+          gateway:{
+            state:shortText(gateway.state, 80),
+            label:shortText(gateway.label, 160),
+            detail:shortText(gateway.detail),
+            supported:gateway.supported === true,
+            checked:gateway.checked === true,
+            enabled:gateway.enabled === true
+          }
+        }
+      };
+      const redactedCompactSnapshot = redactDiagnosticPayload(compactSnapshot);
+      const compactCharacterCount = JSON.stringify(redactedCompactSnapshot).length;
+      if(compactCharacterCount > 20000){
+        return {
+          diagnosticSchema:'review_tester_bundle.v2',
+          timestamp:new Date().toISOString(),
+          panelTitle,
+          ticker:shortText(record && record.ticker || activeReviewTicker() || 'general', 32),
+          bundleMode:'review_tester_bundle',
+          truncated:true,
+          characterCount:compactCharacterCount,
+          maxCharacterCount:20000,
+          canonicalVerdict:shortText(stateHealth.canonicalVerdict, 80),
+          visualBucket:shortText(stateHealth.visualBucket, 80),
+          primaryBlockerReason:shortText(stateHealth.primaryBlockerReason),
+          error:'Review diagnostics exceeded the handoff limit; use the full debug export for the complete state.'
+        };
+      }
+      redactedCompactSnapshot.characterCount = compactCharacterCount;
+      redactedCompactSnapshot.maxCharacterCount = 20000;
+      return redactedCompactSnapshot;
+    }
     const rawSnapshot = {
       timestamp:new Date().toISOString(),
       testerId:currentTesterId(),
@@ -5371,17 +5506,6 @@ function buildTesterDiagnosticSnapshot(options = {}){
       gateway:currentPaperGatewayDiagnostics(),
       panelText:panelElement ? String(panelElement.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 4000) : ''
     };
-    if(bundleMode === 'review_tester_bundle'){
-      rawSnapshot.bundleMode = 'review_tester_bundle';
-      rawSnapshot.bundleNote = 'Primary Review tester bundle. Use this instead of copying separate Review debug panels.';
-      rawSnapshot.sections = {
-        review:rawSnapshot.review,
-        stateHealth:rawSnapshot.stateHealth,
-        chartVerification:currentReviewChartVerificationSnapshot(record),
-        paperTradeDebug:rawSnapshot.paperTradeDebug,
-        gateway:rawSnapshot.gateway
-      };
-    }
     if(bundleMode === 'track_tester_bundle'){
       rawSnapshot.bundleMode = 'track_tester_bundle';
       rawSnapshot.bundleNote = 'Primary Track tester bundle. Use this instead of copying separate Track debug panels.';
@@ -49298,7 +49422,7 @@ function renderReviewWorkspace(options = {}){
   const reviewDiagnosticBundlePanel = advancedOpen
     ? `<div class="panelbox" data-diagnostic-panel="Review Diagnostics Bundle" style="margin-top:10px">
         <strong>Review Diagnostics Bundle</strong>
-        <div class="tiny" style="margin-top:8px">Primary tester copy for Review. Includes state health, chart verification, resolver trace, and gateway snapshot.</div>
+        <div class="tiny" style="margin-top:8px">Compact tester copy for Review: authority summary, plan status, chart verification, and gateway status. Use General diagnostics for a full state export.</div>
         <div class="actions" style="margin-top:10px">
           <button class="primary compactbutton" type="button" data-act="copy-review-diagnostics-bundle">Copy Review Diagnostics Bundle</button>
         </div>

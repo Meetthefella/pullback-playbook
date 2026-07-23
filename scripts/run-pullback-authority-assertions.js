@@ -849,6 +849,7 @@ function runDiagnosticsAndSnapshotAssertions(appSource, appSandbox){
     },
     activeWorkspaceTab(){ return 'track'; },
     currentVisibleReviewDiagnostics(){ return {}; },
+    currentReviewChartVerificationSnapshot(){ return {}; },
     buildChartGuruAuditSnapshot(){ return null; },
     currentReviewStateHealthSnapshot(){ return {}; },
     currentPaperTradeDebugSnapshotForTicker(){ return null; },
@@ -937,6 +938,45 @@ function runDiagnosticsAndSnapshotAssertions(appSource, appSandbox){
     || trackBundle.sections.track.canonical_pullback_state !== 'near_20ma'
     || trackBundle.sections.track.raw_pullback_zone !== 'none'){
     throw new Error('Track tester diagnostics must carry canonical pullback authority fields.');
+  }
+
+  diagnosticSandbox.currentVisibleReviewDiagnostics = function(){
+    return {
+      currentVerdict:'watch',
+      visibleReviewStatus:'Review is waiting for confirmation.',
+      reviewWorkspaceStatus:'Ready',
+      chartVerificationStatus:{phase:'complete', status:'verified', requestId:'request-1', imageId:'image-1'}
+    };
+  };
+  diagnosticSandbox.currentReviewStateHealthSnapshot = function(){
+    return {
+      sourceOfTruth:'simplified_state_pipeline',
+      canonicalVerdict:'watch',
+      visualBucket:'monitor',
+      primaryBlockerReason:'Needs confirmation.',
+      planStatus:'pending',
+      contract:{
+        contractFingerprint:'contract-1',
+        canonicalPullbackState:'near_20ma',
+        contractDiagnostics:{authorityContract:'pre_lifecycle', canonicalAuthoritySelectionSource:'scan_authority_preserved'},
+        deliberatelyLargePayload:'x'.repeat(150000)
+      },
+      planAuthority:{authorityId:'manual_review', source:'manual_review', reasonCode:'waiting_for_trigger', actionable:false}
+    };
+  };
+  diagnosticSandbox.currentReviewChartVerificationSnapshot = function(){
+    return {phase:'complete', status:'verified', diagnostics:['Verified'], evidence:['Price held above 20MA']};
+  };
+  const reviewBundle = diagnosticSandbox.buildTesterDiagnosticSnapshot({bundleMode:'review_tester_bundle'});
+  const reviewBundleSize = JSON.stringify(reviewBundle).length;
+  if(reviewBundle.diagnosticSchema !== 'review_tester_bundle.v2'
+    || !reviewBundle.sections
+    || reviewBundle.sections.authority.contractFingerprint !== 'contract-1'
+    || reviewBundle.sections.authority.canonicalVerdict !== 'watch'){
+    throw new Error('Review tester diagnostics must retain compact canonical authority fields.');
+  }
+  if(reviewBundleSize >= 20000 || reviewBundle.characterCount >= 20000 || reviewBundle.maxCharacterCount !== 20000){
+    throw new Error('Review tester diagnostics must remain compact even when raw authority state is large.');
   }
 
   const replaySnapshot = diagnosticSandbox.buildReplaySnapshotForTicker({ticker:'CARR', meta:{}, marketData:{}, setup:{}, plan:{}, scan:{}, review:{}});
