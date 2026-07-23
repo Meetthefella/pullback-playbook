@@ -1058,7 +1058,9 @@
     if(checks.below_50_without_reclaim) reasons.push('Price must be above the 50MA.');
     if(checks.below_200ma) reasons.push('Price is below the 200MA.');
     if(checks.ma50_below_200ma) reasons.push('50MA is below the 200MA.');
-    if(checks.market_blocked) reasons.push('Market conditions are too poor for this setup.');
+    // Market regime remains visible as a caution for Near Entry. It is an
+    // Entry confirmation requirement, not a reason to hide an otherwise
+    // priceable pullback that is still waiting for its trigger.
     if(!checks.capital_ok) reasons.push('Capital fit is impossible at this risk level.');
     // Near Entry is the monitored, priceable pullback phase. A late-location
     // caution can still block a full Entry, but must not erase a valid
@@ -3337,6 +3339,7 @@
           watchlist_entry_exists:true,
           authority:{version:1, source:'scan', reason:'scanner_workflow'},
           plan:{source:'scanner_estimate'},
+          meta:{marketStatus:'S&P below 50 MA'},
           setupScore:7,
           baseScore:7,
           displayScore:5,
@@ -3382,6 +3385,8 @@
         assert(result){
           return result.final_verdict === 'near_entry'
             && result.near_entry_gate_pass === true
+            && result.entry_gate_pass === false
+            && result.near_entry_gate_checks && result.near_entry_gate_checks.market_blocked === true
             && result.scan_authority_near_entry_release === true
             && result.contractDiagnostics && result.contractDiagnostics.canonicalAuthoritySelectionSource === 'scan_authority_near_entry_release'
             && result.late_pullback_gate_checks && result.late_pullback_gate_checks.late_from_support === true;
