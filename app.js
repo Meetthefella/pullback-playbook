@@ -49081,8 +49081,14 @@ function renderReviewWorkspace(options = {}){
   const chartGuruNarrationDebug = aiSummaryVisible && analysisState.normalizedAnalysis
     ? chartGuruNarrationDebugMarkup(analysisState.normalizedAnalysis, analysisState.normalizedAnalysis.chartCoach)
     : '';
+  // The server's narrated Chart Guru payload does not carry the deterministic
+  // story context. Read the same selected display model used above so Advanced
+  // Debug always exposes the canonical phase decision behind the visible copy.
+  const canonicalPhaseDecisionCoach = chartGuruDisplayState.chartCoach && typeof chartGuruDisplayState.chartCoach === 'object'
+    ? chartGuruDisplayState.chartCoach
+    : analysisState.normalizedAnalysis && analysisState.normalizedAnalysis.chartCoach;
   const canonicalPhaseDecisionDebug = analysisState.normalizedAnalysis
-    ? canonicalPhaseDecisionDebugMarkup(analysisState.normalizedAnalysis, analysisState.normalizedAnalysis.chartCoach)
+    ? canonicalPhaseDecisionDebugMarkup(analysisState.normalizedAnalysis, canonicalPhaseDecisionCoach)
     : '';
   if(chartVerificationBlocksAiReview && !loading && !analysisBusy){
     analyseDisabled = true;

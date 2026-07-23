@@ -3157,6 +3157,8 @@ function runSourceAssertions(){
   assert(appSource.includes('function buildDeterministicChartCoach'), 'App must include deterministic Chart Coach helper');
   assert(appSource.includes('function selectReviewAiSummary'), 'App must include the Review AI summary authority selector');
   assert(appSource.includes('function buildReviewChartGuruDisplay'), 'App must expose a dedicated Review Chart Guru display helper');
+  assert(appSource.includes('const canonicalPhaseDecisionCoach = chartGuruDisplayState.chartCoach'), 'Review Advanced Debug must read the selected Chart Guru display model, not only the raw server narration payload');
+  assert(appSource.includes('canonicalPhaseDecisionDebugMarkup(analysisState.normalizedAnalysis, canonicalPhaseDecisionCoach)'), 'Review Advanced Debug must render canonical phase instrumentation from the selected display model');
   assert(appSource.includes("const title = '🧘 Chart Guru';"), 'Review helper source should pin the Chart Guru title');
   assert(!appSource.includes('primaryTeachingSection'), 'Dead legacy Chart Guru teaching-section variable should be removed');
   assert(!appSource.includes('const finalizedSections = finalizeChartCoachSections(rankedSections);'), 'Dead finalizedSections recomputation should be removed');
