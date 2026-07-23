@@ -687,15 +687,18 @@ function runDeterministicCandleFallbackRegression(){
   const fixedPlanReplay = sandbox.buildFixedPlanHistoricalReplay({
     plan:{stop:264.2, firstTarget:283.23},
     marketData:{history:[
+      {date:'2025-07-16', close:180},
       {date:'2026-07-22', close:280.7},
       {date:'2026-07-21', close:279},
       {date:'2026-07-20', close:271.98},
       {date:'2026-07-16', close:271.19}
     ]}
-  });
+  }, {supportEpisodeStartDate:'2026-07-15'});
   assert.strictEqual(fixedPlanReplay.historicalReplayMode, 'fixed_plan_reconstruction', 'Historical R:R output must declare its fixed-plan replay mode.');
   assert.strictEqual(fixedPlanReplay.historicalReplayAuthoritative, false, 'Historical R:R replay must never claim persisted resolver authority.');
   assert.strictEqual(fixedPlanReplay.targetMayContainLookahead, true, 'A current resistance target must be marked as possible future-information lookahead.');
+  assert.strictEqual(fixedPlanReplay.historicalReplayScope, 'selected_support_episode_forward', 'Replay must exclude unrelated history before the selected support episode.');
+  assert.strictEqual(fixedPlanReplay.reconstructedPriceabilityTimeline.some(bar => bar.date === '2025-07-16'), false, 'Replay must not combine an older unrelated history window with the selected support episode.');
   assert.strictEqual(fixedPlanReplay.reconstructedFirstThresholdPassDate, '2026-07-16', 'Fixed-plan replay should identify the first chronological close that clears 1.5R.');
   assert.strictEqual(fixedPlanReplay.fixedPlanEverReachedNearEntryRR, true, 'Fixed-plan replay should report a historical 1.5R pass when one exists.');
   assert.strictEqual(fixedPlanReplay.fixedPlanEverReachedEntryRR, false, 'Fixed-plan replay should not invent a 2R pass.');

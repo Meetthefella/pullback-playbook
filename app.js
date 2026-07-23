@@ -26459,12 +26459,18 @@ function finalDisplayedAnalysisChartRead(record, analysis){
   };
 }
 
-function buildFixedPlanHistoricalReplay(record = {}){
+function buildFixedPlanHistoricalReplay(record = {}, options = {}){
   const item = normalizeTickerRecord(record || {});
   const fixedStop = numericOrNull(item.plan && item.plan.stop);
   const fixedTarget = numericOrNull(item.plan && item.plan.firstTarget);
   const normalizedHistory = normalizeCandleSequenceOrder(item.marketData && item.marketData.history).candles;
-  const chronological = normalizedHistory.slice().reverse();
+  const supportEpisodeStartDate = String(options.supportEpisodeStartDate || '').trim();
+  const supportEpisodeStartTime = supportEpisodeStartDate ? Date.parse(supportEpisodeStartDate) : NaN;
+  const chronological = normalizedHistory.slice().reverse().filter(candle => {
+    if(!Number.isFinite(supportEpisodeStartTime)) return true;
+    const candleTime = Date.parse(String(candle && (candle.date || candle.datetime || candle.timestamp) || ''));
+    return !Number.isFinite(candleTime) || candleTime >= supportEpisodeStartTime;
+  });
   const limitation = 'Historical per-bar plans and resolver snapshots were not persisted.';
   const replayable = Number.isFinite(fixedStop) && Number.isFinite(fixedTarget) && chronological.length > 0;
   const timeline = replayable
@@ -26515,6 +26521,8 @@ function buildFixedPlanHistoricalReplay(record = {}){
     historicalReplayAuthoritative:false,
     historicalReplayLimitation:limitation,
     targetMayContainLookahead:true,
+    historicalReplayScope:Number.isFinite(supportEpisodeStartTime) ? 'selected_support_episode_forward' : 'all_available_history_no_episode_boundary',
+    supportEpisodeStartDate,
     fixedPlanAvailable:replayable,
     reconstructedPriceabilityTimeline:timeline,
     replayedGateTrace:timeline.map(bar => ({date:bar.date, close:bar.close, gates:bar.replayedGateTrace})),
@@ -26581,7 +26589,11 @@ function buildChartGuruAuditSnapshot(record = {}, analysisState = null, options 
       reviewedAt:String(safeAnalysisState.reviewedAt || '').trim()
     },
     buildInfo:currentBuildInfo(),
-    historicalReplay:buildFixedPlanHistoricalReplay(item),
+    historicalReplay:buildFixedPlanHistoricalReplay(item, {
+      // The replay is a price-sensitivity diagnostic for this selected support
+      // episode, never a re-run of historical resolver authority.
+      supportEpisodeStartDate:String(phaseDecision.supportEvent && phaseDecision.supportEvent.timestamp || '')
+    }),
     chartContext,
     detectedEvents:Array.isArray(diagnostics.storyCandidates)
       ? diagnostics.storyCandidates.map(candidate => String(candidate && candidate.id || '').trim()).filter(Boolean)
