@@ -26466,11 +26466,12 @@ function buildFixedPlanHistoricalReplay(record = {}, options = {}){
   const normalizedHistory = normalizeCandleSequenceOrder(item.marketData && item.marketData.history).candles;
   const supportEpisodeStartDate = String(options.supportEpisodeStartDate || '').trim();
   const supportEpisodeStartTime = supportEpisodeStartDate ? Date.parse(supportEpisodeStartDate) : NaN;
-  const chronological = normalizedHistory.slice().reverse().filter(candle => {
-    if(!Number.isFinite(supportEpisodeStartTime)) return true;
-    const candleTime = Date.parse(String(candle && (candle.date || candle.datetime || candle.timestamp) || ''));
-    return !Number.isFinite(candleTime) || candleTime >= supportEpisodeStartTime;
-  });
+  const chronological = Number.isFinite(supportEpisodeStartTime)
+    ? normalizedHistory.slice().reverse().filter(candle => {
+        const candleTime = Date.parse(String(candle && (candle.date || candle.datetime || candle.timestamp) || ''));
+        return !Number.isFinite(candleTime) || candleTime >= supportEpisodeStartTime;
+      })
+    : [];
   const limitation = 'Historical per-bar plans and resolver snapshots were not persisted.';
   const replayable = Number.isFinite(fixedStop) && Number.isFinite(fixedTarget) && chronological.length > 0;
   const timeline = replayable
@@ -26521,7 +26522,7 @@ function buildFixedPlanHistoricalReplay(record = {}, options = {}){
     historicalReplayAuthoritative:false,
     historicalReplayLimitation:limitation,
     targetMayContainLookahead:true,
-    historicalReplayScope:Number.isFinite(supportEpisodeStartTime) ? 'selected_support_episode_forward' : 'all_available_history_no_episode_boundary',
+    historicalReplayScope:Number.isFinite(supportEpisodeStartTime) ? 'selected_support_episode_forward' : 'unavailable_no_selected_support_episode',
     supportEpisodeStartDate,
     fixedPlanAvailable:replayable,
     reconstructedPriceabilityTimeline:timeline,

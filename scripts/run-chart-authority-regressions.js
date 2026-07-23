@@ -704,6 +704,12 @@ function runDeterministicCandleFallbackRegression(){
   assert.strictEqual(fixedPlanReplay.fixedPlanEverReachedEntryRR, false, 'Fixed-plan replay should not invent a 2R pass.');
   assert.strictEqual(fixedPlanReplay.reconstructedPriceabilityTimeline[0].nonPriceabilityGateReplay.buyerControl.authority, 'unavailable_not_persisted', 'Unavailable historical buyer control must remain explicitly unavailable.');
   assert.strictEqual(fixedPlanReplay.reconstructedPriceabilityTimeline[0].nonPriceabilityGateReplay.stop.authority, 'fixed_current_plan_assumption', 'Replay stop provenance must remain explicit.');
+  const replayWithoutEpisodeBoundary = sandbox.buildFixedPlanHistoricalReplay({
+    plan:{stop:264.2, firstTarget:283.23},
+    marketData:{history:Array.from({length:400}, (_, index) => ({date:`2025-01-${String((index % 28) + 1).padStart(2, '0')}`, close:270}))}
+  });
+  assert.strictEqual(replayWithoutEpisodeBoundary.historicalReplayScope, 'unavailable_no_selected_support_episode', 'Missing canonical episode boundaries must not fall back to a huge all-history replay.');
+  assert.strictEqual(replayWithoutEpisodeBoundary.reconstructedPriceabilityTimeline.length, 0, 'Missing canonical episode boundaries must keep the diagnostics bundle compact and copyable.');
   const immediateResponseStory = sandbox.buildCanonicalChartStoryContext({
     currentPrice:102, ma20:100, supportContext:'20ma', supportTestState:'not_tested', structureIntact:true,
     historySequence:[
