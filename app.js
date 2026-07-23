@@ -5415,20 +5415,28 @@ async function copyTextToClipboard(text){
       return true;
     }catch(error){}
   }
+  const previouslyFocused = document.activeElement;
   const textarea = document.createElement('textarea');
   textarea.value = value;
   textarea.setAttribute('readonly', 'readonly');
   textarea.style.position = 'fixed';
   textarea.style.opacity = '0';
   document.body.appendChild(textarea);
-  textarea.select();
   let copied = false;
   try{
+    textarea.focus({preventScroll:true});
+    textarea.select();
     copied = document.execCommand('copy');
   }catch(error){
     copied = false;
+  }finally{
+    textarea.remove();
+    if(previouslyFocused && typeof previouslyFocused.focus === 'function' && document.contains(previouslyFocused)){
+      try{
+        previouslyFocused.focus({preventScroll:true});
+      }catch(error){}
+    }
   }
-  textarea.remove();
   return copied;
 }
 
@@ -5438,13 +5446,6 @@ function showManualSnapshotCopyText(text){
   if(!wrap || !field) return false;
   wrap.hidden = false;
   field.value = String(text || '');
-  try{
-    field.focus({preventScroll:true});
-  }catch(error){}
-  try{
-    field.select();
-    field.setSelectionRange(0, field.value.length);
-  }catch(error){}
   return true;
 }
 
@@ -5464,12 +5465,12 @@ async function copyTesterDiagnosticSnapshot(options = {}){
     snapshotText = JSON.stringify(snapshot, null, 2);
   }
   uiState.lastTesterDiagnosticSnapshot = snapshot;
-  showManualSnapshotCopyText(snapshotText);
   const copied = await copyTextToClipboard(snapshotText);
   if(copied){
     const status = $('testerReportSnapshotStatus');
-    if(status) status.textContent = `Snapshot copied: ${snapshot.panelTitle} | ${formatLocalTimestamp(snapshot.timestamp) || snapshot.timestamp}. Manual copy text is also shown below.`;
+    if(status) status.textContent = `Snapshot copied: ${snapshot.panelTitle} | ${formatLocalTimestamp(snapshot.timestamp) || snapshot.timestamp}.`;
   }else{
+    showManualSnapshotCopyText(snapshotText);
     const status = $('testerReportSnapshotStatus');
     if(status) status.textContent = 'Clipboard copy failed. Snapshot text opened below for manual copy.';
   }
