@@ -48121,7 +48121,10 @@ function renderReviewWorkspace(options = {}){
   }
   if(canonicalPlanSynced) commitTickerState();
   const renderSourceRecord = refreshBundle && refreshBundle.record ? refreshBundle.record : refreshedRecord;
-  const canonicalLiveRecord = getTickerRecord(ticker) || renderSourceRecord || liveRecord || null;
+  // Review refreshes read-only so it does not rewrite the user's record merely
+  // by opening the panel. Render that fresh bundle first; otherwise Review
+  // shows the stale live record until Track performs a persisted refresh.
+  const canonicalLiveRecord = renderSourceRecord || getTickerRecord(ticker) || liveRecord || null;
   const record = canonicalLiveRecord && typeof canonicalLiveRecord === 'object'
     ? normalizeDetachedTickerRecord(canonicalLiveRecord)
     : (renderSourceRecord && typeof renderSourceRecord === 'object'
