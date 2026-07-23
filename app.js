@@ -7,15 +7,15 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const reviewSessionKey = 'pullbackPlaybookReviewSessionV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.5.3';
-const APP_BUILD_TIMESTAMP = '2026-07-23T10:05:00Z';
+const APP_VERSION = 'v4.5.4';
+const APP_BUILD_TIMESTAMP = '2026-07-23T10:58:00Z';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
 const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
 const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
 const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.5.3',
+    version:'4.5.4',
     buildTimestamp:APP_BUILD_TIMESTAMP,
     assetId:`pullback-playbook-${APP_VERSION}-${APP_BUILD_TIMESTAMP}`,
     chartGuruDeterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
@@ -26475,7 +26475,7 @@ function buildFixedPlanHistoricalReplay(record = {}, options = {}){
     : [];
   const limitation = 'Historical per-bar plans and resolver snapshots were not persisted.';
   const replayable = Number.isFinite(fixedStop) && Number.isFinite(fixedTarget) && chronological.length > 0;
-  const timeline = replayable
+  const fullTimeline = replayable
     ? chronological.map(candle => {
       const close = numericOrNull(candle && candle.close);
       const rr = Number.isFinite(close) && close > fixedStop && fixedTarget > close
@@ -26515,9 +26515,31 @@ function buildFixedPlanHistoricalReplay(record = {}, options = {}){
       };
     })
     : [];
-  const firstThresholdPass = timeline.find(bar => bar.rrThresholdPassed) || null;
-  const firstEntryThresholdPass = timeline.find(bar => bar.entryRrThresholdPassed) || null;
-  const firstTechnicalEligibility = timeline.find(bar => bar.replayedGateTrace.allAvailableTechnicalGatesPassed === true) || null;
+  const firstThresholdPass = fullTimeline.find(bar => bar.rrThresholdPassed) || null;
+  const firstEntryThresholdPass = fullTimeline.find(bar => bar.entryRrThresholdPassed) || null;
+  const firstTechnicalEligibility = fullTimeline.find(bar => bar.replayedGateTrace.allAvailableTechnicalGatesPassed === true) || null;
+  // The replay must calculate every selected-episode bar, but emitting a full
+  // object for each one makes the diagnostic bundle impractical to copy. Keep
+  // the decisive boundaries plus their neighbours and the latest bars instead.
+  const timelineAnchorIndexes = [
+    0,
+    fullTimeline.length - 1,
+    firstThresholdPass ? fullTimeline.indexOf(firstThresholdPass) : -1,
+    firstEntryThresholdPass ? fullTimeline.indexOf(firstEntryThresholdPass) : -1,
+    firstTechnicalEligibility ? fullTimeline.indexOf(firstTechnicalEligibility) : -1
+  ].filter(index => index >= 0);
+  const diagnosticTimelineIndexes = new Set();
+  timelineAnchorIndexes.forEach(index => {
+    [index - 1, index, index + 1].forEach(candidate => {
+      if(candidate >= 0 && candidate < fullTimeline.length) diagnosticTimelineIndexes.add(candidate);
+    });
+  });
+  for(let index = Math.max(0, fullTimeline.length - 5); index < fullTimeline.length; index += 1){
+    diagnosticTimelineIndexes.add(index);
+  }
+  const timeline = Array.from(diagnosticTimelineIndexes)
+    .sort((left, right) => left - right)
+    .map(index => fullTimeline[index]);
   return {
     historicalReplayMode:'fixed_plan_reconstruction',
     historicalReplayAuthoritative:false,
@@ -26526,6 +26548,12 @@ function buildFixedPlanHistoricalReplay(record = {}, options = {}){
     historicalReplayScope:Number.isFinite(supportEpisodeStartTime) ? 'selected_support_episode_forward' : 'unavailable_no_selected_support_episode',
     supportEpisodeStartDate,
     fixedPlanAvailable:replayable,
+    reconstructedPriceabilityTimelineCoverage:{
+      totalBarsEvaluated:fullTimeline.length,
+      barsIncluded:timeline.length,
+      omittedBarCount:Math.max(0, fullTimeline.length - timeline.length),
+      selection:'support-episode boundary, first R:R threshold passes, first replayable technical eligibility, and latest five bars'
+    },
     reconstructedPriceabilityTimeline:timeline,
     replayedGateTrace:timeline.map(bar => ({date:bar.date, close:bar.close, gates:bar.replayedGateTrace})),
     fixedPlanEverReachedNearEntryRR:!!firstThresholdPass,

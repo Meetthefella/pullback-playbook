@@ -710,6 +710,18 @@ function runDeterministicCandleFallbackRegression(){
   });
   assert.strictEqual(replayWithoutEpisodeBoundary.historicalReplayScope, 'unavailable_no_selected_support_episode', 'Missing canonical episode boundaries must not fall back to a huge all-history replay.');
   assert.strictEqual(replayWithoutEpisodeBoundary.reconstructedPriceabilityTimeline.length, 0, 'Missing canonical episode boundaries must keep the diagnostics bundle compact and copyable.');
+  const longEpisodeHistory = Array.from({length:400}, (_, index) => ({
+    date:new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
+    close:270 + index * 0.01
+  })).reverse();
+  const compactLongReplay = sandbox.buildFixedPlanHistoricalReplay({
+    plan:{stop:264.2, firstTarget:283.23},
+    marketData:{history:longEpisodeHistory}
+  }, {supportEpisodeStartDate:'2026-01-01'});
+  assert.strictEqual(compactLongReplay.reconstructedPriceabilityTimelineCoverage.totalBarsEvaluated, 400, 'Replay calculations must still cover every selected-episode bar.');
+  assert.ok(compactLongReplay.reconstructedPriceabilityTimeline.length < 24, 'Diagnostics must emit a compact representative timeline instead of every historical bar.');
+  assert.ok(compactLongReplay.reconstructedPriceabilityTimelineCoverage.omittedBarCount > 0, 'Compact replay diagnostics must disclose omitted per-bar detail.');
+  assert.ok(JSON.stringify(compactLongReplay).length < 20000, 'A long selected episode must remain practical to copy into a diagnostics handoff.');
   const immediateResponseStory = sandbox.buildCanonicalChartStoryContext({
     currentPrice:102, ma20:100, supportContext:'20ma', supportTestState:'not_tested', structureIntact:true,
     historySequence:[
