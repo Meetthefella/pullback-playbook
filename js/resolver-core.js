@@ -2066,7 +2066,23 @@
     const reclaimDirectSignalCount = Number.isFinite(Number(nearEntryGateChecks.reclaim_direct_signal_count))
       ? Number(nearEntryGateChecks.reclaim_direct_signal_count)
       : (Number.isFinite(Number(entryGateChecks.reclaim_direct_signal_count)) ? Number(entryGateChecks.reclaim_direct_signal_count) : 0);
-    const applyTrackedLifecycleVerdict = isTracked && !preserveScanAuthorityCanonicalPath;
+    // Scan authority protects an unchanged Watch from downstream plan/lifecycle
+    // noise. It must release once the same record independently qualifies as a
+    // priceable Near Entry; otherwise a passed promotion gate can never become
+    // the canonical state.
+    const scanAuthorityNearEntryRelease = !!(
+      preserveScanAuthorityCanonicalPath
+      && guardedVerdict.near_entry_gate_pass === true
+      && guardedVerdict.entry_gate_pass !== true
+      && priceabilityState === 'priceable'
+      && String(displayedPlan && displayedPlan.status || '').trim().toLowerCase() === 'valid'
+      && nearEntryGateChecks.has_priceable_plan === true
+      && nearEntryGateChecks.near_entry_terminal_block_applied !== true
+    );
+    const applyTrackedLifecycleVerdict = isTracked && (
+      !preserveScanAuthorityCanonicalPath
+      || scanAuthorityNearEntryRelease
+    );
     let trackedVerdict = normalizeVerdict(guardedVerdict.final_verdict);
     let trackedReason = guardedVerdict.reason || reason;
     const viability = resolveWatchlistViability({
@@ -2284,11 +2300,15 @@
       && ['entry','near_entry'].includes(nonTrackedCanonicalVerdict)
       && nonTrackedCanonicalPriceabilityState === 'priceable'
     );
-    const selectedAuthoritySource = selectedAuthorityContractSource(item, {
+    const selectedAuthoritySource = scanAuthorityNearEntryRelease
+      ? 'scan_authority_near_entry_release'
+      : selectedAuthorityContractSource(item, {
       preserveReviewCanonicalForSoftReadiness,
       preserveScanAuthorityCanonicalPath
     });
-    const canonicalAuthoritySource = canonicalVerdictAuthoritySource(item, {
+    const canonicalAuthoritySource = scanAuthorityNearEntryRelease
+      ? 'scan_authority_near_entry_release'
+      : canonicalVerdictAuthoritySource(item, {
       preserveReviewCanonicalForSoftReadiness,
       preserveScanAuthorityCanonicalPath,
       canonicalSoftReadinessAlignmentApplied:nonTrackedCanonicalAlignmentApplied
@@ -2441,6 +2461,7 @@
         : canonicalVisualBucketForVerdict(canonicalReviewVerdict),
       canonical_priceability_state:canonicalReviewPriceabilityState,
       selected_authority_contract_source:selectedAuthoritySource,
+      scan_authority_near_entry_release:scanAuthorityNearEntryRelease,
       canonical_soft_readiness_alignment_applied:nonTrackedCanonicalAlignmentApplied,
       canonical_soft_readiness_alignment_source:canonicalAuthoritySource,
       setup_location_state:setupLocationState,
@@ -3313,6 +3334,9 @@
         id:'priceable-pullback-in-progress-stays-near-entry-despite-late-location-flag',
         record:{
           ticker:'HWM',
+          watchlist_entry_exists:true,
+          authority:{version:1, source:'scan', reason:'scanner_workflow'},
+          plan:{source:'scanner_estimate'},
           setupScore:7,
           baseScore:7,
           displayScore:5,
@@ -3358,6 +3382,8 @@
         assert(result){
           return result.final_verdict === 'near_entry'
             && result.near_entry_gate_pass === true
+            && result.scan_authority_near_entry_release === true
+            && result.contractDiagnostics && result.contractDiagnostics.canonicalAuthoritySelectionSource === 'scan_authority_near_entry_release'
             && result.late_pullback_gate_checks && result.late_pullback_gate_checks.late_from_support === true;
         }
       },
