@@ -631,7 +631,8 @@ function runDeterministicCandleFallbackRegression(){
     'chartGuruChartCoachFreshness',
     'chartGuruNarrationSourceForAnalysis',
     'selectReviewAiSummary',
-    'finalDisplayedAnalysisChartRead'
+    'finalDisplayedAnalysisChartRead',
+    'buildFixedPlanHistoricalReplay'
   ].forEach(name => {
     vm.runInContext(extractFunctionSource(appSource, name), sandbox, {filename:`app.js#${name}`});
   });
@@ -683,6 +684,23 @@ function runDeterministicCandleFallbackRegression(){
   ]);
   assert.ok(immediateResponse.supportEvent, 'Two consecutive qualifying candles must establish a support episode.');
   assert.strictEqual(immediateResponse.latestEpisode.responseDetected, true, 'Two consecutive qualifying candles immediately after support must validate a response.');
+  const fixedPlanReplay = sandbox.buildFixedPlanHistoricalReplay({
+    plan:{stop:264.2, firstTarget:283.23},
+    marketData:{history:[
+      {date:'2026-07-22', close:280.7},
+      {date:'2026-07-21', close:279},
+      {date:'2026-07-20', close:271.98},
+      {date:'2026-07-16', close:271.19}
+    ]}
+  });
+  assert.strictEqual(fixedPlanReplay.historicalReplayMode, 'fixed_plan_reconstruction', 'Historical R:R output must declare its fixed-plan replay mode.');
+  assert.strictEqual(fixedPlanReplay.historicalReplayAuthoritative, false, 'Historical R:R replay must never claim persisted resolver authority.');
+  assert.strictEqual(fixedPlanReplay.targetMayContainLookahead, true, 'A current resistance target must be marked as possible future-information lookahead.');
+  assert.strictEqual(fixedPlanReplay.reconstructedFirstThresholdPassDate, '2026-07-16', 'Fixed-plan replay should identify the first chronological close that clears 1.5R.');
+  assert.strictEqual(fixedPlanReplay.fixedPlanEverReachedNearEntryRR, true, 'Fixed-plan replay should report a historical 1.5R pass when one exists.');
+  assert.strictEqual(fixedPlanReplay.fixedPlanEverReachedEntryRR, false, 'Fixed-plan replay should not invent a 2R pass.');
+  assert.strictEqual(fixedPlanReplay.reconstructedPriceabilityTimeline[0].nonPriceabilityGateReplay.buyerControl.authority, 'unavailable_not_persisted', 'Unavailable historical buyer control must remain explicitly unavailable.');
+  assert.strictEqual(fixedPlanReplay.reconstructedPriceabilityTimeline[0].nonPriceabilityGateReplay.stop.authority, 'fixed_current_plan_assumption', 'Replay stop provenance must remain explicit.');
   const immediateResponseStory = sandbox.buildCanonicalChartStoryContext({
     currentPrice:102, ma20:100, supportContext:'20ma', supportTestState:'not_tested', structureIntact:true,
     historySequence:[

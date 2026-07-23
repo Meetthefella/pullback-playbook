@@ -26452,7 +26452,82 @@ function finalDisplayedAnalysisChartRead(record, analysis){
     fallbackReason:'deterministic_chart_coach',
     fallbackFacts:chartCoachFallback.facts || null,
     reviewProse:deterministicReviewProse,
-    chartCoach:sanitizedChartCoach || chartCoachFallback
+    // A stale persisted narration can be useful only while it remains fresh.
+    // When deterministic prose wins, its sections and story context must win
+    // too; mixing them produces contradictory Chart Guru output.
+    chartCoach:useFallback ? chartCoachFallback : (sanitizedChartCoach || chartCoachFallback)
+  };
+}
+
+function buildFixedPlanHistoricalReplay(record = {}){
+  const item = normalizeTickerRecord(record || {});
+  const fixedStop = numericOrNull(item.plan && item.plan.stop);
+  const fixedTarget = numericOrNull(item.plan && item.plan.firstTarget);
+  const normalizedHistory = normalizeCandleSequenceOrder(item.marketData && item.marketData.history).candles;
+  const chronological = normalizedHistory.slice().reverse();
+  const limitation = 'Historical per-bar plans and resolver snapshots were not persisted.';
+  const replayable = Number.isFinite(fixedStop) && Number.isFinite(fixedTarget) && chronological.length > 0;
+  const timeline = replayable
+    ? chronological.map(candle => {
+      const close = numericOrNull(candle && candle.close);
+      const rr = Number.isFinite(close) && close > fixedStop && fixedTarget > close
+        ? (fixedTarget - close) / (close - fixedStop)
+        : null;
+      const ma50 = numericOrNull(candle && (candle.ma50 ?? candle.sma50));
+      const ma200 = numericOrNull(candle && (candle.ma200 ?? candle.sma200));
+      const structure = Number.isFinite(close) && Number.isFinite(ma50) && Number.isFinite(ma200)
+        ? close > ma50 && close > ma200 && ma50 > ma200
+        : null;
+      const availableTechnicalGateValues = [structure].filter(value => value !== null);
+      const allAvailableTechnicalGatesPassed = availableTechnicalGateValues.length
+        ? availableTechnicalGateValues.every(Boolean)
+        : null;
+      return {
+        date:String(candle && (candle.date || candle.datetime || candle.timestamp) || '').trim(),
+        close,
+        fixedStop,
+        fixedTarget,
+        reconstructedRR:Number.isFinite(rr) ? Number(rr.toFixed(4)) : null,
+        rrThresholdPassed:Number.isFinite(rr) ? rr >= 1.5 : false,
+        entryRrThresholdPassed:Number.isFinite(rr) ? rr >= 2 : false,
+        targetMayContainLookahead:true,
+        nonPriceabilityGateReplay:{
+          structure:{
+            value:structure,
+            authority:structure === null ? 'unavailable_not_persisted' : 'recomputed_from_historical_data'
+          },
+          buyerControl:{value:null, authority:'unavailable_not_persisted'},
+          stop:{value:fixedStop, authority:'fixed_current_plan_assumption'},
+          target:{value:fixedTarget, authority:'fixed_current_plan_assumption'}
+        },
+        replayedGateTrace:{
+          allAvailableTechnicalGatesPassed,
+          unavailableHistoricalGates:['buyerControl', 'confirmation', 'historicalPlanAuthority', 'historicalTargetAvailability']
+        }
+      };
+    })
+    : [];
+  const firstThresholdPass = timeline.find(bar => bar.rrThresholdPassed) || null;
+  const firstEntryThresholdPass = timeline.find(bar => bar.entryRrThresholdPassed) || null;
+  const firstTechnicalEligibility = timeline.find(bar => bar.replayedGateTrace.allAvailableTechnicalGatesPassed === true) || null;
+  return {
+    historicalReplayMode:'fixed_plan_reconstruction',
+    historicalReplayAuthoritative:false,
+    historicalReplayLimitation:limitation,
+    targetMayContainLookahead:true,
+    fixedPlanAvailable:replayable,
+    reconstructedPriceabilityTimeline:timeline,
+    replayedGateTrace:timeline.map(bar => ({date:bar.date, close:bar.close, gates:bar.replayedGateTrace})),
+    fixedPlanEverReachedNearEntryRR:!!firstThresholdPass,
+    reconstructedFirstThresholdPassBar:firstThresholdPass ? {date:firstThresholdPass.date, close:firstThresholdPass.close, reconstructedRR:firstThresholdPass.reconstructedRR} : null,
+    reconstructedFirstThresholdPassDate:firstThresholdPass ? firstThresholdPass.date : '',
+    fixedPlanEverReachedEntryRR:!!firstEntryThresholdPass,
+    reconstructedFirstEntryThresholdPassBar:firstEntryThresholdPass ? {date:firstEntryThresholdPass.date, close:firstEntryThresholdPass.close, reconstructedRR:firstEntryThresholdPass.reconstructedRR} : null,
+    reconstructedFirstEntryThresholdPassDate:firstEntryThresholdPass ? firstEntryThresholdPass.date : '',
+    reconstructedRrAtFirstTechnicalEligibility:firstTechnicalEligibility ? firstTechnicalEligibility.reconstructedRR : null,
+    firstTechnicalEligibilityBar:firstTechnicalEligibility ? {date:firstTechnicalEligibility.date, close:firstTechnicalEligibility.close} : null,
+    definitiveHistoricalPromotionUnavailable:true,
+    unavailableHistoricalGates:['buyerControl', 'confirmation', 'historicalPlanAuthority', 'historicalTargetAvailability']
   };
 }
 
@@ -26474,6 +26549,12 @@ function buildChartGuruAuditSnapshot(record = {}, analysisState = null, options 
     : deterministicCoach;
   const diagnostics = chartCoach && chartCoach.diagnostics && typeof chartCoach.diagnostics === 'object'
     ? chartCoach.diagnostics
+    : {};
+  const storyContext = chartCoach && chartCoach.storyContext && typeof chartCoach.storyContext === 'object'
+    ? chartCoach.storyContext
+    : (diagnostics.storyContext && typeof diagnostics.storyContext === 'object' ? diagnostics.storyContext : {});
+  const phaseDecision = storyContext.diagnostics && storyContext.diagnostics.phaseDecision && typeof storyContext.diagnostics.phaseDecision === 'object'
+    ? storyContext.diagnostics.phaseDecision
     : {};
   const chartContext = diagnostics.chartContext && typeof diagnostics.chartContext === 'object'
     ? diagnostics.chartContext
@@ -26500,6 +26581,7 @@ function buildChartGuruAuditSnapshot(record = {}, analysisState = null, options 
       reviewedAt:String(safeAnalysisState.reviewedAt || '').trim()
     },
     buildInfo:currentBuildInfo(),
+    historicalReplay:buildFixedPlanHistoricalReplay(item),
     chartContext,
     detectedEvents:Array.isArray(diagnostics.storyCandidates)
       ? diagnostics.storyCandidates.map(candidate => String(candidate && candidate.id || '').trim()).filter(Boolean)
@@ -26514,14 +26596,20 @@ function buildChartGuruAuditSnapshot(record = {}, analysisState = null, options 
       supportSemantic:String(chartCoach.recentStory && chartCoach.recentStory.supportSemantic || diagnostics.storyContract && diagnostics.storyContract.supportSemantic || '').trim(),
       buyerResponseSemantic:String(chartCoach.recentStory && chartCoach.recentStory.buyerResponseSemantic || diagnostics.storyContract && diagnostics.storyContract.buyerResponseSemantic || '').trim(),
       confirmationSemantic:String(chartCoach.recentStory && chartCoach.recentStory.confirmationSemantic || diagnostics.storyContract && diagnostics.storyContract.confirmationSemantic || '').trim(),
-      supportState:normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.supportState
-        ? cloneData(normalizedAnalysis.deterministicEventPacket.supportState, {})
-        : null,
-      currentPhase:String(normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.currentPhase || '').trim(),
-      storyEvents:Array.isArray(normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.storyEvents)
-        ? normalizedAnalysis.deterministicEventPacket.storyEvents.slice()
-        : [],
-      supportDistanceMeasured:!!(normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.supportState && normalizedAnalysis.deterministicEventPacket.supportState.distanceMeasured),
+      supportState:storyContext.support && typeof storyContext.support === 'object'
+        ? cloneData(storyContext.support, {})
+        : (normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.supportState
+          ? cloneData(normalizedAnalysis.deterministicEventPacket.supportState, {})
+          : null),
+      currentPhase:String(storyContext.currentPhase || normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.currentPhase || '').trim(),
+      storyEvents:Array.isArray(storyContext.storyEvents)
+        ? storyContext.storyEvents.slice()
+        : (Array.isArray(normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.storyEvents)
+          ? normalizedAnalysis.deterministicEventPacket.storyEvents.slice()
+          : []),
+      supportDistanceMeasured:storyContext.support && storyContext.support.distanceMeasured === true
+        ? true
+        : !!(normalizedAnalysis.deterministicEventPacket && normalizedAnalysis.deterministicEventPacket.supportState && normalizedAnalysis.deterministicEventPacket.supportState.distanceMeasured),
       dominantEventKey:String(chartCoach.primaryStory && chartCoach.primaryStory.key || '').trim(),
       dominantEventLabel:chartGuruDominantEventLabel(chartCoach.primaryStory && chartCoach.primaryStory.key || '')
     },
