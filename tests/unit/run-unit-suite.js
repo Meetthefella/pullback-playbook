@@ -17,6 +17,12 @@ const cases = [
     groups:['all', 'resolver', 'pure']
   },
   {
+    id:'canonical-decision-baseline',
+    label:'Canonical decision baseline assertions',
+    script:'scripts/run-canonical-decision-baseline-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
     id:'normalization-read-write',
     label:'Normalization read/write assertions',
     script:'scripts/run-normalization-read-write-assertions.js',

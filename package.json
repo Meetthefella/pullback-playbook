@@ -37,6 +37,7 @@
     "test:chart-guru:ai": "node scripts/run-chart-guru-openai-harness.js",
     "test:storage-persistence": "node scripts/run-storage-persistence-assertions.js",
     "test:resolver-gates": "node scripts/run-resolver-gate-assertions.js",
+    "test:canonical-decision-baseline": "node scripts/run-canonical-decision-baseline-assertions.js",
     "test:trade-execution": "node scripts/run-trade-execution-handler-tests.js"
   },
   "dependencies": {

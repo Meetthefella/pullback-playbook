@@ -437,6 +437,19 @@
       {label:'Entry Gate Pass', value:globalVerdict.entry_gate_pass ? 'true' : 'false'},
       {label:'Near Entry Gate Pass', value:globalVerdict.near_entry_gate_pass ? 'true' : 'false'}
     ], deps);
+    const observability = global.CanonicalDecisionObservability && typeof global.CanonicalDecisionObservability.buildDecisionObservabilitySummary === 'function'
+      ? global.CanonicalDecisionObservability.buildDecisionObservabilitySummary(item, globalVerdict, {
+        scan:{verdict:canonicalVerdict},
+        review:{verdict:canonicalVerdict},
+        track:{verdict:globalVerdict.tracked_verdict || canonicalVerdict}
+      })
+      : null;
+    const observabilityRows = observability && global.CanonicalDecisionObservability && typeof global.CanonicalDecisionObservability.compactRows === 'function'
+      ? global.CanonicalDecisionObservability.compactRows(observability)
+      : [];
+    const authoritySection = observabilityRows.length
+      ? renderDebugSectionMarkup('Decision Authority (Read-only)', observabilityRows, deps)
+      : '';
     const executionSection = renderDebugSectionMarkup('Execution State', [
       {label:'Lifecycle State', value:globalVerdict.lifecycle || '(none)'},
       {label:'Action State', value:nextAction.label || '(none)'},
@@ -614,7 +627,7 @@
       {label:'Resolver Reason', value:globalVerdict.reason || '(none)'},
       {label:'Card Click Trace', value:clickTrace ? `${clickTrace.stage}${clickTrace.detail ? ` | ${clickTrace.detail}` : ''} | ${clickTrace.at}` : '(none)'}
     ], 'Advanced Debug (Internal)', deps);
-    return `${finalSection}${baseSection}${executionSection}${interactionSection}${advancedSection}`;
+    return `${finalSection}${authoritySection}${baseSection}${executionSection}${interactionSection}${advancedSection}`;
   }
 
   global.ScannerDebug = {
