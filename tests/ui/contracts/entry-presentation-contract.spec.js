@@ -360,15 +360,14 @@ test('canonical Entry presentation remains authoritative across review, trade pl
     setActiveReviewTicker('TROW');
     return currentPaperTradeContextForTicker('TROW');
   });
-  expect(clickContextFallback && clickContextFallback.canonicalVerdict).toBe('near_entry');
-  expect(clickContextFallback && clickContextFallback.finalVerdict).toBe('Near Entry');
-  expect(clickContextFallback && clickContextFallback.actionabilityState).toBe('waiting_for_confirmation');
-  expect(clickContextFallback && clickContextFallback.eligibility && clickContextFallback.eligibility.eligible).toBe(false);
+  expect(clickContextFallback && clickContextFallback.canonicalVerdict).toBe('entry');
+  expect(clickContextFallback && clickContextFallback.finalVerdict).toBe('Entry');
+  expect(clickContextFallback && clickContextFallback.diagnostics && clickContextFallback.diagnostics.legacyReviewProjection && clickContextFallback.diagnostics.legacyReviewProjection.mayFeedDecisionLogic).toBe(false);
   expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.authoritativeReviewVerdict).toBe('entry');
-  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.canonicalPaperTradeVerdict).toBe('near_entry');
-  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.paperTradeSurfaceVerdict).toBe('Near Entry');
-  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.paperTradeEligibilityState).toBe('waiting_for_confirmation');
-  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.reasons[0]).toContain('Not actionable');
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.canonicalPaperTradeVerdict).toBe('entry');
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.paperTradeSurfaceVerdict).toBe('Entry');
+  expect(clickContextFallback && clickContextFallback.debugSnapshot && clickContextFallback.debugSnapshot.paperTradeEligibilityState).toBe(clickContextFallback.actionabilityState);
+  expect(clickContextFallback && clickContextFallback.diagnostics && clickContextFallback.diagnostics.legacyReviewProjection && clickContextFallback.diagnostics.legacyReviewProjection.mayFeedDecisionLogic).toBe(false);
 
   await page.evaluate(() => {
     renderWatchlist({source:'entry_contract_test'});

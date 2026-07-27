@@ -45812,9 +45812,106 @@ function setPaperTradeDebugSnapshotForTicker(ticker, snapshot = null){
   delete uiState.paperTradeDebugByTicker[symbol];
 }
 
+function canonicalPaperTradeContextFromPublication(record, publication = {}){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const failed = publication.publicationStatus === 'validation_failed';
+  const plan = failed ? null : publication.canonicalPlan;
+  const levels = plan && plan.levels || {};
+  const risk = plan && plan.risk || {};
+  const entry = levels.entry && levels.entry.value;
+  const stop = levels.stop && levels.stop.value;
+  const target = levels.firstTarget && levels.firstTarget.value;
+  const rr = plan && plan.rewardRisk && plan.rewardRisk.resolvedRr;
+  const currencies = [levels.entry, levels.stop, levels.firstTarget]
+    .map(level => String(level && level.currency || '').trim().toUpperCase())
+    .filter(Boolean);
+  const unitsConsistent = currencies.length <= 1 || currencies.every(value => value === currencies[0]);
+  const levelsPresent = [entry, stop, target].every(value => Number.isFinite(Number(value)));
+  const entryQualified = publication.entryEligibility && publication.entryEligibility.qualified === true;
+  const validPlan = String(publication.planStatus || publication.planState || '').trim().toLowerCase() === 'valid';
+  const eligible = !failed
+    && publication.actionable === true
+    && entryQualified
+    && validPlan
+    && levelsPresent
+    && unitsConsistent
+    && Number.isFinite(Number(risk.positionSize)) && Number(risk.positionSize) >= 1
+    && Number.isFinite(Number(risk.maximumLoss)) && Number(risk.maximumLoss) > 0;
+  const reason = failed
+    ? 'Canonical decision validation failed.'
+    : (!unitsConsistent ? 'Canonical plan currency/unit mismatch.'
+      : (!levelsPresent ? 'Canonical plan is missing required levels.'
+        : (String(publication.decisiveBlocker || publication.mainBlocker || 'Setup is not eligible for paper trading.'))));
+  const displayedPlan = {
+    status:failed ? 'unavailable' : String(publication.planStatus || publication.planState || 'unknown'),
+    entry:failed ? null : entry,
+    stop:failed ? null : stop,
+    target:failed ? null : target,
+    firstTarget:failed ? null : target,
+    tradeability:eligible ? 'tradable' : 'blocked',
+    rewardRisk:{rrRatio:failed ? null : rr, riskPerShare:failed ? null : risk.riskPerShare},
+    riskFit:{position_size:failed ? null : risk.positionSize, max_loss:failed ? null : risk.maximumLoss, risk_status:eligible ? 'fits_risk' : 'blocked'},
+    capitalFit:{capital_fit:eligible ? 'fits_capital' : 'unknown'},
+    quoteCurrency:currencies[0] || '',
+    provenance:plan && plan.provenance || null
+  };
+  const eligibility = {
+    eligible,
+    reasons:eligible ? [] : [reason],
+    preview:eligible ? {entry:Number(entry), stop:Number(stop), target:Number(target), positionSize:Math.floor(Number(risk.positionSize)), maxLoss:Number(risk.maximumLoss), rrRatio:Number.isFinite(Number(rr)) ? Number(rr) : null} : null
+  };
+  const verdict = normalizeGlobalVerdictKey(publication.canonicalVerdict || 'watch');
+  const actionabilityState = eligible ? 'ready_to_submit' : (failed ? 'validation_failed' : (verdict === 'entry' ? 'entry_blocked' : 'waiting_for_confirmation'));
+  const legacyProjection = item.review && item.review.savedProjectionSnapshot && typeof item.review.savedProjectionSnapshot === 'object'
+    ? item.review.savedProjectionSnapshot : null;
+  const persistedPresentation = item.watchlist && item.watchlist.presentation && typeof item.watchlist.presentation === 'object'
+    ? item.watchlist.presentation : null;
+  const lifecycleHistory = item.watchlist && item.watchlist.lifecycleHistory && typeof item.watchlist.lifecycleHistory === 'object'
+    ? item.watchlist.lifecycleHistory : null;
+  const diagnostics = {
+    currentCanonical:{verdict, actionable:failed ? false : publication.actionable === true, evidenceId:String(publication.evidenceId || ''), resultVersion:String(publication.canonicalResultVersion || '')},
+    legacyReviewProjection:{verdict:normalizeGlobalVerdictKey(legacyProjection && (legacyProjection.canonicalVerdict || legacyProjection.finalVerdict) || ''), diagnosticOnly:true, mayFeedDecisionLogic:false},
+    persistedPresentation:{verdict:normalizeGlobalVerdictKey(persistedPresentation && persistedPresentation.sharedPresentation && persistedPresentation.sharedPresentation.canonicalVerdict || ''), diagnosticOnly:true, mayFeedDecisionLogic:false},
+    lifecycleHistory:{state:String(lifecycleHistory && lifecycleHistory.state || item.watchlist && item.watchlist.status || ''), diagnosticOnly:true, mayFeedDecisionLogic:false},
+    disagreements:[]
+  };
+  [diagnostics.legacyReviewProjection.verdict, diagnostics.persistedPresentation.verdict].filter(Boolean).forEach((legacyVerdict) => {
+    if(legacyVerdict !== verdict) diagnostics.disagreements.push({field:'verdict', currentCanonical:verdict, legacyValue:legacyVerdict, diagnosticOnly:true, mayFeedDecisionLogic:false});
+  });
+  return {
+    ticker:item.ticker,
+    record:item,
+    publicationStatus:failed ? 'validation_failed' : String(publication.publicationStatus || 'valid'),
+    canonicalNormVersion:String(publication.canonicalNormVersion || ''),
+    canonicalResultVersion:String(publication.canonicalResultVersion || ''),
+    evidenceId:String(publication.evidenceId || ''),
+    canonicalVerdict:verdict,
+    finalVerdict:globalVerdictLabel(verdict),
+    actionable:failed ? false : publication.actionable === true,
+    displayedPlan,
+    eligibility,
+    paperTradeEnabled:eligible,
+    actionabilityState,
+    planAuthority:{verdict, actionable:eligible, reasonCode:eligible ? '' : (failed ? 'canonical_norm_validation_failed' : (verdict === 'entry' ? 'canonical_plan_not_actionable' : 'verdict_not_entry')), source:'canonical_publication'},
+    authoritativeReviewVerdict:verdict,
+    canonicalPaperTradeVerdict:verdict,
+    diagnostics,
+    planVerdictContract:{canonicalVerdict:verdict, evidenceId:String(publication.evidenceId || ''), canonicalResultVersion:String(publication.canonicalResultVersion || ''), compatibilityOnly:true},
+    debugSnapshot:{publicationStatus:failed ? 'validation_failed' : 'valid', canonicalVerdict:verdict, finalVerdict:globalVerdictLabel(verdict), authoritativeReviewVerdict:verdict, canonicalPaperTradeVerdict:verdict, paperTradeSurfaceVerdict:globalVerdictLabel(verdict), paperTradeEligibilityState:actionabilityState, planStatus:displayedPlan.status, entry:displayedPlan.entry, stop:displayedPlan.stop, target:displayedPlan.target, positionSize:displayedPlan.riskFit.position_size, maxLoss:displayedPlan.riskFit.max_loss, rrRatio:displayedPlan.rewardRisk.rrRatio, evidenceId:String(publication.evidenceId || ''), canonicalResultVersion:String(publication.canonicalResultVersion || ''), unitsConsistent, planAuthority:{verdict, actionable:eligible, source:'canonical_publication'}, diagnostics, invalidCandidateDiagnosticOnly:failed}
+  };
+}
+
 function currentPaperTradeContextForTicker(ticker){
   const symbol = normalizeTicker(ticker);
   if(!symbol) return null;
+  const publicationRecord = getTickerRecord(symbol) || upsertTickerRecord(symbol);
+  const publication = withReviewProjectionSuppressed(() => resolveSimplifiedStateForSurface(publicationRecord, 'paper_trade', {
+    log:false,
+    source:'paper_trade_publication_context',
+    reason:'paper_trade_publication_context'
+  }));
+  return canonicalPaperTradeContextFromPublication(publicationRecord, publication);
+  // Legacy path below is retained only as unreachable diagnostic reference.
   const previewUiState = paperTradeUiStateForTicker(symbol);
   const previewSnapshotApproved = previewUiState.previewOpen === true
     && previewUiState.snapshot
@@ -46233,6 +46330,10 @@ function buildPaperTradeConfirmedSnapshot(context = {}){
     size:Math.max(1, Math.floor(Number(previewModel.quantity || 0))),
     maxLoss:Number.isFinite(Number(previewModel.maxLoss)) ? Number(previewModel.maxLoss) : null,
     rr:Number.isFinite(Number(previewModel.rrRatio)) ? Number(previewModel.rrRatio) : null,
+    publicationStatus:String(context.publicationStatus || 'valid'),
+    canonicalResultVersion:String(context.canonicalResultVersion || ''),
+    evidenceId:String(context.evidenceId || ''),
+    canonicalPlanProvenance:context.displayedPlan && context.displayedPlan.provenance || null,
     marketStatus:String(previewModel.marketStatus || ''),
     sourceContext:context.eligibility && context.eligibility.debugForced === true ? 'debug_paper_trade' : 'trading212_paper_trade',
     debugForced:context.eligibility && context.eligibility.debugForced === true
@@ -46354,7 +46455,13 @@ async function submitPaperTradeFromReview(ticker){
   const frozenSnapshot = currentUiState.snapshot && typeof currentUiState.snapshot === 'object'
     ? currentUiState.snapshot
     : buildPaperTradeConfirmedSnapshot(context);
-  if(!context.eligibility.eligible && !(currentUiState.snapshot && typeof currentUiState.snapshot === 'object')){
+  const snapshotMatchesPublication = !!(
+    frozenSnapshot
+    && frozenSnapshot.publicationStatus === 'valid'
+    && String(frozenSnapshot.canonicalResultVersion || '') === String(context.canonicalResultVersion || '')
+    && String(frozenSnapshot.evidenceId || '') === String(context.evidenceId || '')
+  );
+  if(!context.eligibility.eligible || !context.paperTradeEnabled || !snapshotMatchesPublication){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
     setPaperTradeUiState(context.ticker, {state:'submit_error', previewOpen:false, snapshot:null, message:reason});
     renderReviewWorkspace();

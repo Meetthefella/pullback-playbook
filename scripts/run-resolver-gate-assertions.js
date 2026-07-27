@@ -12103,6 +12103,32 @@ function runScannerProjectionAuthorityAssertions(){
   }
 }
 
+function runPaperTradePublicationAuthorityAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const contextSource = extractFunctionSource(appSource, 'currentPaperTradeContextForTicker');
+  const liveContextSource = contextSource.split('// Legacy path below is retained only as unreachable diagnostic reference.')[0];
+  if(!/return canonicalPaperTradeContextFromPublication\(publicationRecord, publication\);/.test(liveContextSource)){
+    throw new Error('Paper Trade context must return only the publication-derived mapper result.');
+  }
+  ['refreshTrackedTickerState', 'deriveCurrentPlanState', 'resolveCanonicalTradePlanAuthority', 'applyReviewWatchlistSoftReadinessDisplayOverride', 'record.plan'].forEach((forbidden) => {
+    if(liveContextSource.includes(forbidden)) throw new Error(`Paper Trade live context must not invoke ${forbidden}.`);
+  });
+  const mapperSource = extractFunctionSource(appSource, 'canonicalPaperTradeContextFromPublication');
+  const decisionSource = mapperSource.split('const legacyProjection =')[0];
+  if(!/const plan = failed \? null : publication\.canonicalPlan;/.test(decisionSource)
+    || /record\.plan|effectivePlan|deriveCurrentPlanState|calculateRewardRisk|positionSizeFor/.test(decisionSource)){
+    throw new Error('Paper Trade decision fields must be sourced only from the canonical publication plan payload.');
+  }
+  if(!/diagnosticOnly:true, mayFeedDecisionLogic:false/.test(mapperSource)){
+    throw new Error('Paper Trade legacy projections must be explicitly diagnostic-only.');
+  }
+  const submitSource = extractFunctionSource(appSource, 'submitPaperTradeFromReview');
+  if(!/snapshotMatchesPublication/.test(submitSource)
+    || !/!context\.eligibility\.eligible \|\| !context\.paperTradeEnabled \|\| !snapshotMatchesPublication/.test(submitSource)){
+    throw new Error('Paper Trade submit must require a matching eligible canonical publication snapshot.');
+  }
+}
+
 async function runAllAssertions(){
   runTrackPresentationAuthorityAssertions();
   runScannerPolicyCompatibilityAssertions();
@@ -12120,6 +12146,7 @@ async function runAllAssertions(){
   runScannerProjectionAuthorityAssertions();
   runTesterProfileResetAssertions();
   runCanonicalDecisionInvariantAssertions();
+  runPaperTradePublicationAuthorityAssertions();
   await runTrackedStateTesterIsolationAssertions();
   await runTesterReportAssertions();
 
@@ -12142,6 +12169,7 @@ async function runAllAssertions(){
   console.log('Scanner projection authority assertions passed.');
   console.log('Tester profile reset assertions passed.');
   console.log('Canonical decision invariant assertions passed.');
+  console.log('Paper Trade publication-authority assertions passed.');
   console.log('Tracked-state tester isolation assertions passed.');
   console.log('Tester report assertions passed.');
 }

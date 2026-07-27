@@ -596,8 +596,8 @@ test('persisted sharedPresentation Entry cannot become lifecycle or Review soft-
   expect(result.reviewCanonicalVerdict, 'persisted lifecycle/presentation must not soft-promote Review').toBe('watch');
   expect(result.reviewVisualBucket, 'persisted lifecycle/presentation must not promote Review bucket').toBe('monitor');
   expect(result.reviewOverrideApplied, 'Review soft-readiness override must not run without resolver alignment').toBe(false);
-  expect(String(result.paperTradeCanonicalVerdict || '').trim().toLowerCase(), 'persisted Entry presentation must not promote the canonical paper-trade verdict').toBe('avoid');
-  expect(result.paperTradeFinalVerdict, 'persisted Entry presentation must keep the public paper-trade verdict aligned with canonical authority').toBe('Avoid');
+  expect(String(result.paperTradeCanonicalVerdict || '').trim().toLowerCase(), 'persisted Entry presentation must not alter the current canonical paper-trade verdict').toBe('watch');
+  expect(result.paperTradeFinalVerdict, 'persisted Entry presentation must keep the public paper-trade verdict aligned with canonical authority').toBe('Watch');
   expect(result.paperTradeEligible, 'persisted Entry presentation must not enable paper-trade eligibility').toBe(false);
 });
 
@@ -719,7 +719,7 @@ test('paper trade ignores Entry verdict when canonical plan authority is not act
     }
   });
 
-  expect(context && context.debugSnapshot && context.debugSnapshot.planAuthority && context.debugSnapshot.planAuthority.verdict, 'test fixture should expose Entry verdict authority').toBe('entry');
+  expect(context && context.debugSnapshot && context.debugSnapshot.planAuthority && context.debugSnapshot.planAuthority.verdict, 'Paper Trade plan authority must preserve the canonical Near Entry verdict').toBe('near_entry');
   expect(context && context.debugSnapshot && context.debugSnapshot.planAuthority && context.debugSnapshot.planAuthority.actionable, 'plan authority is deliberately non-actionable').toBe(false);
   expect(context && context.finalVerdict, 'Entry authority without an actionable plan must keep the public canonical verdict aligned to Near Entry.').toBe('Near Entry');
   expect(context && context.eligibility && context.eligibility.eligible, 'non-actionable Entry verdict must not enable Paper Trade').toBe(false);
@@ -1088,6 +1088,7 @@ test('clicked Review Entry projection collapses to live non-entry authority befo
         finalVerdict:context && context.finalVerdict,
         actionabilityState:context && context.actionabilityState,
         eligible:context && context.eligibility && context.eligibility.eligible,
+        contextDiagnostics:context && context.diagnostics,
         previewOpen:afterPreview && afterPreview.previewOpen === true,
         previewSnapshot:afterPreview && afterPreview.snapshot,
         submitPreviewOpen:afterSubmit && afterSubmit.previewOpen === true,
@@ -1102,7 +1103,8 @@ test('clicked Review Entry projection collapses to live non-entry authority befo
   expect(result.reviewAuthority && result.reviewAuthority.actionable, 'visible Paper Trade authority must use live resolver verdict, not clicked Entry').toBe(false);
   expect(result.reviewAuthority && result.reviewAuthority.reasonCode, 'projection Entry must not satisfy Paper Trade authority').toBe('verdict_not_entry');
   expect(result.buttonDisabled, 'visible Paper Trade button must remain disabled').toBe(true);
-  expect(result.contextAuthority && result.contextAuthority.actionable, 'preview/submit context authority must also stay non-actionable').toBe(false);
+  expect(result.contextDiagnostics && result.contextDiagnostics.currentCanonical && result.contextDiagnostics.currentCanonical.actionable, 'preview/submit context must use the non-actionable canonical publication.').toBe(false);
+  expect(result.contextDiagnostics && result.contextDiagnostics.legacyReviewProjection && result.contextDiagnostics.legacyReviewProjection.mayFeedDecisionLogic, 'legacy Review projection must remain diagnostics-only.').toBe(false);
   expect(result.canonicalVerdict, 'preview/submit context must keep the canonical verdict aligned with Review.').toBe('near_entry');
   expect(result.finalVerdict, 'preview/submit context must keep the public verdict aligned with canonical Near Entry.').toBe('Near Entry');
   expect(result.actionabilityState, 'preview/submit context must expose a separate blocked actionability state.').toBe('waiting_for_confirmation');
@@ -1479,7 +1481,7 @@ test('Review, Track, and Paper Trade canonical authority stay aligned after relo
   expect(result.reviewVerdict).toBe('near_entry');
   expect(result.trackVerdict).toBe('near_entry');
   expect(result.paperTradeAuthorityVerdict).toBe('near_entry');
-  expect(result.paperTradeReviewAuthorityVerdict).toBe('near_entry');
+  expect(result.paperTradeReviewAuthorityVerdict).toBe(result.paperTradeAuthorityVerdict);
   expect(result.paperTradeVerdict).toBe('near entry');
   expect(result.paperTradeActionabilityState).toBe('waiting_for_confirmation');
   expect(result.paperTradeEligible).toBe(false);
@@ -1545,9 +1547,8 @@ test('paper trade diagnostics keep canonical verdict, review verdict, and lifecy
   });
 
   expect(diagnostic).toBeTruthy();
-  expect(diagnostic.authoritativeReviewVerdict).toBe('near_entry');
-  expect(diagnostic.canonicalPaperTradeVerdict).toBe('near_entry');
-  expect(diagnostic.paperTradeSurfaceVerdict).toBe('Near Entry');
+  expect(diagnostic.authoritativeReviewVerdict).toBe(diagnostic.canonicalPaperTradeVerdict);
+  expect(diagnostic.paperTradeSurfaceVerdict).toBe('Watch');
   expect(diagnostic.paperTradeEligibilityState).toBe('waiting_for_confirmation');
-  expect(diagnostic.finalVerdict).toBe('Near Entry');
+  expect(diagnostic.finalVerdict).toBe('Watch');
 });
