@@ -11407,13 +11407,7 @@ function rankedTickerRecords(){
   return allTickerRecords()
     .filter(record => sessionTickers.has(normalizeTickerRecord(record).ticker))
     .filter(record => record.scan && (record.scan.lastScannedAt || record.scan.verdict || Number.isFinite(record.scan.score)))
-    .sort((a, b) =>
-      statusRankFromRecord(a) - statusRankFromRecord(b)
-      || setupScoreForRecord(b) - setupScoreForRecord(a)
-      || (numericOrNull(recordRrValue(b)) || -999) - (numericOrNull(recordRrValue(a)) || -999)
-      || ((a.setup && a.setup.marketCaution) ? 1 : 0) - ((b.setup && b.setup.marketCaution) ? 1 : 0)
-      || a.ticker.localeCompare(b.ticker)
-    );
+    .sort((a, b) => rankTickerForFocus(b) - rankTickerForFocus(a) || a.ticker.localeCompare(b.ticker));
 }
 
 function openCardTickerRecords(){
@@ -18854,8 +18848,136 @@ function getFinalClassification(view){
   return getFinalClassificationImpl(view, scannerViewBridgeDeps());
 }
 
+function canonicalScanPresentationFromPublication(publication = {}){
+  const failed = publication.publicationStatus === 'validation_failed';
+  const verdict = normalizeGlobalVerdictKey(publication.canonicalVerdict || (failed && publication.safeFallback && publication.safeFallback.verdict) || 'watch');
+  const plan = failed ? null : publication.canonicalPlan;
+  const planVisible = !failed && !!(plan && plan.visibility && plan.visibility.mayShowPlan);
+  const bucket = failed ? 'monitor' : normalizeVisualBucketForPairing(publication.visualBucket || (verdict === 'watch' ? 'monitor' : verdict), verdict);
+  const section = failed ? 'monitor_watch' : (verdict === 'entry' ? 'tradeable_entry' : (verdict === 'near_entry' ? 'near_entry' : (verdict === 'avoid' ? 'avoid' : 'monitor_watch')));
+  const sortPriority = failed ? 90 : ({entry:10, near_entry:20, watch:30, avoid:50}[verdict] || 90);
+  const blocker = String(publication.decisiveBlocker || publication.mainBlocker || '').trim();
+  return {
+    canonicalVerdict:verdict,
+    publicationStatus:failed ? 'validation_failed' : String(publication.publicationStatus || 'valid'),
+    canonicalNormVersion:String(publication.canonicalNormVersion || ''),
+    canonicalResultVersion:String(publication.canonicalResultVersion || ''),
+    evidenceId:String(publication.evidenceId || ''),
+    actionable:failed ? false : publication.actionable === true,
+    entryEligibility:failed ? null : publication.entryEligibility,
+    nearEntryEligibility:failed ? null : publication.nearEntryEligibility,
+    decisiveBlockerCode:failed ? 'canonical_norm_validation_failed' : String(publication.decisiveBlockerCode || ''),
+    decisiveBlockerCategory:failed ? 'validation' : String(publication.decisiveBlockerCategory || ''),
+    visualBucket:bucket,
+    presentationBucket:bucket,
+    tone:bucket,
+    scanSection:section,
+    sortPriority,
+    badgeLabel:failed ? 'Decision unavailable' : globalVerdictLabel(verdict),
+    summary:failed ? 'Current decision unavailable; setup remains non-actionable.' : (blocker || String(publication.actionLabel || 'Review canonical requirements.').trim()),
+    planState:failed ? 'unavailable' : String(publication.planState || publication.planStatus || 'unknown'),
+    planStatus:failed ? 'unavailable' : String(publication.planStatus || publication.planState || 'unknown'),
+    canonicalPlan:plan,
+    planVisible,
+    resolvedRR:failed ? null : (plan && plan.rewardRisk && plan.rewardRisk.resolvedRr),
+    diagnostics:{
+      source:'canonical_publication',
+      compatibilityOnly:true,
+      mayFeedDecisionLogic:false,
+      sourceCanonicalFields:['verdict','eligibility','semantics','plan','snapshot.evidenceId']
+    }
+  };
+}
+
+function canonicalScanViewFromPublication(record, publication = {}){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const presentation = canonicalScanPresentationFromPublication(publication);
+  const plan = presentation.canonicalPlan;
+  const entry = plan && plan.levels && plan.levels.entry && plan.levels.entry.value;
+  const stop = plan && plan.levels && plan.levels.stop && plan.levels.stop.value;
+  const target = plan && plan.levels && plan.levels.firstTarget && plan.levels.firstTarget.value;
+  const rr = plan && plan.rewardRisk && plan.rewardRisk.resolvedRr;
+  const risk = plan && plan.risk || {};
+  const setupScore = Number.isFinite(Number(item.setup && item.setup.score)) ? Number(item.setup.score) : 0;
+  const verdict = presentation.canonicalVerdict;
+  const setupState = verdict === 'entry' ? 'entry' : (verdict === 'near_entry' ? 'watch' : (verdict === 'avoid' ? 'broken' : 'watch'));
+  const planState = presentation.planStatus;
+  const displayedPlan = {
+    status:planState,
+    entry, stop, target, firstTarget:target,
+    tradeability:presentation.actionable ? 'actionable' : 'blocked',
+    rewardRisk:{rrRatio:rr, riskPerShare:risk.riskPerShare},
+    riskFit:{position_size:risk.positionSize, max_loss:risk.maximumLoss},
+    capitalFit:{capital_fit:risk.exposureCap != null ? 'known' : 'unknown'},
+    affordability:'',
+    quoteCurrency:plan && plan.levels && plan.levels.entry && plan.levels.entry.currency || ''
+  };
+  return {
+    item,
+    ticker:item.ticker,
+    companyName:item.meta && item.meta.companyName || '',
+    simplifiedState:publication,
+    publicationStatus:presentation.publicationStatus,
+    canonicalNormVersion:presentation.canonicalNormVersion,
+    canonicalResultVersion:presentation.canonicalResultVersion,
+    evidenceId:presentation.evidenceId,
+    canonicalVerdict:verdict,
+    finalVerdict:globalVerdictLabel(verdict),
+    displayStage:globalVerdictLabel(verdict),
+    actionable:presentation.actionable,
+    entryEligibility:presentation.entryEligibility,
+    nearEntryEligibility:presentation.nearEntryEligibility,
+    decisiveBlockerCode:presentation.decisiveBlockerCode,
+    decisiveBlockerCategory:presentation.decisiveBlockerCategory,
+    setupStates:{structureState:publication.structureState,supportState:publication.supportState,pullbackState:publication.pullbackState,buyerResponseState:publication.buyerResponseState,buyerControlState:publication.buyerControlState,followThroughState:publication.followThroughState,marketState:publication.marketState,volumeState:publication.volumeState},
+    setupUiState:{state:setupState,label:globalVerdictLabel(verdict),className:simplifiedVisualBadgeClass(presentation.visualBucket)},
+    planUiState:{state:planState,label:planState,className:'badge--monitor'},
+    displayedPlan,
+    effectivePlan:{entry, stop, firstTarget:target},
+    rrValue:rr,
+    actionableRrValue:presentation.actionable ? rr : null,
+    positionSize:risk.positionSize,
+    affordability:'',
+    capitalFit:risk.exposureCap != null ? 'known' : 'unknown',
+    setupScore,
+    score:setupScore,
+    setupScoreDisplay:`Setup ${setupScore}/10`,
+    scoreLabel:`Setup ${setupScore}/10`,
+    bucket:presentation.visualBucket,
+    finalClassification:verdict === 'avoid' ? 'filtered' : (verdict === 'entry' || verdict === 'near_entry' ? 'tradeable' : 'early'),
+    globalVerdict:{
+      finalVerdict:verdict,
+      final_verdict:verdict,
+      decision_summary:presentation.summary,
+      publicationStatus:presentation.publicationStatus,
+      evidenceId:presentation.evidenceId
+    },
+    scanPresentation:presentation,
+    actionLabel:presentation.summary,
+    mainBlocker:String(publication.decisiveBlocker || publication.mainBlocker || ''),
+    canOpenReview:true,
+    canAddToWatchlist:true,
+    rawEvidence:{
+      price:item.marketData && item.marketData.price,
+      ma20:item.marketData && item.marketData.ma20,
+      ma50:item.marketData && item.marketData.ma50,
+      volume:item.marketData && item.marketData.volume,
+      source:'scan_raw_evidence_only',
+      mayFeedDecisionLogic:false
+    }
+  };
+}
+
 function buildFinalSetupView(record, options = {}){
-  return buildFinalSetupViewImpl(record, options, scannerViewBridgeDeps());
+  // Consumer 5 publication boundary. Raw scanner evidence remains on `item`,
+  // but no scanner helper may classify the current setup after this point.
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const simplifiedState = resolveSimplifiedStateForSurface(item, 'scan', {
+    log:false,
+    source:'scan_publication_view',
+    reason:'scan_publication_view'
+  });
+  return canonicalScanViewFromPublication(item, simplifiedState);
 }
 
 function classifyRankedRecord(record){
@@ -18883,7 +19005,11 @@ function rankedVisibleSectionForView(view){
 }
 
 function scanPresentationForView(view){
-  return scanPresentationForViewImpl(view, scannerViewBridgeDeps());
+  const item = view && view.item ? view.item : view || {};
+  const simplifiedState = view && view.simplifiedState && typeof view.simplifiedState === 'object'
+    ? view.simplifiedState
+    : resolveSimplifiedStateForSurface(item, 'scan', {log:false, source:'scan_publication_presentation'});
+  return canonicalScanPresentationFromPublication(simplifiedState);
 }
 
 function resultReasonForRecord(record){
@@ -34802,33 +34928,15 @@ function scanCardStatusPills(view, maxPills = 3){
 }
 
 function rankTickerForFocus(record){
-  const item = normalizeTickerRecord(record);
-  const view = projectTickerForCard(item);
-  const setupState = view.setupUiState.state;
-  const targetReviewLabel = view.planUiState.state === 'valid' ? targetReviewQueueLabel(item.plan.targetReviewState) : '';
-  if(setupState === 'broken' || item.lifecycle.stage === 'expired') return -9999;
-  let score = 0;
-  if(targetReviewLabel === 'At Target' || targetReviewLabel === 'Review Target') score += 1000;
-  else if(targetReviewLabel === 'Near Target') score += 900;
-  if(setupState === 'entry') score += 400;
-  else if(view.displayStage === 'Near Entry' || setupState === 'watch') score += 280;
-  else if(setupState === 'developing') score += 180;
-  score += (view.setupScore || 0) * 10;
-  if(view.convictionTier === 'Premium') score += 30;
-  else if(view.convictionTier === 'Good') score += 20;
-  else if(view.convictionTier === 'Cautious') score += 10;
-  if(view.warningState && view.warningState.showWarning) score -= 10;
-  if(view.planUiState.state === 'valid') score += 8;
-  else if(view.planUiState.state === 'unrealistic_rr') score -= 20;
-  if(item.plan.planValidationState === 'stale' || item.plan.triggerState === 'stale') score -= 80;
-  if(Number.isFinite(view.rrValue)) score += Math.min(view.rrValue, 5);
-  if(item.setup.marketCaution) score -= 5;
-  if(item.setup.practicalSizeFlag === 'tiny_size') score -= 8;
-  else if(item.setup.practicalSizeFlag === 'low_impact') score -= 4;
-  if(view.affordability === 'not_affordable') score -= 4;
-  else if(view.affordability === 'heavy_capital' || view.displayedPlan.tradeability === 'capital_heavy') score -= 2;
-  if(item.scan.lastScannedAt && !isFreshScanTimestamp(item.scan.lastScannedAt)) score -= 6;
-  return score;
+  const view = buildFinalSetupView(record);
+  const presentation = view.scanPresentation;
+  if(presentation.publicationStatus === 'validation_failed') return -100000;
+  const classScore = ({entry:400, near_entry:300, watch:200, avoid:0}[presentation.canonicalVerdict] || 0);
+  // Within-class ordering only: raw score and published RR never alter the
+  // canonical section, verdict, eligibility, or actionability.
+  const factualScore = Number.isFinite(Number(view.setupScore)) ? Number(view.setupScore) : 0;
+  const rrScore = Number.isFinite(Number(presentation.resolvedRR)) ? Math.min(Number(presentation.resolvedRR), 5) : 0;
+  return classScore + factualScore + rrScore;
 }
 
 function renderPlanProjectionFromRecord(record, options = {}){

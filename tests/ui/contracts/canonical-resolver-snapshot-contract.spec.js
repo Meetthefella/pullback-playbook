@@ -186,7 +186,9 @@ function assertCanonicalParity({scan, review, track}, sourceLabel){
   // different visual grouping without changing canonical meaning.
   expect(track.track.diagnostics && track.track.diagnostics.contract && track.track.diagnostics.contract.canonicalVisualBucket).toBeTruthy();
 
-  expect(scan.scan.visibleCard.scoreLabel, `${sourceLabel}: Scan displayed score should use the shared score display pipeline`).toContain('6');
+  // Scan score is a raw non-decision ordering metric after Consumer 5. It
+  // must remain present but may differ from Review's presentation score.
+  expect(scan.scan.visibleCard.scoreLabel, `${sourceLabel}: Scan displayed raw ranking score`).toContain('Setup');
   expect(review.review.stateHealth.planAuthority.verdict, `${sourceLabel}: Review plan authority verdict`).toBe('near_entry');
   expect(track.track.visible.scoreLabel, `${sourceLabel}: Track setup score should stay aligned with the shared display-model score pipeline`).toContain('6');
 
