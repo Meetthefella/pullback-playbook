@@ -23,6 +23,12 @@ const cases = [
     groups:['all', 'resolver', 'pure']
   },
   {
+    id:'canonical-norm',
+    label:'Canonical Norm assertions',
+    script:'scripts/run-canonical-norm-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
     id:'normalization-read-write',
     label:'Normalization read/write assertions',
     script:'scripts/run-normalization-read-write-assertions.js',

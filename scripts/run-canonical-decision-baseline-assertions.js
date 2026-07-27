@@ -13,7 +13,7 @@ function load(relativePath, sandbox){
 function createSandbox(){
   const sandbox = {window:{}, console};
   sandbox.globalThis = sandbox.window;
-  ['js/resolver-core.js', 'js/domain/paper-trade-eligibility.js', 'js/chart-guru-phase-policy.js', 'js/domain/canonical-decision-observability.js']
+  ['js/domain/canonical-resolver-input.js', 'js/domain/canonical-decision-result.js', 'js/resolver-core.js', 'js/domain/paper-trade-eligibility.js', 'js/chart-guru-phase-policy.js', 'js/domain/canonical-decision-observability.js']
     .forEach(relativePath => load(relativePath, sandbox));
   return sandbox.window;
 }
@@ -89,6 +89,7 @@ function run(){
 
   assert.strictEqual(results.length, 6, 'baseline must cover the five named tickers plus broken structure');
   assert.strictEqual(results.find(result => result.id === 'broken_structure').verdict, 'avoid', 'broken structure must remain Avoid');
+  assert.strictEqual(results.find(result => result.id === 'hwm_confirmed_control').verdict, 'watch', 'HWM-like Entry proposal must not bypass failed Entry prerequisites');
   assert.strictEqual(results.find(result => result.id === 'amzn_emerging_buyer_control').gates.entry, false, 'emerging buyer control must block Entry');
   assert.strictEqual(results.find(result => result.id === 'unp_unpriceable_plan').paperTradeEligible, false, 'unpriceable plan must block paper trading');
   assert.strictEqual(results.find(result => result.id === 'cat_accepted_50ma_support').chartGuru.phase, 'at_support', 'accepted 50MA support must retain at-support phase');

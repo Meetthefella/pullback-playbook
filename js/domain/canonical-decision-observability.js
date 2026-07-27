@@ -62,6 +62,11 @@
         disagreement,
         fallbackUsed
       }),
+      publication:Object.freeze({
+        status:text(decision.publicationStatus, 'legacy compatibility'),
+        normVersion:text(decision.canonicalDecisionResult && decision.canonicalDecisionResult.normVersion || decision.canonicalPublication && decision.canonicalPublication.validation && decision.canonicalPublication.validation.normVersion),
+        violationCodes:Object.freeze((decision.canonicalPublication && decision.canonicalPublication.validation && decision.canonicalPublication.validation.violations || []).map(item => item.code))
+      }),
       surfaces:Object.freeze({
         scan:key(surfaces.scan && surfaces.scan.verdict || canonicalVerdict, canonicalVerdict),
         review:key(surfaces.review && surfaces.review.verdict || canonicalVerdict, canonicalVerdict),
@@ -76,11 +81,13 @@
     const gates = item.gates || {};
     const authority = item.authority || {};
     const surfaces = item.surfaces || {};
+    const publication = item.publication || {};
     return [
       {label:'Canonical decision', value:`${text(item.canonicalVerdict, 'watch')} / ${text(item.visualBucket, 'watch')}`},
       {label:'Decisive blocker', value:text(item.decisiveBlocker, '(none)')},
       {label:'Promotion gates', value:`Entry ${gates.entry === true ? 'pass' : 'block'}; Near Entry ${gates.nearEntry === true ? 'pass' : 'block'}`},
       {label:'Authority', value:`${text(authority.selected, 'legacy_resolver')}${authority.disagreement ? ' (legacy disagreement)' : ''}${authority.fallbackUsed ? ' (fallback)' : ''}`},
+      {label:'Publication', value:text(publication.status, 'legacy compatibility')},
       {label:'Surface parity', value:`Scan ${text(surfaces.scan, 'watch')} / Review ${text(surfaces.review, 'watch')} / Track ${text(surfaces.track, 'watch')}`}
     ];
   }

@@ -708,11 +708,11 @@ test('canonical Watch stays non-actionable and may still require confirmation', 
   await expect(trackCard).not.toContainText('Entry Ready');
 });
 
-test('canonical Near Entry stays distinct from Entry', async ({page}) => {
+test('stale Near Entry presentation cannot publish an unqualified Near Entry decision', async ({page}) => {
   await bootApp(page);
   await seedScenario(page, nearEntryScenario());
 
-  await expect(page.locator('#reviewWorkspace .review-summary-badges .badge')).toContainText('Near Entry');
+  await expect(page.locator('#reviewWorkspace .review-summary-badges .badge')).toContainText('Watch');
   await expect(page.locator('#tradeStatusBox')).not.toContainText('Entry Ready');
   await expect(page.locator('#paperTradeBtn')).toBeDisabled();
 
@@ -720,7 +720,7 @@ test('canonical Near Entry stays distinct from Entry', async ({page}) => {
   await waitForUiTransitionSettle(page);
 
   const trackCard = page.locator('[data-watchlist-ticker="NEAR"]').first();
-  await expect(trackCard.locator('.badge.state-pill').first()).toContainText('Near Entry');
+  await expect(trackCard.locator('.badge.state-pill').first()).toContainText('Watch');
   await expect(trackCard).not.toContainText('Entry Ready');
   await expect(trackCard).toContainText(/confirmation|Wait for stronger confirmation/i);
 
@@ -2421,7 +2421,7 @@ test('read-only getter, Review, Track, and diagnostics paths do not stamp or rew
   expect(Object.prototype.hasOwnProperty.call(result.afterRecord.setup || {}, 'score'), 'read paths must not create setup.score').toBe(false);
 });
 
-test('debug card text cannot promote the Track long-press panel to Entry', async ({page}) => {
+test('debug card text cannot promote an unqualified stale Near Entry panel', async ({page}) => {
   await bootApp(page);
   const scenario = nearEntryScenario();
   scenario.companyName = 'Entry Ready Debug Text Inc.';
@@ -2436,7 +2436,7 @@ test('debug card text cannot promote the Track long-press panel to Entry', async
   });
 
   expect(entryPanelText).not.toContain('Status: Entry Ready');
-  expect(entryPanelText).toContain('Status: Near Entry');
+  expect(entryPanelText).toContain('Status: Developing Watch');
 });
 
 test('Track long-press ignores Entry label text without canonical Entry authority', async ({page}) => {

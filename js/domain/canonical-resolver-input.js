@@ -56,6 +56,23 @@
     }
   }
 
+  function stableHash(value){
+    const input = stableStringify(value);
+    let hash = 2166136261;
+    for(let index = 0; index < input.length; index += 1){
+      hash ^= input.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return `nde-${(hash >>> 0).toString(16)}`;
+  }
+
+  function evidenceValue(value){
+    if(value === undefined) return {state:'absent', value:null};
+    if(value === null || value === '') return {state:'unknown', value:null};
+    if(value === false) return {state:'false', value:false};
+    return {state:'present', value};
+  }
+
   function hasText(value){
     return String(value || '').trim() !== '';
   }
@@ -460,9 +477,45 @@
     };
   }
 
+  function normaliseDecisionEvidence(record, options = {}){
+    const canonicalInput = buildCanonicalResolverInput(record, options);
+    const market = canonicalInput.canonical.market;
+    const plan = canonicalInput.canonical.plan;
+    const scanner = canonicalInput.canonical.scanner;
+    const values = {
+      ticker:evidenceValue(canonicalInput.ticker),
+      price:evidenceValue(market.price),
+      sma20:evidenceValue(market.sma20),
+      sma50:evidenceValue(market.sma50),
+      sma200:evidenceValue(market.sma200),
+      volume:evidenceValue(market.volume),
+      entry:evidenceValue(plan.numericFields.entry),
+      stop:evidenceValue(plan.numericFields.stop),
+      firstTarget:evidenceValue(plan.numericFields.firstTarget),
+      scannerProjection:evidenceValue(scanner.analysisProjection),
+      scannerVerdict:evidenceValue(scanner.resolvedVerdict)
+    };
+    const source = {
+      schemaVersion:'normalised-decision-evidence-v1',
+      source:'canonical-resolver-input',
+      surface:canonicalInput.surface,
+      ticker:canonicalInput.ticker,
+      values,
+      provenance:{
+        planAuthority:canonicalInput.diagnostics.selectedPlanAuthorityCandidate,
+        derivedStateAuthority:canonicalInput.diagnostics.selectedDerivedStateAuthorityCandidate,
+        legacyStructuredAuthorityValues:canonicalInput.diagnostics.legacyStructuredAuthorityValues,
+        conflicts:canonicalInput.diagnostics.presentationFeedbackRisks,
+        fallback:false
+      }
+    };
+    return Object.freeze({...source, snapshotId:stableHash(source)});
+  }
+
   global.CanonicalResolverInput = {
     buildCanonicalResolverInput,
     buildLegacyResolverInputSnapshot,
-    buildCanonicalResolverInputComparison
+    buildCanonicalResolverInputComparison,
+    normaliseDecisionEvidence
   };
 })(window);

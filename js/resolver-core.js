@@ -2228,6 +2228,15 @@
       avoid:'drop',
       dead:'drop'
     };
+    // Promotion contracts can propose an Entry/Near Entry state, but they are
+    // never allowed to bypass the gates that establish eligibility. This keeps
+    // the decision direction one-way: semantics -> gates -> eligibility -> verdict.
+    if(normalizeVerdict(finalVerdict) === 'entry' && guardedVerdict.entry_gate_pass !== true){
+      finalVerdict = guardedVerdict.near_entry_gate_pass === true ? 'near_entry' : 'watch';
+      reason = (guardedVerdict.entry_gate_reasons && guardedVerdict.entry_gate_reasons[0])
+        || (guardedVerdict.near_entry_gate_reasons && guardedVerdict.near_entry_gate_reasons[0])
+        || 'Entry prerequisites are not satisfied.';
+    }
     const canonicalFinalVerdict = normalizeVerdict(finalVerdict);
     const tone = getTone(canonicalFinalVerdict);
     const badge = getBadge(canonicalFinalVerdict);
@@ -2391,7 +2400,7 @@
     const canonicalDecisiveBlocker = canonicalFinalVerdict === 'entry'
       ? ''
       : (reason || trackedReason || viability.mainBlocker || '');
-    return {
+    const rawResult = {
       base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
       final_verdict:canonicalFinalVerdict,
@@ -2614,6 +2623,25 @@
       })[canonicalFinalVerdict] || 'watch_state',
       resolved
     };
+    const normalizedEvidence = global.CanonicalResolverInput
+      && typeof global.CanonicalResolverInput.normaliseDecisionEvidence === 'function'
+      ? global.CanonicalResolverInput.normaliseDecisionEvidence(item, {surface:'resolver-core'})
+      : {schemaVersion:'normalised-decision-evidence-v1', snapshotId:'unavailable', source:'resolver-core-fallback'};
+    if(global.CanonicalDecisionResult && typeof global.CanonicalDecisionResult.publishCanonicalDecision === 'function'){
+      const publication = global.CanonicalDecisionResult.publishCanonicalDecision(rawResult, normalizedEvidence, {
+        enforce:deps.enforceCanonicalNorm === true
+      });
+      if(publication.publicationStatus === 'validation_failed' && typeof console !== 'undefined' && console.error){
+        console.error('[CANONICAL_NORM_VALIDATION_FAILED]', {
+          ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
+          normVersion:publication.validation && publication.validation.normVersion,
+          violations:publication.validation && publication.validation.violations,
+          resolverSource:'resolver-core'
+        });
+      }
+      return global.CanonicalDecisionResult.compatibilityProjection(rawResult, publication);
+    }
+    return rawResult;
   }
 
   function runTradeReadinessGateAssertions(){
