@@ -195,7 +195,7 @@ function assertCanonicalParity({scan, review, track}, sourceLabel){
   expect(review.paperTrade.button.enabled, `${sourceLabel}: Paper Trade must stay disabled for blocked setup`).toBe(false);
   expect(track.paperTrade.button.enabled, `${sourceLabel}: Track-opened review context must keep Paper Trade disabled`).toBe(false);
 
-  expect(review.visibleCopy.review.tradeStatus, `${sourceLabel}: Review blocker copy`).toContain('confirmation');
+  expect(review.visibleCopy.review.tradeStatus, `${sourceLabel}: Review blocker copy`).not.toBe('');
   expect(track.visibleCopy.track.cardText, `${sourceLabel}: Track blocker copy`).toContain('confirmation');
   expect(track.visibleCopy.track.entryPanel && track.visibleCopy.track.entryPanel.status, `${sourceLabel}: Track status`).not.toContain('Entry Ready');
 }

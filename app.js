@@ -33367,6 +33367,74 @@ function resolveCanonicalVisibleVerdictKey(record, options = {}){
 
 function buildCanonicalReviewPresentationModel(record, options = {}){
   const item = normalizeTickerRecordReadOnly(record || {});
+  // Consumer 3 publication boundary. Review presentation is a pure adapter;
+  // the former resolver/plan/projection path below is retained temporarily as
+  // unreachable observer code for migration diagnostics only.
+  const publicationSource = resolveGlobalVerdict(item);
+  const publication = publicationSource && publicationSource.canonicalPublication;
+  const simplifiedPublication = resolveSimplifiedStateForSurface(item, 'review', {log:false});
+  const failedPublication = simplifiedPublication.publicationStatus === 'validation_failed';
+  const reviewPublicationPlan = failedPublication ? null : simplifiedPublication.canonicalPlan;
+  const publicationVerdictKey = normalizeGlobalVerdictKey(simplifiedPublication.canonicalVerdict || 'watch');
+  const publicationVisualBucket = normalizeVisualBucketForPairing(simplifiedPublication.visualBucket || (publicationVerdictKey === 'watch' ? 'monitor' : publicationVerdictKey));
+  const blocker = String(simplifiedPublication.decisiveBlocker || simplifiedPublication.mainBlocker || '').trim();
+  const planVisibility = reviewPublicationPlan && reviewPublicationPlan.visibility || {};
+  const technicalContextLine = failedPublication
+    ? 'Canonical decision validation failed.'
+    : `Structure ${String(simplifiedPublication.structureState || 'unknown')} | Support ${String(simplifiedPublication.supportState || 'unknown')} | Buyer control ${String(simplifiedPublication.buyerControlState || 'unknown')}`;
+  return {
+    ticker:normalizeTicker(item.ticker || ''),
+    publicationStatus:simplifiedPublication.publicationStatus,
+    canonicalNormVersion:simplifiedPublication.canonicalNormVersion,
+    canonicalResultVersion:simplifiedPublication.canonicalResultVersion,
+    evidenceId:simplifiedPublication.evidenceId,
+    canonicalVerdict:publicationVerdictKey,
+    verdictKey:publicationVerdictKey,
+    actionable:failedPublication ? false : simplifiedPublication.actionable === true,
+    entryEligibility:failedPublication ? null : simplifiedPublication.entryEligibility,
+    nearEntryEligibility:failedPublication ? null : simplifiedPublication.nearEntryEligibility,
+    structureState:simplifiedPublication.structureState,
+    supportState:simplifiedPublication.supportState,
+    pullbackState:simplifiedPublication.pullbackState,
+    buyerResponseState:simplifiedPublication.buyerResponseState,
+    buyerControlState:simplifiedPublication.buyerControlState,
+    followThroughState:simplifiedPublication.followThroughState,
+    marketState:simplifiedPublication.marketState,
+    volumeState:simplifiedPublication.volumeState,
+    planState:simplifiedPublication.planState,
+    canonicalPlan:reviewPublicationPlan,
+    decisiveBlocker:blocker,
+    decisiveBlockerCode:simplifiedPublication.decisiveBlockerCode,
+    decisiveBlockerCategory:simplifiedPublication.decisiveBlockerCategory,
+    visualBucket:publicationVisualBucket,
+    tone:String(simplifiedPublication.tone || publicationVisualBucket),
+    badgeClass:reviewBadgeClassForBucket(publicationVisualBucket),
+    badgeLabel:simplifiedPublication.badgeLabel || globalVerdictLabel(publicationVerdictKey),
+    nextActionLabel:simplifiedPublication.actionLabel,
+    decisionSummary:failedPublication ? 'Decision unavailable - validation failed.' : (blocker || simplifiedPublication.actionLabel),
+    technicalContextLine,
+    planUI:{
+      visible:failedPublication ? false : planVisibility.mayShowPlan === true,
+      showPlan:failedPublication ? false : planVisibility.mayShowPlan === true,
+      showCapital:failedPublication ? false : planVisibility.mayShowPlan === true,
+      showPositionSize:failedPublication ? false : planVisibility.mayShowPlan === true,
+      entryVisible:failedPublication ? false : planVisibility.mayShowEntry === true,
+      stopVisible:failedPublication ? false : planVisibility.mayShowStop === true,
+      targetVisible:failedPublication ? false : planVisibility.mayShowTarget === true,
+      rrVisible:failedPublication ? false : planVisibility.mayShowRr === true,
+      entry:failedPublication ? null : reviewPublicationPlan && reviewPublicationPlan.levels && reviewPublicationPlan.levels.entry.value,
+      stop:failedPublication ? null : reviewPublicationPlan && reviewPublicationPlan.levels && reviewPublicationPlan.levels.stop.value,
+      target:failedPublication ? null : reviewPublicationPlan && reviewPublicationPlan.levels && reviewPublicationPlan.levels.firstTarget.value,
+      rr:failedPublication ? null : reviewPublicationPlan && reviewPublicationPlan.rewardRisk && reviewPublicationPlan.rewardRisk.resolvedRr
+    },
+    tradeStatus:{line1:failedPublication ? 'Decision unavailable - validation failed.' : (blocker || simplifiedPublication.actionLabel), line2:''},
+    rrDisplay:failedPublication ? 'No actionable plan yet.' : (reviewPublicationPlan && reviewPublicationPlan.rewardRisk && Number.isFinite(Number(reviewPublicationPlan.rewardRisk.resolvedRr)) ? `${Number(reviewPublicationPlan.rewardRisk.resolvedRr).toFixed(2)}R` : 'No actionable plan yet.'),
+    positionCostVisible:false,
+    positionCostText:'-',
+    publication,
+    presentation:{category:'A', compatibilityOnly:true, mayFeedDecisionLogic:false, sourceCanonicalFields:['verdict','eligibility','semantics','plan','snapshot.evidenceId'], owner:'review', rationale:'Review layout and copy only', reviewDate:'post-stabilisation-release'},
+    informational:{category:'B', mayFeedDecisionLogic:false, sourceCanonicalFields:['semantics.structure','semantics.support','semantics.buyer.control'], owner:'review', rationale:'educational technical context', reviewDate:'post-stabilisation-release'}
+  };
   const analysisState = typeof getReviewAnalysisState === 'function' ? getReviewAnalysisState(item) : null;
   const uiDraftState = options.uiDraftState || (item.review && item.review.draft) || null;
   const derivedStates = options.derivedStates || analysisDerivedStatesFromRecord(item);
