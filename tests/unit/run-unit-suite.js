@@ -35,6 +35,12 @@ const cases = [
     groups:['all', 'resolver', 'contracts']
   },
   {
+    id:'resolver-presentation-publication',
+    label:'ResolverPresentation publication assertions',
+    script:'scripts/run-resolver-presentation-publication-assertions.js',
+    groups:['all', 'resolver', 'contracts']
+  },
+  {
     id:'normalization-read-write',
     label:'Normalization read/write assertions',
     script:'scripts/run-normalization-read-write-assertions.js',

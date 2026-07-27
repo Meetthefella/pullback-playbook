@@ -413,7 +413,9 @@
     };
   }
 
-  function resolveVisualState(record, context = 'scanner', options = {}, deps = {}){
+  // Retained only for shadow diagnostics during the compatibility release.
+  // It must never be used to render current decision-bearing state.
+  function legacyResolveVisualStateObserverOnly(record, context = 'scanner', options = {}, deps = {}){
     const safeRecord = record && typeof record === 'object' ? record : {};
     const derivedStates = options.derivedStates || deps.analysisDerivedStatesFromRecord(safeRecord);
     const analysis = options.analysis && typeof options.analysis === 'object' ? options.analysis : null;
@@ -707,6 +709,105 @@
     };
   }
 
+  function presentationCopyForCanonical(verdict, blocker, publicationStatus){
+    if(publicationStatus === 'validation_failed'){
+      return {
+        summary:'Decision unavailable - canonical validation failed.',
+        action:'Do not act until canonical validation succeeds.'
+      };
+    }
+    if(verdict === 'entry') return {summary:'Entry - canonical requirements are qualified.', action:'Execute only if the canonical trigger remains valid.'};
+    if(verdict === 'near_entry') return {summary:'Near Entry - canonical requirements are not yet complete.', action:'Wait for the remaining canonical requirement.'};
+    if(verdict === 'avoid') return {summary:blocker || 'Avoid - canonical blocker is active.', action:'Do not act.'};
+    return {summary:blocker || 'Watch - waiting for the next canonical requirement.', action:'Wait for the next canonical requirement.'};
+  }
+
+  function mapCanonicalDecisionToVisualState(publication, context = 'scanner'){
+    const envelope = publication && typeof publication === 'object' ? publication : {};
+    const candidate = envelope.canonicalResult && typeof envelope.canonicalResult === 'object'
+      ? envelope.canonicalResult : null;
+    const failed = envelope.publicationStatus !== 'valid' || !candidate;
+    const canonical = failed ? null : candidate;
+    const fallback = failed && envelope.safeFallback && typeof envelope.safeFallback === 'object'
+      ? envelope.safeFallback
+      : {};
+    const verdict = failed
+      ? coerceCanonicalVerdict(fallback.verdict || 'watch')
+      : coerceCanonicalVerdict(canonical && canonical.verdict && canonical.verdict.value || 'watch');
+    const plan = canonical && canonical.plan || {};
+    const semantics = canonical && canonical.semantics || {};
+    const blocker = failed
+      ? 'Canonical decision validation failed.'
+      : String(canonical && canonical.verdict && canonical.verdict.decisiveBlocker || '');
+    const visualBucket = verdict === 'watch' ? 'monitor' : verdict;
+    const tone = visualBucket;
+    const copy = presentationCopyForCanonical(verdict, blocker, failed ? 'validation_failed' : 'valid');
+    const state = visualStateKey(verdict);
+    const badgeText = verdict === 'near_entry' ? 'Near Entry' : (verdict === 'entry' ? 'Entry' : (verdict === 'avoid' ? 'Avoid' : 'Watch'));
+    const icon = verdict === 'entry' ? '✓' : (verdict === 'near_entry' ? '◐' : (verdict === 'avoid' ? '!' : '◌'));
+    return {
+      publicationStatus:failed ? 'validation_failed' : 'valid',
+      canonicalNormVersion:failed ? String(envelope.validation && envelope.validation.normVersion || '') : String(canonical.normVersion || ''),
+      canonicalResultVersion:failed ? '' : String(canonical.schemaVersion || ''),
+      evidenceId:failed ? '' : String(canonical.snapshot && canonical.snapshot.evidenceId || ''),
+      state,
+      finalVerdict:verdict,
+      final_verdict:verdict,
+      renderedVerdict:verdict,
+      canonicalVerdict:verdict,
+      actionable:failed ? false : canonical.verdict.actionable === true,
+      entryEligibility:failed ? null : canonical.eligibility && canonical.eligibility.entry,
+      nearEntryEligibility:failed ? null : canonical.eligibility && canonical.eligibility.nearEntry,
+      structureState:failed ? 'unknown' : semantics.structure && semantics.structure.state,
+      supportState:failed ? 'unknown' : semantics.support && semantics.support.context,
+      pullbackState:failed ? 'unknown' : semantics.pullback && semantics.pullback.state,
+      buyerResponseState:failed ? 'unknown' : semantics.buyer && semantics.buyer.response,
+      buyerControlState:failed ? 'unknown' : semantics.buyer && semantics.buyer.control,
+      followThroughState:failed ? 'unknown' : semantics.buyer && semantics.buyer.followThrough,
+      marketState:failed ? 'unknown' : semantics.market && semantics.market.state,
+      volumeState:failed ? 'unknown' : semantics.market && semantics.market.volume,
+      planState:failed ? 'unavailable' : semantics.planState && semantics.planState.priceability,
+      canonicalPlan:failed ? null : plan,
+      decisiveBlocker:blocker,
+      decisiveBlockerCode:failed ? 'canonical_norm_validation_failed' : String(canonical.verdict && canonical.verdict.decisiveBlockerCode || ''),
+      decisiveBlockerCategory:failed ? 'validation' : String(canonical.verdict && canonical.verdict.decisiveBlockerCategory || ''),
+      visualBucket,
+      presentationBucket:visualBucket,
+      bucket:visualBucket,
+      tone,
+      visual_tone:tone,
+      badge:{text:badgeText, className:visualBucket, icon},
+      decision_summary:copy.summary,
+      summary:copy.summary,
+      actionLabel:copy.action,
+      reason:blocker || copy.summary,
+      allowPlan:failed ? false : plan.visibility && plan.visibility.mayShowPlan === true,
+      allow_plan:failed ? false : plan.visibility && plan.visibility.mayShowPlan === true,
+      className:`visual-state-card visual-state-${state} visual-tone-${tone} ${cardClassForBucket(visualBucket)}`,
+      toneClass:`visual-state-${state} visual-tone-${tone} ${cardClassForBucket(visualBucket)}`,
+      styleAttr:visualStyleForState(tone === 'diminishing' ? 'watch' : tone, 0),
+      presentation:{
+        category:'A', compatibilityOnly:true, mayFeedDecisionLogic:false,
+        sourceCanonicalFields:['verdict','semantics','plan.visibility','snapshot.evidenceId','publicationStatus'],
+        context:String(context || 'scanner')
+      },
+      diagnostics:{source:'canonical-publication-presentation-mapper', publicationStatus:failed ? 'validation_failed' : 'valid', legacyObserverAvailable:true}
+    };
+  }
+
+  function resolveVisualState(record, context = 'scanner', options = {}, deps = {}){
+    const safeRecord = record && typeof record === 'object' ? record : {};
+    const resolved = options && options.publication && typeof options.publication === 'object'
+      ? options.publication
+      : (typeof deps.resolveGlobalVerdict === 'function'
+        ? deps.resolveGlobalVerdict(safeRecord)
+        : null);
+    const publication = resolved && resolved.canonicalPublication
+      ? resolved.canonicalPublication
+      : resolved;
+    return mapCanonicalDecisionToVisualState(publication, context);
+  }
+
   function resolveGlobalVisualState(record, context = 'scanner', options = {}, deps = {}){
     return resolveVisualState(record, context, options, deps);
   }
@@ -768,8 +869,10 @@
 
   global.ResolverPresentation = {
     primaryShortlistStatusChip,
+    mapCanonicalDecisionToVisualState,
     resolveVisualState,
     resolveGlobalVisualState,
+    legacyResolveVisualStateObserverOnly,
     resolveEmojiPresentation
   };
 })(window);

@@ -18754,43 +18754,20 @@ function primaryShortlistStatusChip(view){
 }
 
 function resolveGlobalVisualState(record, context = 'scanner', options = {}){
+  const canonicalSource = resolveGlobalVerdict(record && typeof record === 'object' ? record : {});
   return resolveGlobalVisualStateImpl(record, context, options, {
-    resolveVisualState,
-    resolveGlobalVerdict,
-    resolveFinalStateContract,
-    analysisDerivedStatesFromRecord,
-    effectivePlanForRecord,
-    deriveCurrentPlanState,
-    setupScoreForRecord,
-    getBadge,
-    getBucket,
-    normalizeGlobalVerdictKey,
-    normalizeVerdict
+    resolveGlobalVerdict:() => canonicalSource
   });
 }
 
 function resolveVisualState(record, context = 'scanner', options = {}){
+  const canonicalSource = resolveGlobalVerdict(record && typeof record === 'object' ? record : {});
+  const publication = canonicalSource && canonicalSource.canonicalPublication;
   return resolveVisualStateImpl(record, context, {
-    ...(options && typeof options === 'object' ? options : {})
+    ...(options && typeof options === 'object' ? options : {}),
+    publication
   }, {
-    resolveGlobalVerdict,
-    resolveFinalStateContract,
-    analysisDerivedStatesFromRecord,
-    effectivePlanForRecord,
-    deriveCurrentPlanState,
-    setupScoreForRecord,
-    getBadge,
-    getBucket,
-    resolveTrackPresentationModel,
-    syncWatchlistLifecycle,
-    watchlistLifecycleSnapshot,
-    watchlistPriorityForRecord,
-    normalizeGlobalVerdictKey,
-    normalizeVerdict,
-    buildCanonicalStoryContextForRecord,
-    canonicalDecisionSummaryFromStoryContext,
-    buildDecisionSemantics,
-    sharedDecisionSummaryFromSemantics
+    resolveGlobalVerdict:() => canonicalSource
   });
 }
 
