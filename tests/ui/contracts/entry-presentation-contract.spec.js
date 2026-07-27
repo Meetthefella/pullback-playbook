@@ -310,7 +310,9 @@ test('canonical Entry presentation remains authoritative across review, trade pl
   expect(contract.sharedPresentation.headline).toBeTruthy();
   expect(contract.sharedPresentation.primaryReason).toBe('Buyers are in control and the setup is ready to act on.');
   expect(contract.sharedPresentation.nextAction).toBe('Execute only if the trigger remains valid.');
-  expect(contract.sharedPresentation.planSummary).toBe('Trade plan available.');
+  // A clicked legacy Entry label cannot reconstruct a plan.  The Track alias
+  // may expose plan copy only when CanonicalDecisionResult publishes it.
+  expect(contract.sharedPresentation.planSummary).toBe('No actionable trade plan yet.');
   expect(contract.sharedPresentation.headline).not.toContain('Monitor');
   expect(contract.sharedPresentation.headline).not.toContain('confirmation');
   expect(contract.sharedPresentation.primaryReason).not.toContain('Monitor');

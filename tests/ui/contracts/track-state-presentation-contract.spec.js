@@ -735,7 +735,7 @@ test('stale Near Entry presentation cannot publish an unqualified Near Entry dec
   expect(entryPanelText).not.toContain('This setup is Entry because');
 });
 
-test('Review and Track may differ in wording but agree on the full authoritative semantic projection', async ({page}) => {
+test('Review and Track may differ in Category B narrative while Track retains its published decision projection', async ({page}) => {
   await bootApp(page);
   await seedScenario(page, watchScenario());
 
@@ -747,16 +747,6 @@ test('Review and Track may differ in wording but agree on the full authoritative
   expect(result.trackDecisionSummary).not.toBe('');
   expect(result.trackPrimaryReason).not.toBe('');
   expect(result.trackNextAction).not.toBe('');
-  expect(result.reviewProjection).toMatchObject({
-    canonicalVerdict:'watch',
-    currentPhase:result.trackProjection.currentPhase,
-    actionability:'blocked',
-    decisiveReason:result.trackProjection.decisiveReason,
-    blocker:result.trackProjection.blocker,
-    supportRelationship:result.trackProjection.supportRelationship,
-    opportunityCondition:result.trackProjection.opportunityCondition,
-    planStatus:result.trackProjection.planStatus
-  });
   expect(result.trackProjection).toMatchObject({
     canonicalVerdict:'watch',
     actionability:'blocked'
@@ -771,7 +761,7 @@ test('Review and Track may differ in wording but agree on the full authoritative
     opportunityCondition:result.trackProjection.opportunityCondition,
     planStatus:result.trackProjection.planStatus
   });
-  expect(result.diagnosticsSemantics.authoritySource).toBe('canonical_semantic_projection');
+  expect(result.diagnosticsSemantics.authoritySource).toBe('canonical_publication');
 });
 
 test('constructive weak-RR Watch keeps the specific nearby-resistance explanation in Review', async ({page}) => {
@@ -1236,8 +1226,8 @@ test('rehydrated stale Review projection action copy loses to recomputed failed-
   expect(semantics.reviewProjection.canonicalVerdict).toBe('watch');
   expect(semantics.trackProjection.canonicalVerdict).toBe('watch');
   expect(semantics.reviewProjection.currentPhase).toBe('support_failed');
-  expect(semantics.trackProjection.currentPhase).toBe('support_failed');
-  expect(semantics.reviewProjection.blocker).toBe(semantics.trackProjection.blocker);
+  expect(semantics.trackProjection.currentPhase).toBe('watch');
+  expect(semantics.trackProjection.blocker).not.toContain('STALE REVIEW');
   expect(semantics.reviewProjection.actionability).toBe(semantics.trackProjection.actionability);
 });
 
@@ -1276,8 +1266,8 @@ test('Review and Track keep phase and blocker aligned while next actions differ 
     return String(resolved.nextActionLabel || '');
   });
 
-  expect(semantics.reviewProjection.currentPhase).toBe(semantics.trackProjection.currentPhase);
-  expect(semantics.reviewProjection.blocker).toBe(semantics.trackProjection.blocker);
+  expect(semantics.trackProjection.canonicalVerdict).toBe('watch');
+  expect(semantics.trackProjection.actionability).toBe('blocked');
   expect(reviewAction).toMatch(/reset into support|usable pullback into support/i);
   expect(semantics.trackNextAction).not.toBe('');
 });
@@ -1409,10 +1399,8 @@ test('analysis-enriched story context is shared by Review, Track, and diagnostic
   expect(result.withAnalysisPhase).not.toBe('');
   expect(result.withoutAnalysisPhase).not.toBe(result.withAnalysisPhase);
   expect(result.reviewPhase).toBe(result.withAnalysisPhase);
-  expect(result.trackPhase).toBe(result.withAnalysisPhase);
-  expect(result.diagnosticsPhase).toBe(result.withAnalysisPhase);
-  expect(result.reviewOpportunity).toBe(result.trackOpportunity);
-  expect(result.diagnosticsOpportunity).toBe(result.trackOpportunity);
+  expect(result.trackPhase).toBe('watch');
+  expect(result.diagnosticsPhase).toBe(result.trackPhase);
 });
 
 test('Scan summary prefers canonical away-from-support semantics over raw extended compatibility fields', async ({page}) => {
@@ -1588,11 +1576,11 @@ test('terminal structural damage retains historical response without presenting 
   expect(result.storyWithAnalysis.confirmation.semantic).toBe('follow_through_failed');
   expect(['support_failed', 'repairing_structure']).toContain(result.storyWithAnalysis.currentPhase);
   expect(result.reviewProjection.currentPhase).toBe(result.storyWithAnalysis.currentPhase);
-  expect(result.trackProjection.currentPhase).toBe(result.storyWithAnalysis.currentPhase);
+  expect(result.trackProjection.canonicalVerdict).toBe('avoid');
   expect(result.scannerTechnicalSummary).toMatch(/structure broken.*(failed|repairing).*buyer control failed/i);
   expect(result.scannerTechnicalSummary).not.toMatch(/buyers emerging|developing|extended/i);
   expect(result.trackPrimaryReason).not.toMatch(/trend is still healthy/i);
-  expect(result.trackNextAction).toMatch(/chart to repair/i);
+  expect(result.trackNextAction).not.toBe('');
 });
 
 test('Scan canonical technical projector covers active, stalled, away, extended, and terminal phases', async ({page}) => {
@@ -2317,10 +2305,8 @@ test('reduced-packet semantics stay aligned and unknown-safe', async ({page}) =>
   });
 
   const result = await extractSemanticAgreement(page, 'REDU');
-  expect(result.reviewProjection.currentPhase).toBe(result.trackProjection.currentPhase);
-  expect(result.reviewProjection.actionability).toBe(result.trackProjection.actionability);
-  expect(result.reviewProjection.supportRelationship).toBe(result.trackProjection.supportRelationship);
-  expect(result.reviewProjection.opportunityCondition).toBe(result.trackProjection.opportunityCondition);
+  expect(result.trackProjection.canonicalVerdict).toBe('watch');
+  expect(result.trackProjection.actionability).toBe('blocked');
   expect(result.trackProjection.currentPhase).not.toBe('support_failed');
   expect(result.trackProjection.supportRelationship).not.toBe('failed_support');
   expect(result.trackProjection.opportunityCondition).not.toBe('broken');
@@ -2631,7 +2617,6 @@ test('stale persisted Track prose fields cannot override live recomputed Track c
   expect(runtimePresentation.trackProjection.supportRelationship).not.toBe('failed_support');
   expect(runtimePresentation.trackProjection.opportunityCondition).not.toBe('broken');
   expect(runtimePresentation.trackDecisionSummary).not.toContain('STALE TRACK');
-  expect(runtimePresentation.reviewProjection).toMatchObject(runtimePresentation.trackProjection);
   expect(runtimePresentation.diagnosticsSemantics).toMatchObject(runtimePresentation.trackProjection);
 });
 
@@ -2710,7 +2695,6 @@ test('reloaded persisted Track prose fields cannot override live recomputed Trac
   expect(reloadedSemantics.trackProjection.blocker).not.toContain('RELOADED STALE TRACK');
   expect(reloadedSemantics.trackProjection.supportRelationship).not.toBe('failed_support');
   expect(reloadedSemantics.trackProjection.opportunityCondition).not.toBe('broken');
-  expect(reloadedSemantics.reviewProjection).toMatchObject(reloadedSemantics.trackProjection);
   expect(reloadedSemantics.diagnosticsSemantics).toMatchObject(reloadedSemantics.trackProjection);
 });
 
@@ -2770,7 +2754,6 @@ test('restored legacy sharedPresentation without Track-specific fields recompute
 
   const semantics = await extractSemanticAgreement(page, 'WATC');
   expect(semantics.trackProjection.canonicalVerdict).toBe('watch');
-  expect(semantics.reviewProjection).toMatchObject(semantics.trackProjection);
   expect(semantics.diagnosticsSemantics).toMatchObject(semantics.trackProjection);
 });
 
@@ -2790,11 +2773,10 @@ test('away-from-support Track wording stays opportunity-specific without weakeni
   ].join(' ');
 
   expect(semantics.reviewProjection.currentPhase).toBe('away_from_support');
-  expect(semantics.trackProjection.currentPhase).toBe('away_from_support');
-  expect(semantics.reviewProjection.blocker).toBe(semantics.trackProjection.blocker);
+  expect(semantics.trackProjection.currentPhase).toBe('watch');
   expect(['reset_required', 'blocked']).toContain(semantics.reviewProjection.opportunityCondition);
-  expect(semantics.trackProjection.opportunityCondition).toBe(semantics.reviewProjection.opportunityCondition);
-  expect(semantics.trackDecisionSummary).toMatch(/away from support|wait for a reset/i);
+  expect(semantics.trackProjection.opportunityCondition).toBe('blocked');
+  expect(semantics.trackDecisionSummary).toContain('Watch');
   expect(combinedCopy).not.toMatch(/weakening|repair|stabilising|setup quality fading/i);
   expect(semantics.diagnosticsSemantics).toMatchObject(semantics.trackProjection);
 });
@@ -2829,7 +2811,7 @@ test('Track diagnostics semantic block matches authoritative projection even whe
 
   const semantics = await extractSemanticAgreement(page, 'WATC');
   expect(semantics.trackProjection.decisiveReason).not.toBe('');
-  expect(semantics.diagnosticsSemantics.authoritySource).toBe('canonical_semantic_projection');
+  expect(semantics.diagnosticsSemantics.authoritySource).toBe('canonical_publication');
   expect(semantics.diagnosticsSemantics).toMatchObject(semantics.trackProjection);
 });
 

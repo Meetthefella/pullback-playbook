@@ -9376,16 +9376,50 @@ function runTrackPresentationAuthorityAssertions(){
       rejected_by_viability_gate:false
     }
   });
-  if(trackedLifecycleEntryPresentation.canonicalVerdict !== 'entry'
-    || trackedLifecycleEntryPresentation.visualBucket !== 'entry'
-    || trackedLifecycleEntryPresentation.tone !== 'entry'){
-    throw new Error('Track shared presentation must preserve lifecycle Entry over soft tracked watch when no hard blocker exists.');
+  if(trackedLifecycleEntryPresentation.canonicalVerdict !== 'watch'
+    || trackedLifecycleEntryPresentation.visualBucket !== 'monitor'
+    || trackedLifecycleEntryPresentation.tone !== 'monitor'){
+    throw new Error('Track shared presentation must preserve current canonical Watch over historical lifecycle Entry.');
   }
-  if(trackedLifecycleEntryPresentation.badgeLabel !== 'Entry'
-    || trackedLifecycleEntryPresentation.actionLabel !== 'Entry'
-    || trackedLifecycleEntryPresentation.headline !== 'Entry'){
-    throw new Error('Track shared presentation must align badge/action/headline labels with preserved lifecycle Entry authority.');
+  if(trackedLifecycleEntryPresentation.badgeLabel !== 'Watch'
+    || trackedLifecycleEntryPresentation.headline !== 'Watch'){
+    throw new Error('Track badge and headline must remain tied to the current canonical Watch.');
   }
+  const lifecycleParityCases = [
+    {history:'near_entry', verdict:'watch', actionable:false},
+    {history:'entry', verdict:'near_entry', actionable:false},
+    {history:'watch', verdict:'entry', actionable:true},
+    {history:'entry', verdict:'watch', actionable:false, publicationStatus:'validation_failed'}
+  ];
+  lifecycleParityCases.forEach((fixture) => {
+    const presentation = trackLifecycleAuthoritySandbox.buildSharedReviewTrackPresentation({ticker:'LIFE', watchlist:{inWatchlist:true}}, {
+      simplifiedState:{
+        canonicalVerdict:fixture.verdict,
+        visualBucket:fixture.verdict === 'watch' ? 'monitor' : fixture.verdict,
+        tone:fixture.verdict === 'watch' ? 'monitor' : fixture.verdict,
+        badgeLabel:fixture.verdict === 'near_entry' ? 'Near Entry' : (fixture.verdict === 'entry' ? 'Entry' : 'Watch'),
+        publicationStatus:fixture.publicationStatus || 'valid',
+        actionable:fixture.actionable,
+        entryEligibility:{qualified:fixture.verdict === 'entry'},
+        nearEntryEligibility:{qualified:fixture.verdict === 'near_entry'},
+        planStatus:'missing', planState:'unavailable',
+        decisiveBlocker:'Current canonical blocker.', decisiveBlockerCode:'canonical_blocker', decisiveBlockerCategory:'gate',
+        canonicalResultVersion:'v-test', evidenceId:'e-test'
+      },
+      lifecycleSnapshot:{state:fixture.history, label:fixture.history, status:'historical'}
+    });
+    if(presentation.canonicalVerdict !== fixture.verdict
+      || presentation.actionable !== fixture.actionable
+      || presentation.currentDecision.verdict !== fixture.verdict
+      || presentation.currentDecision.evidenceId !== 'e-test'
+      || presentation.lifecycleHistory.authority !== 'historical_context_only'){
+      throw new Error('Track current decision must preserve publication parity independently of lifecycle history.');
+    }
+    if(fixture.publicationStatus === 'validation_failed'
+      && (presentation.publicationStatus !== 'validation_failed' || presentation.actionable !== false || presentation.canonicalPlan !== null)){
+      throw new Error('Track validation-failed fallback must remain explicit and must not expose a candidate plan.');
+    }
+  });
   const trackedLifecycleBlockedPresentation = trackLifecycleAuthoritySandbox.buildSharedReviewTrackPresentation({
     ticker:'UNP',
     watchlist:{inWatchlist:true, debug:{}},

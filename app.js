@@ -4750,6 +4750,57 @@ function applyReviewWatchlistSoftReadinessDisplayOverride(record, simplifiedStat
 function buildTrackDiagnosticSnapshot(record){
   const item = record && typeof record === 'object' ? record : null;
   if(!item) return null;
+  // Consumer 4: the diagnostic card describes the same published current
+  // decision rendered by Track.  Lifecycle/persisted values below are legacy
+  // observer code and cannot supply diagnostic current-state fields.
+  const diagnosticPublicationSource = resolveSimplifiedStateForSurface(item, 'track', {
+    log:false,
+    source:'track_diagnostic_publication',
+    reason:'track_diagnostic_publication'
+  });
+  const diagnosticPublication = {
+    ...(diagnosticPublicationSource && typeof diagnosticPublicationSource === 'object' ? diagnosticPublicationSource : {}),
+    // This marker describes the persisted input as cache-only; it does not
+    // select any persisted value for the current decision.
+    persistedPresentationCacheOnly:!!(item.watchlist && item.watchlist.presentation)
+  };
+  const diagnosticHistory = watchlistLifecycleSnapshot(item);
+  const diagnosticPresentation = buildSharedReviewTrackPresentation(item, {
+    surface:'track',
+    simplifiedState:diagnosticPublication,
+    lifecycleSnapshot:diagnosticHistory,
+    source:'track_diagnostic_publication',
+    reason:'track_diagnostic_publication'
+  });
+  const diagnosticSemantics = diagnosticPresentation.trackSemanticProjection || {};
+  return {
+    ticker:String(item.ticker || ''),
+    canonicalVerdict:String(diagnosticPresentation.canonicalVerdict || ''),
+    visualBucket:String(diagnosticPresentation.visualBucket || ''),
+    tone:String(diagnosticPresentation.tone || ''),
+    badgeLabel:String(diagnosticPresentation.badgeLabel || ''),
+    headline:String(diagnosticPresentation.headline || ''),
+    statusText:String(diagnosticPresentation.statusText || ''),
+    actionLabel:String(diagnosticPresentation.actionLabel || ''),
+    contract:{
+      canonicalVerdict:diagnosticPresentation.canonicalVerdict,
+      canonicalVisualBucket:diagnosticPresentation.visualBucket,
+      canonicalResultVersion:diagnosticPresentation.canonicalResultVersion,
+      canonicalNormVersion:diagnosticPresentation.canonicalNormVersion,
+      evidenceId:diagnosticPresentation.evidenceId,
+      publicationStatus:diagnosticPresentation.publicationStatus,
+      // Snapshot identity is the contract identity after Consumer 4; a Track
+      // diagnostic no longer obtains a competing presentation contract.
+      contractFingerprint:`canonical:${String(diagnosticPresentation.canonicalResultVersion || '')}:${String(diagnosticPresentation.evidenceId || '')}`
+    },
+    simplifiedState:safeDiagnosticClone(diagnosticPublication || {}, {}),
+    sharedPresentation:safeDiagnosticClone(diagnosticPresentation || {}, {}),
+    lifecycleSnapshot:safeDiagnosticClone(diagnosticHistory || {}, {}),
+    semantics:safeDiagnosticClone({...diagnosticSemantics, authoritySource:'canonical_publication'}, {}),
+    plan:safeDiagnosticClone(diagnosticPresentation.canonicalPlan || {}, {}),
+    scan:safeDiagnosticClone(item.scan || {}, {}),
+    diagnostics:{legacyObserverOnly:true, sourceCanonicalFields:['verdict','semantics','eligibility','plan','snapshot.evidenceId'], mayFeedDecisionLogic:false}
+  };
   try{
     const normalizeProjectionSource = typeof normalizeReviewProjectionSource === 'function'
       ? normalizeReviewProjectionSource
@@ -9898,6 +9949,121 @@ function buildSharedReviewTrackPresentation(record, options = {}){
   const item = typeof normalizeTickerRecordReadOnly === 'function'
     ? normalizeTickerRecordReadOnly(record || {})
     : (record && typeof record === 'object' ? record : {});
+  // Consumer 4 publication boundary: current Track state is copied from the
+  // validated publication only. Lifecycle and projections are historical
+  // context and the previous implementation below is observer-only.
+  const trackPublicationState = options.simplifiedState && typeof options.simplifiedState === 'object'
+    ? options.simplifiedState
+    : resolveSimplifiedStateForSurface(item, 'track', {log:false});
+  const trackPublicationFailed = trackPublicationState.publicationStatus === 'validation_failed';
+  const trackCanonicalPlan = trackPublicationFailed ? null : trackPublicationState.canonicalPlan;
+  const trackVerdict = normalizeGlobalVerdictKey(trackPublicationState.canonicalVerdict || 'watch');
+  const trackBucket = normalizeVisualBucketForPairing(trackPublicationState.visualBucket || (trackVerdict === 'watch' ? 'monitor' : trackVerdict));
+  const trackPublicationBlocker = String(trackPublicationState.decisiveBlocker || trackPublicationState.mainBlocker || '').trim();
+  const trackHistory = options.lifecycleSnapshot && typeof options.lifecycleSnapshot === 'object'
+    ? options.lifecycleSnapshot : watchlistLifecycleSnapshot(item);
+  // These are presentation-only projections. They deliberately take no input
+  // from lifecycle history, persisted presentation, or a second resolver.
+  const publicationTrackHeadline = trackPublicationFailed
+    ? 'Decision unavailable'
+    : (trackVerdict === 'entry' ? 'Entry Ready' : (trackVerdict === 'near_entry' ? 'Near Entry' : globalVerdictLabel(trackVerdict)));
+  const publicationTrackPrimaryReason = trackPublicationFailed
+    ? 'The current decision could not be validated.'
+    : (trackVerdict === 'entry'
+      ? 'Buyers are in control and the setup is ready to act on.'
+      : (trackVerdict === 'near_entry'
+        ? 'The setup is close, but confirmation still needs to improve.'
+        : (trackPublicationBlocker || 'Confirmation is still developing, so the setup stays on watch.')));
+  const publicationTrackNextAction = trackPublicationFailed
+    ? 'Current decision unavailable; setup remains non-actionable.'
+    : (trackVerdict === 'entry'
+      ? 'Execute only if the trigger remains valid.'
+      : (trackPublicationState.actionLabel || 'Wait for stronger confirmation before considering entry.'));
+  const publicationTrackPlanVisible = !trackPublicationFailed && !!(trackCanonicalPlan && trackCanonicalPlan.visibility && trackCanonicalPlan.visibility.mayShowPlan);
+  const publicationTrackPlanSummary = trackPublicationFailed
+    ? 'No actionable trade plan yet.'
+    : (publicationTrackPlanVisible ? 'Trade plan available.' : 'No actionable trade plan yet.');
+  const publicationTrackSemanticProjection = {
+    canonicalVerdict:trackVerdict,
+    currentPhase:trackPublicationFailed ? 'validation_failed' : trackVerdict,
+    actionability:trackPublicationFailed ? 'blocked' : (trackPublicationState.actionable === true ? 'actionable' : 'blocked'),
+    decisiveReason:trackPublicationBlocker || publicationTrackPrimaryReason,
+    blocker:trackPublicationBlocker,
+    planStatus:String(trackPublicationState.planStatus || trackPublicationState.planState || 'unknown').trim().toLowerCase(),
+    supportRelationship:String(trackPublicationState.supportState || 'unknown').trim().toLowerCase(),
+    opportunityCondition:trackVerdict === 'avoid' ? 'blocked' : (trackPublicationState.actionable === true ? 'actionable' : 'blocked')
+  };
+  { // live publication-only current-decision path
+  return {
+    canonicalVerdict:trackVerdict,
+    finalVerdict:trackVerdict,
+    final_verdict:trackVerdict,
+    renderedVerdict:trackVerdict,
+    publicationStatus:trackPublicationState.publicationStatus,
+    canonicalNormVersion:trackPublicationState.canonicalNormVersion,
+    canonicalResultVersion:trackPublicationState.canonicalResultVersion,
+    evidenceId:trackPublicationState.evidenceId,
+    actionable:trackPublicationFailed ? false : trackPublicationState.actionable === true,
+    entryEligibility:trackPublicationFailed ? null : trackPublicationState.entryEligibility,
+    nearEntryEligibility:trackPublicationFailed ? null : trackPublicationState.nearEntryEligibility,
+    structureState:trackPublicationState.structureState,
+    supportState:trackPublicationState.supportState,
+    pullbackState:trackPublicationState.pullbackState,
+    buyerResponseState:trackPublicationState.buyerResponseState,
+    buyerControlState:trackPublicationState.buyerControlState,
+    followThroughState:trackPublicationState.followThroughState,
+    planState:trackPublicationState.planState,
+    canonicalPlan:trackCanonicalPlan,
+    decisiveBlocker:trackPublicationBlocker,
+    decisiveBlockerCode:trackPublicationState.decisiveBlockerCode,
+    decisiveBlockerCategory:trackPublicationState.decisiveBlockerCategory,
+    visualBucket:trackBucket,
+    presentationBucket:trackBucket,
+    tone:String(trackPublicationState.tone || trackBucket),
+    badgeLabel:trackPublicationState.badgeLabel || globalVerdictLabel(trackVerdict),
+    headline:publicationTrackHeadline,
+    statusText:publicationTrackHeadline,
+    nextAction:publicationTrackNextAction,
+    actionLabel:publicationTrackNextAction,
+    primaryReason:publicationTrackPrimaryReason,
+    mainBlocker:trackPublicationBlocker,
+    planVisible:publicationTrackPlanVisible,
+    planStatus:trackPublicationState.planStatus,
+    planSummary:publicationTrackPlanSummary,
+    entry:trackPublicationFailed ? null : trackCanonicalPlan && trackCanonicalPlan.levels && trackCanonicalPlan.levels.entry.value,
+    stop:trackPublicationFailed ? null : trackCanonicalPlan && trackCanonicalPlan.levels && trackCanonicalPlan.levels.stop.value,
+    target:trackPublicationFailed ? null : trackCanonicalPlan && trackCanonicalPlan.levels && trackCanonicalPlan.levels.firstTarget.value,
+    resolvedRR:trackPublicationFailed ? null : trackCanonicalPlan && trackCanonicalPlan.rewardRisk && trackCanonicalPlan.rewardRisk.resolvedRr,
+    trackDecisionSummary:publicationTrackHeadline,
+    trackPrimaryReason:publicationTrackPrimaryReason,
+    trackNextAction:publicationTrackNextAction,
+    trackPlanSummary:publicationTrackPlanSummary,
+    trackCurrentPhase:publicationTrackSemanticProjection.currentPhase,
+    trackActionability:publicationTrackSemanticProjection.actionability,
+    trackDecisiveReason:publicationTrackSemanticProjection.decisiveReason,
+    trackBlocker:publicationTrackSemanticProjection.blocker,
+    trackSupportRelationship:publicationTrackSemanticProjection.supportRelationship,
+    trackOpportunityCondition:publicationTrackSemanticProjection.opportunityCondition,
+    trackSemanticProjection:publicationTrackSemanticProjection,
+    currentDecision:{
+      publicationStatus:trackPublicationState.publicationStatus,
+      canonicalNormVersion:trackPublicationState.canonicalNormVersion,
+      canonicalResultVersion:trackPublicationState.canonicalResultVersion,
+      evidenceId:trackPublicationState.evidenceId,
+      verdict:trackVerdict,
+      actionable:trackPublicationFailed ? false : trackPublicationState.actionable === true,
+      entryEligibility:trackPublicationFailed ? null : trackPublicationState.entryEligibility,
+      nearEntryEligibility:trackPublicationFailed ? null : trackPublicationState.nearEntryEligibility,
+      semanticStates:{structure:trackPublicationState.structureState,support:trackPublicationState.supportState,pullback:trackPublicationState.pullbackState,buyerResponse:trackPublicationState.buyerResponseState,buyerControl:trackPublicationState.buyerControlState,followThrough:trackPublicationState.followThroughState},
+      plan:trackCanonicalPlan,
+      planState:trackPublicationState.planState,
+      blocker:{code:trackPublicationState.decisiveBlockerCode,category:trackPublicationState.decisiveBlockerCategory,message:trackPublicationBlocker}
+    },
+    lifecycleHistory:{authority:'historical_context_only', state:trackHistory && trackHistory.lifecycleHistory || null, evidenceId:trackHistory && trackHistory.currentDecision && trackHistory.currentDecision.evidenceId || ''},
+    presentation:{category:'A', compatibilityOnly:true, mayFeedDecisionLogic:false, sourceCanonicalFields:['verdict','eligibility','semantics','plan','snapshot.evidenceId'], owner:'track', rationale:'Track layout only', reviewDate:'post-stabilisation-release'},
+    informational:{category:'B', mayFeedDecisionLogic:false, sourceCanonicalFields:['verdict','decisiveBlocker','publicationStatus'], owner:'track', rationale:'compact action copy', reviewDate:'post-stabilisation-release'}
+  };
+  }
   const normalizeProjectionSource = typeof normalizeReviewProjectionSource === 'function'
     ? normalizeReviewProjectionSource
     : ((source) => String(source || '').trim().toLowerCase());
