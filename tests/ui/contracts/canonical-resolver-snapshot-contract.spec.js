@@ -39,9 +39,11 @@ async function bootApp(page){
 async function seedCanonicalWatchWithValidPlan(page){
   await page.evaluate(() => {
     const ticker = 'TROW';
+    const fixtureTimestamp = new Date().toISOString();
+    const fixtureDate = fixtureTimestamp.slice(0, 10);
     state.paperTradeApiKey = 'paper-key';
     state.paperTradeApiSecret = 'paper-secret';
-    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    state.paperTradeTesterSetupCompletedAt = fixtureTimestamp;
     const record = upsertTickerRecord(ticker);
     record.meta.companyName = 'T. Rowe Price Group, Inc.';
     record.meta.exchange = 'LSE';
@@ -56,7 +58,7 @@ async function seedCanonicalWatchWithValidPlan(page){
     record.marketData.rsi = 64.82;
     record.marketData.volume = 3831934;
     record.marketData.avgVolume = 2115787.96;
-    record.marketData.asOf = '2026-06-29T09:00:00.000Z';
+    record.marketData.asOf = fixtureTimestamp;
     record.marketData.history = [
       {date:'2026-06-27', open:19.8, high:20.6, low:19.6, close:20.4, volume:3831934}
     ];
@@ -83,7 +85,7 @@ async function seedCanonicalWatchWithValidPlan(page){
     record.plan.authoritySource = 'resolver';
     record.plan.authorityReason = 'canonical_test_seed';
     record.plan.writtenBy = 'playwright';
-    record.plan.writtenAt = '2026-06-29T09:00:00.000Z';
+    record.plan.writtenAt = fixtureTimestamp;
     record.plan.quoteCurrency = 'GBP';
     record.plan.capitalFit = {
       capital_fit:'unknown',
@@ -136,7 +138,7 @@ async function seedCanonicalWatchWithValidPlan(page){
       target:25.2
     };
     record.watchlist.inWatchlist = true;
-    record.watchlist.addedAt = '2026-06-29';
+    record.watchlist.addedAt = fixtureDate;
     record.watchlist.expiryAfterTradingDays = 5;
     record.watchlist.presentation = {
       sharedPresentation:{
@@ -1332,9 +1334,11 @@ test('Review, Track, and Paper Trade canonical authority stay aligned after relo
 
   await page.evaluate(() => {
     const ticker = 'TROW';
+    const fixtureTimestamp = new Date().toISOString();
+    const fixtureDate = fixtureTimestamp.slice(0, 10);
     state.paperTradeApiKey = 'paper-key';
     state.paperTradeApiSecret = 'paper-secret';
-    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    state.paperTradeTesterSetupCompletedAt = fixtureTimestamp;
     trading212PaperAvailabilityChecked = true;
     trading212PaperEnabled = true;
     trading212PaperAvailabilityMessage = 'Paper gateway ready.';
@@ -1351,7 +1355,7 @@ test('Review, Track, and Paper Trade canonical authority stay aligned after relo
     record.marketData.ma200 = 17.8;
     record.marketData.volume = 3831934;
     record.marketData.avgVolume = 2115787.96;
-    record.marketData.asOf = '2026-06-29T09:00:00.000Z';
+    record.marketData.asOf = fixtureTimestamp;
     record.marketData.history = [
       {date:'2026-06-27', open:19.8, high:20.6, low:19.6, close:20.4, volume:3831934}
     ];
@@ -1378,7 +1382,7 @@ test('Review, Track, and Paper Trade canonical authority stay aligned after relo
     record.plan.authorityVersion = 'trade_plan_v1';
     record.plan.authorityReason = 'reload_alignment_seed';
     record.plan.writtenBy = 'playwright';
-    record.plan.writtenAt = '2026-06-29T09:00:00.000Z';
+    record.plan.writtenAt = fixtureTimestamp;
     record.plan.capitalFit = {
       capital_fit:'unknown',
       capital_note:'Capital fit cannot be confirmed yet.',
@@ -1422,7 +1426,7 @@ test('Review, Track, and Paper Trade canonical authority stay aligned after relo
     record.review.manualReview = {entry:20.4, stop:18.8, target:25.2};
     record.review.cardOpen = true;
     record.watchlist.inWatchlist = true;
-    record.watchlist.addedAt = '2026-06-29';
+    record.watchlist.addedAt = fixtureDate;
     record.watchlist.expiryAfterTradingDays = 5;
     state.tickers = [ticker];
     uiState.scannerSessionTickers = [ticker];

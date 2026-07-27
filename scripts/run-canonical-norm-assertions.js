@@ -28,7 +28,8 @@ assert.throws(() => api.publishCanonicalDecision(invalidCandidate, evidence, {en
 const validCandidate = {
   final_verdict:'entry', entry_gate_pass:true, near_entry_gate_pass:true,
   buyer_control_gate_pass:true, confirmation_gate_pass:true,
-  priceability_state:'priceable', structure_eligibility:'alive', support_test_state:'holding'
+  priceability_state:'priceable', structure_eligibility:'alive', support_test_state:'holding',
+  resolvedPlanEntry:100, resolvedPlanStop:95, resolvedPlanTarget:110, resolvedRR:2
 };
 const valid = api.publishCanonicalDecision(validCandidate, evidence);
 assert.strictEqual(valid.publicationStatus, 'valid');

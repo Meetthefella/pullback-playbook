@@ -246,21 +246,11 @@ function assertSimplifiedPipelineResolverInjection(){
     deps
   });
 
-  assert.strictEqual(capturedRecord, record, 'simplified pipeline should pass the same record into ResolverCore.resolveGlobalVerdict');
-  assert.ok(capturedDeps && typeof capturedDeps === 'object', 'simplified pipeline should inject resolver deps');
-  assert.strictEqual(capturedDeps.analysisDerivedStatesFromRecord(record).priceabilityState, 'priceable', 'reconciled derivedStates should be injected into ResolverCore.resolveGlobalVerdict');
-  assert.strictEqual(capturedDeps.resolveFinalStateContract(record).canonical_final_verdict, 'entry', 'override-aware final-state contract should be injected');
-  assert.strictEqual(
-    capturedDeps.preserveReviewCanonicalForSoftReadiness,
-    false,
-    'review surface must not inject the soft-readiness preservation override unless explicit review authority input is present'
-  );
-  assert.strictEqual(
-    result.canonicalVerdict,
-    'watch',
-    'without explicit review authority input, the simplified review pipeline should not preserve soft-readiness Entry canonically'
-  );
-  assert.strictEqual(result.priceabilityState, 'priceable', 'soft-readiness-only review case should preserve priceable state in simplified pipeline');
+  assert.strictEqual(capturedRecord, null, 'publication-only SimplifiedTradeState must not invoke ResolverCore.resolveGlobalVerdict');
+  assert.strictEqual(capturedDeps, null, 'publication-only SimplifiedTradeState must not inject surface resolver dependencies');
+  assert.strictEqual(result.publicationStatus, 'validation_failed', 'a resolver-less simplified call must be visibly validation-failed rather than locally resolved');
+  assert.strictEqual(result.actionable, false, 'a missing publication must remain non-actionable');
+  assert.strictEqual(result.entry, null, 'a missing publication must not expose locally reconstructed plan values');
 }
 
 function assertFxEstimatedRiskOnlyPriceabilityReconciliation(){
@@ -987,8 +977,12 @@ function run(){
   assert.ok(typeof circularComparison.capturedAt === 'string' && circularComparison.capturedAt.length > 0, 'comparison should include capture timestamp');
 
   assertSimplifiedPipelineResolverInjection();
-  assertFxEstimatedRiskOnlyPriceabilityReconciliation();
-  assertTrackedScanAuthorityPreservesCanonicalVerdict();
+  // Consumer 1 no longer reconciles FX/risk plan state locally. That legacy
+  // assertion exercised a retired decision pipeline; publication parity is
+  // covered by run-simplified-publication-adapter-assertions instead.
+  // The former tracked-scan preservation test asserted the stale Near Entry
+  // authority path removed by the Consumer 1B lifecycle cut. Track parity is
+  // now covered by the immutable publication and UI lifecycle contracts.
 
   console.log('run-canonical-resolver-input-assertions: ok');
 }

@@ -1,6 +1,6 @@
 (function(global){
-  const NORM_VERSION = 'canonical-norm-v1';
-  const RESULT_VERSION = 'canonical-decision-result-v1';
+  const NORM_VERSION = 'canonical-norm-v1.1';
+  const RESULT_VERSION = 'canonical-decision-result-v1.1';
 
   function key(value, fallback = ''){
     const normalized = String(value == null ? '' : value).trim().toLowerCase().replace(/[\s-]+/g, '_');
@@ -53,6 +53,34 @@
     });
   }
 
+  function numberOrNull(value){ const number = Number(value); return Number.isFinite(number) ? number : null; }
+  function valueState(value){ return Number.isFinite(value) ? 'present' : 'absent'; }
+  function canonicalPlan(candidate, evidence){
+    const entry = numberOrNull(candidate.resolvedPlanEntry);
+    const stop = numberOrNull(candidate.resolvedPlanStop);
+    const firstTarget = numberOrNull(candidate.resolvedPlanTarget);
+    // `resolvedRr` is the mathematical RR of the published entry/stop/target.
+    // `gateResolvedRr` retains the resolver's conservative plan-realism input.
+    // They are deliberately separate: the latter can cap a distant target
+    // without silently replacing the trader-facing first target.
+    const calculatedRr = entry !== null && stop !== null && firstTarget !== null && entry > stop
+      ? (firstTarget - entry) / (entry - stop)
+      : null;
+    const gateRr = numberOrNull(candidate.resolvedRR);
+    const priceability = key(candidate.priceability_state, 'unknown');
+    const state = ['priceable','provisional'].includes(priceability) ? (priceability === 'provisional' ? 'provisional' : 'valid') : (priceability === 'unpriceable' ? 'unpriceable' : 'unavailable');
+    const actionable = key(candidate.final_verdict) === 'entry';
+    const mayShow = state === 'valid' && entry !== null && stop !== null && firstTarget !== null;
+    return {
+      state, priceability:{status:priceability, reasonCode:String(candidate.unpriceableBlockReason || ''), source:'resolver-core', provisional:state === 'provisional'},
+      levels:{entry:{value:entry,valueState:valueState(entry),source:'resolver-core',currency:'',evidenceIds:[evidence.snapshotId]},stop:{value:stop,valueState:valueState(stop),source:'resolver-core',currency:'',evidenceIds:[evidence.snapshotId]},firstTarget:{value:firstTarget,valueState:valueState(firstTarget),source:'resolver-core',currency:'',evidenceIds:[evidence.snapshotId]}},
+      rewardRisk:{resolvedRr:calculatedRr,valueState:valueState(calculatedRr),gateResolvedRr:gateRr,gateValueState:valueState(gateRr),threshold:actionable ? 2 : 1.5,passes:gateRr === null ? null : gateRr >= (actionable ? 2 : 1.5),source:'resolver-core',gateSource:'resolver-core.plan_gate',reasonCode:''},
+      visibility:{mayShowPlan:mayShow,mayShowEntry:mayShow,mayShowStop:mayShow,mayShowTarget:mayShow,mayShowRr:mayShow && calculatedRr !== null,reasonCode:mayShow ? '' : 'canonical_plan_not_visible'},
+      blocker:{code:String(candidate.semantic_blocker_code || ''),category:String(candidate.primary_blocker_source || ''),fields:[]},
+      provenance:{planId:`${evidence.snapshotId}:plan`,evidenceId:evidence.snapshotId,resolverVersion:RESULT_VERSION,sourceCandidates:[],selectedAuthority:'resolver-core'}
+    };
+  }
+
   function validateCanonicalNorm(result){
     const candidate = result && typeof result === 'object' ? result : {};
     const violations = [];
@@ -63,6 +91,7 @@
     const verdict = key(candidate.verdict && candidate.verdict.value, 'watch');
     const semantics = candidate.semantics || {};
     const priceability = key(semantics.planState && semantics.planState.priceability, 'unknown');
+    const plan = candidate.plan || {};
     const terminal = key(semantics.structure && semantics.structure.eligibility) === 'broken'
       || key(semantics.support && semantics.support.testState) === 'failed';
 
@@ -87,6 +116,13 @@
     if(candidate.snapshot && candidate.evidence && candidate.snapshot.evidenceId !== candidate.evidence.snapshotId){
       violations.push(violation('mixed_canonical_snapshot', 'semantic', 'evidence', ['snapshot.evidenceId', 'evidence.snapshotId'], 'Result fields must originate from one evidence snapshot.'));
     }
+    if(['valid','provisional'].includes(plan.state) && (plan.levels && (plan.levels.entry.valueState !== 'present' || plan.levels.stop.valueState !== 'present'))){
+      violations.push(violation('published_plan_missing_required_levels', 'semantic', 'plan', ['plan.state','plan.levels.entry','plan.levels.stop'], 'Priceable canonical plan requires entry and stop levels.'));
+    }
+    if(plan.rewardRisk && plan.rewardRisk.resolvedRr !== null && plan.levels && Number.isFinite(plan.levels.entry.value) && Number.isFinite(plan.levels.stop.value) && Number.isFinite(plan.levels.firstTarget.value)){
+      const computed = (plan.levels.firstTarget.value - plan.levels.entry.value) / (plan.levels.entry.value - plan.levels.stop.value);
+      if(Math.abs(computed - plan.rewardRisk.resolvedRr) > 0.01) violations.push(violation('published_plan_rr_mismatch', 'semantic', 'plan', ['plan.levels','plan.rewardRisk.resolvedRr'], 'Published RR must match published canonical levels.'));
+    }
     return Object.freeze({
       status:violations.length ? 'validation_failed' : 'valid',
       normVersion:NORM_VERSION,
@@ -103,6 +139,7 @@
       normVersion:NORM_VERSION,
       snapshot:{id:`${normalizedEvidence.snapshotId || 'unavailable'}:resolver-core`, evidenceId:normalizedEvidence.snapshotId || 'unavailable', resolverSource:'resolver-core'},
       evidence:normalizedEvidence,
+      plan:canonicalPlan(raw, normalizedEvidence),
       semantics:{
         structure:{state:key(raw.structure_state, 'unknown'), eligibility:key(raw.structure_eligibility, 'unknown')},
         support:{context:key(raw.support_context, 'unknown'), testState:key(raw.support_test_state, 'unknown')},
@@ -113,7 +150,13 @@
       },
       gates:{entry:raw.entry_gate_pass === true, nearEntry:raw.near_entry_gate_pass === true, buyerControl:raw.buyer_control_gate_pass === true, confirmation:raw.confirmation_gate_pass === true},
       eligibility,
-      verdict:{value:key(raw.final_verdict, 'watch'), actionable:key(raw.final_verdict) === 'entry', decisiveBlocker:key(raw.final_verdict) === 'entry' ? '' : String(raw.main_blocker || raw.reason || '').trim()}
+      verdict:{
+        value:key(raw.final_verdict, 'watch'),
+        actionable:key(raw.final_verdict) === 'entry',
+        decisiveBlocker:key(raw.final_verdict) === 'entry' ? '' : String(raw.main_blocker || raw.reason || '').trim(),
+        decisiveBlockerCode:String(raw.semantic_blocker_code || raw.blockerCode || '').trim(),
+        decisiveBlockerCategory:String(raw.primary_blocker_source || raw.blockerCategory || '').trim()
+      }
     };
     result.validation = validateCanonicalNorm(result);
     return deepFreeze(result);
@@ -149,8 +192,14 @@
     const raw = clone(candidate || {});
     const envelope = publication || {};
     if(envelope.publicationStatus === 'valid'){
+      const canonical = envelope.canonicalResult;
+      const verdict = canonical && canonical.verdict ? canonical.verdict.value : 'watch';
       raw.publicationStatus = 'valid';
-      raw.canonicalDecisionResult = envelope.canonicalResult;
+      raw.final_verdict = verdict;
+      raw.canonical_final_verdict = verdict;
+      raw.allow_plan = canonical && canonical.verdict && canonical.verdict.actionable === true;
+      raw.allow_watchlist = verdict !== 'avoid';
+      raw.canonicalDecisionResult = canonical;
       raw.canonicalPublication = envelope;
       return raw;
     }

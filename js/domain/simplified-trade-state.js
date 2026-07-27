@@ -603,7 +603,78 @@
     return diagnostics;
   }
 
-  function resolveRecordState(record, options = {}){
+  function mapCanonicalDecisionToSimplifiedState(record, publication, surface){
+    const item = record && typeof record === 'object' ? record : {};
+    const envelope = publication && typeof publication === 'object' ? publication : {};
+    const canonical = envelope.canonicalResult && typeof envelope.canonicalResult === 'object' ? envelope.canonicalResult : null;
+    const fallback = envelope.safeFallback && typeof envelope.safeFallback === 'object' ? envelope.safeFallback : null;
+    const failed = envelope.publicationStatus === 'validation_failed';
+    const verdict = failed ? String(fallback && fallback.verdict || 'watch').toLowerCase() : String(canonical && canonical.verdict && canonical.verdict.value || 'watch').toLowerCase();
+    const semantics = canonical && canonical.semantics || {};
+    const plan = semantics.planState || {};
+    const publishedPlan = canonical && canonical.plan || {};
+    const eligibility = canonical && canonical.eligibility || {};
+    const blocker = failed ? 'Canonical decision validation failed.' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlocker || '');
+    // The historical `monitor` bucket is retained only as visual grouping for
+    // canonical Watch. It never changes verdict, eligibility, or actionability.
+    const visualBucket = verdict === 'watch' ? 'monitor' : verdict;
+    return {
+      ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
+      canonicalVerdict:verdict, finalVerdict:verdict, publicationStatus:failed ? 'validation_failed' : 'valid',
+      canonicalNormVersion:failed ? String(envelope.validation && envelope.validation.normVersion || '') : canonical.normVersion,
+      canonicalResultVersion:failed ? '' : canonical.schemaVersion,
+      evidenceId:failed ? '' : canonical.snapshot && canonical.snapshot.evidenceId,
+      actionable:failed ? false : canonical.verdict.actionable === true,
+      entryGatePass:failed ? false : canonical.gates.entry === true,
+      nearEntryGatePass:failed ? false : canonical.gates.nearEntry === true,
+      entryEligibility:failed ? null : eligibility.entry,
+      nearEntryEligibility:failed ? null : eligibility.nearEntry,
+      structureState:failed ? 'unknown' : semantics.structure && semantics.structure.state,
+      supportState:failed ? 'unknown' : semantics.support && semantics.support.context,
+      pullbackState:failed ? 'unknown' : semantics.pullback && semantics.pullback.state,
+      buyerResponseState:failed ? 'unknown' : semantics.buyer && semantics.buyer.response,
+      buyerControlState:failed ? 'unknown' : semantics.buyer && semantics.buyer.control,
+      followThroughState:failed ? 'unknown' : semantics.buyer && semantics.buyer.followThrough,
+      marketState:failed ? 'unknown' : semantics.market && semantics.market.state,
+      volumeState:failed ? 'unknown' : semantics.market && semantics.market.volume,
+      planState:failed ? 'unavailable' : plan.priceability,
+      planStatus:failed ? 'unavailable' : plan.status,
+      planVisible:failed ? false : publishedPlan.visibility && publishedPlan.visibility.mayShowPlan === true,
+      canonicalPlan:failed ? null : publishedPlan,
+      entry:failed ? null : publishedPlan.levels && publishedPlan.levels.entry.value,
+      stop:failed ? null : publishedPlan.levels && publishedPlan.levels.stop.value,
+      target:failed ? null : publishedPlan.levels && publishedPlan.levels.firstTarget.value,
+      resolvedRR:failed ? null : publishedPlan.rewardRisk && publishedPlan.rewardRisk.resolvedRr,
+      priceabilityState:failed ? 'unavailable' : publishedPlan.priceability && publishedPlan.priceability.status,
+      decisiveBlocker:blocker,
+      decisiveBlockerCode:failed ? 'canonical_norm_validation_failed' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlockerCode || ''),
+      decisiveBlockerCategory:failed ? 'validation' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlockerCategory || ''),
+      canonicalDecisionProjection:{
+        verdict,
+        actionable:failed ? false : canonical.verdict.actionable === true,
+        decisiveBlocker:blocker,
+        decisiveBlockerCode:failed ? 'canonical_norm_validation_failed' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlockerCode || ''),
+        decisiveBlockerCategory:failed ? 'validation' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlockerCategory || ''),
+        nextRequiredEvent:failed ? '' : String(canonical && canonical.verdict && canonical.verdict.nextRequiredEvent || ''),
+        publicationStatus:failed ? 'validation_failed' : 'valid',
+        canonicalResultVersion:failed ? '' : canonical.schemaVersion,
+        evidenceId:failed ? '' : canonical.snapshot && canonical.snapshot.evidenceId
+      },
+      visualBucket, tone:visualBucket, badgeLabel:verdict === 'near_entry' ? 'Near Entry' : (verdict === 'entry' ? 'Entry' : (verdict === 'avoid' ? 'Avoid' : 'Watch')),
+      actionLabel:failed ? 'Decision unavailable - validation failed.' : (verdict === 'entry' ? 'Execute only if the trigger remains valid.' : 'Wait for the next canonical requirement.'),
+      mainBlocker:blocker,
+      compatibility:{compatibilityOnly:true, mayFeedDecisionLogic:false, reviewVersion:'post-stabilisation-release', sourceCanonicalFields:['verdict','semantics','eligibility','plan','snapshot.evidenceId'], aliases:{
+        visualBucket:{category:'A', sourceCanonicalFields:['verdict.value'], transformation:'watch_to_monitor_visual_group', compatibilityOnly:true, mayFeedDecisionLogic:false},
+        planDisplay:{category:'compatibility_alias', sourceCanonicalFields:['plan.levels.entry','plan.levels.stop','plan.levels.firstTarget','plan.rewardRisk','plan.visibility','plan.provenance'], transformation:'one_way_plan_payload_projection', compatibilityOnly:true, mayFeedDecisionLogic:false},
+        canonicalDecisionProjection:{category:'compatibility_alias', sourceCanonicalFields:['verdict','snapshot.evidenceId','schemaVersion'], transformation:'one_way_decision_projection', compatibilityOnly:true, mayFeedDecisionLogic:false}
+      }},
+      debug:{surface, source:'canonical-publication-mapper', publication:envelope, resolvedState:failed ? null : canonical, visualState:null, compatibilityOnly:true}
+    };
+  }
+
+  // Retained only while the migration diagnostics are deployed.  It is not
+  // exported and therefore cannot affect a returned simplified state.
+  function legacyResolveRecordStateObserverOnly(record, options = {}){
     const surface = options.surface || options.context || 'scanner';
     try{
       if(!global.SimplifiedPlanState || !global.SimplifiedPresentationModel){
@@ -816,7 +887,35 @@
     }
   }
 
+  function missingPublication(){
+    return {
+      publicationStatus:'validation_failed',
+      canonicalResult:null,
+      safeFallback:{
+        verdict:'watch',
+        actionable:false,
+        reasonCode:'canonical_publication_missing',
+        publicationStatus:'validation_failed'
+      },
+      validation:{
+        status:'validation_failed',
+        normVersion:'canonical-norm-v1.1',
+        violations:[{code:'canonical_publication_missing', category:'decision', level:'publication', fields:['publication'], message:'No validated canonical publication was supplied.'}]
+      }
+    };
+  }
+
+  // Consumer 1 publication boundary.  This deliberately has no resolver,
+  // plan, persisted-state, or surface-authority dependency.
+  function resolveRecordState(record, options = {}){
+    const publication = options.publication && typeof options.publication === 'object'
+      ? options.publication
+      : missingPublication();
+    return mapCanonicalDecisionToSimplifiedState(record, publication, options.surface || options.context || 'scanner');
+  }
+
   global.SimplifiedTradeState = {
-    resolveRecordState
+    resolveRecordState,
+    mapCanonicalDecisionToSimplifiedState
   };
 })(window);

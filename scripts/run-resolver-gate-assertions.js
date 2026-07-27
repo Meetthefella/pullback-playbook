@@ -32,6 +32,7 @@ runBrowserModule('js/scanner-universe-policy.js');
 runBrowserModule('js/setup-basis-policy.js');
 runBrowserModule('js/resolver-core.js');
 runBrowserModule('js/resolver-presentation.js');
+runBrowserModule('js/domain/canonical-decision-result.js');
 runBrowserModule('js/domain/simplified-plan-state.js');
 runBrowserModule('js/presentation/simplified-presentation-model.js');
 runBrowserModule('js/domain/simplified-trade-state.js');
@@ -5704,7 +5705,9 @@ function runSimplifiedPipelineAssertions(){
   }
 }
 
-runSimplifiedPipelineAssertions();
+// Consumer 1 is now a publication-only adapter. Its former local-resolution
+// assertions live in run-simplified-publication-adapter-assertions.js; keeping
+// them here would re-authorize the retired pipeline contract.
 
 function runAiContractAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
@@ -8820,122 +8823,26 @@ function runTrackPresentationAuthorityAssertions(){
     || !String(suppressedAvoidPresentation.statusText || '').trim()){
     throw new Error('Persisted tracked avoid presentation must still expose non-empty public labels.');
   }
+  const publication = sandbox.window.CanonicalDecisionResult.publishCanonicalDecision({
+    final_verdict:'entry', entry_gate_pass:true, near_entry_gate_pass:true,
+    buyer_control_gate_pass:true, confirmation_gate_pass:true,
+    priceability_state:'priceable', structure_eligibility:'alive', support_test_state:'held',
+    resolvedPlanEntry:100, resolvedPlanStop:95, resolvedPlanTarget:115, resolvedRR:3,
+    semantic_blocker_code:'', primary_blocker_source:'resolver'
+  }, {schemaVersion:'normalised-decision-evidence-v1', snapshotId:'track-authority-evidence'});
   const persistedScanWatch = sandbox.window.SimplifiedTradeState.resolveRecordState({
     ticker:'NVDA',
-    watchlist:{
-      inWatchlist:true,
-      presentation:{
-        sharedPresentation:suppressedAvoidPresentation
-      }
-    }
-  }, {
-    surface:'scan',
-    log:false,
-    deps:{
-      effectivePlanForRecord(){
-        return {entry:'', stop:'', firstTarget:'', source:''};
-      },
-      riskSettingsProvider(){
-        return {accountSize:4000, maxRisk:40};
-      },
-      analysisDerivedStatesFromRecord(){
-        return {
-          structureState:'weak',
-          setupLocationState:'extended',
-          priceabilityState:'unpriceable',
-          trendState:'acceptable',
-          bounceState:'none',
-          stabilisationState:'none',
-          pullbackZone:'extended',
-          volumeState:'normal'
-        };
-      },
-      applySetupConfirmationPlanGate(_record, displayedPlan){
-        return displayedPlan;
-      },
-      baseVerdictFromResolvedContract(){
-        return 'watch';
-      },
-      resolvePreLifecycleStateContract(){
-        return {
-          finalVerdict:'Avoid',
-          structuralState:'developing',
-          actionStateKey:'recalculate_plan',
-          planStatusKey:'missing',
-          tradeabilityVerdict:'Watch',
-          blockerReason:'Structure is broken.',
-          reasonSummary:'Structure is broken.',
-          terminal:false,
-          baseVerdict:'watch'
-        };
-      },
-      resolveFinalStateContract(){
-        return {
-          finalVerdict:'Avoid',
-          structuralState:'developing',
-          actionStateKey:'recalculate_plan',
-          planStatusKey:'missing',
-          tradeabilityVerdict:'Watch',
-          blockerReason:'Structure is broken.',
-          reasonSummary:'Structure is broken.',
-          terminal:false,
-          baseVerdict:'watch'
-        };
-      },
-      evaluatePlanRealism(){
-        return {credible_rr:null};
-      },
-      setupScoreForRecord(){
-        return 2;
-      },
-      isHostileMarketStatus(){
-        return false;
-      },
-      scannerScoreGradientClass(){
-        return '';
-      },
-      state:{marketStatus:'S&P above 50 MA'},
-      normalizeGlobalVerdictKey(value){
-        const safe = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
-        if(['entry','near_entry','watch','avoid'].includes(safe)) return safe;
-        return 'watch';
-      },
-      normalizeVerdict(value){
-        return String(value || '').trim().toLowerCase();
-      },
-      getBadge(verdict){
-        return {text:verdict === 'avoid' ? 'Avoid' : 'Watch'};
-      },
-      getActions(){
-        return {label:'WATCH'};
-      },
-      deriveTradeability(){
-        return 'watch';
-      },
-      evaluateRiskFit(){
-        return {risk_status:'plan_missing'};
-      }
-    }
-  });
-  if(!String(persistedScanWatch.canonicalVerdict || '').trim()
-    || !String(persistedScanWatch.visualBucket || '').trim()
-    || !String(persistedScanWatch.tone || '').trim()
-    || (
-      String(persistedScanWatch.canonicalVerdict || '').trim().toLowerCase() === String(suppressedAvoidPresentation.canonicalVerdict || '').trim().toLowerCase()
-      && String(persistedScanWatch.visualBucket || '').trim().toLowerCase() === String(suppressedAvoidPresentation.visualBucket || '').trim().toLowerCase()
-      && String(persistedScanWatch.tone || '').trim().toLowerCase() === String(suppressedAvoidPresentation.tone || '').trim().toLowerCase()
-    )){
-    throw new Error('Scan simplified pipeline must recompute fresh public state instead of reusing persisted shared presentation authority.');
+    watchlist:{inWatchlist:true, presentation:{sharedPresentation:suppressedAvoidPresentation}}
+  }, {surface:'scan', publication});
+  if(persistedScanWatch.canonicalVerdict !== 'entry'
+    || persistedScanWatch.visualBucket !== 'entry'
+    || persistedScanWatch.evidenceId !== 'track-authority-evidence'
+    || persistedScanWatch.compatibility.mayFeedDecisionLogic !== false){
+    throw new Error('Scan simplified pipeline must map its returned state solely from the fresh canonical publication.');
   }
-  if(persistedScanWatch.debug.persistedPresentationAvailable !== true
-    || persistedScanWatch.debug.persistedPresentationOverlayApplied !== true
-    || persistedScanWatch.debug.persistedPresentationAuthorityDisabled !== 'global_non_authoritative'){
-    throw new Error('Scan simplified pipeline must retain persisted presentation as cache/debug only, not authority.');
-  }
-  if(!persistedScanWatch.debug.persistedPresentationFeedback
-    || persistedScanWatch.debug.persistedPresentationFeedback.verdictConflict !== true
-    || persistedScanWatch.debug.persistedPresentationFeedback.bucketConflict !== true){
-    throw new Error('Scan simplified pipeline must report persisted presentation feedback conflicts when stale presentation disagrees with fresh state.');
+  if(persistedScanWatch.canonicalVerdict === String(suppressedAvoidPresentation.canonicalVerdict || '').toLowerCase()
+    || persistedScanWatch.visualBucket === String(suppressedAvoidPresentation.visualBucket || '').toLowerCase()){
+    throw new Error('Persisted presentation must not override the canonical publication in the simplified state.');
   }
   const watchlistBucketSandbox = {
     console,

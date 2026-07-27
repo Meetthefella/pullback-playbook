@@ -41,6 +41,8 @@ async function bootApp(page){
 
 async function seedScenario(page, scenario){
   await page.evaluate(seed => {
+    const fixtureDate = typeof todayIsoDate === 'function' ? todayIsoDate() : new Date().toISOString().slice(0, 10);
+    const fixtureTimestamp = `${fixtureDate}T09:00:00.000Z`;
     const record = upsertTickerRecord(seed.ticker);
     record.meta.companyName = seed.companyName;
     record.meta.exchange = 'NASDAQ';
@@ -55,7 +57,7 @@ async function seedScenario(page, scenario){
     record.marketData.rsi = seed.rsi;
     record.marketData.volume = seed.volume;
     record.marketData.avgVolume = seed.avgVolume;
-    record.marketData.asOf = '2026-06-29T09:00:00.000Z';
+    record.marketData.asOf = fixtureTimestamp;
     record.marketData.history = [
       {date:'2026-06-27', open:seed.price - 1, high:seed.price + 1, low:seed.price - 2, close:seed.price, volume:seed.volume}
     ];
@@ -87,7 +89,7 @@ async function seedScenario(page, scenario){
       record.plan.authorityVersion = 'trade_plan_v1';
       record.plan.authorityReason = seed.planAuthorityReason || 'canonical_seed_fixture';
       record.plan.writtenBy = seed.planWrittenBy || 'track-state-presentation-contract.spec';
-      record.plan.writtenAt = seed.planWrittenAt || '2026-06-29T09:00:00.000Z';
+      record.plan.writtenAt = seed.planWrittenAt || fixtureTimestamp;
     }
     record.scan.analysisProjection = {
       price:seed.price,
@@ -137,7 +139,7 @@ async function seedScenario(page, scenario){
       target:seed.target || ''
     };
     record.watchlist.inWatchlist = true;
-    record.watchlist.addedAt = '2026-06-29';
+    record.watchlist.addedAt = fixtureDate;
     record.watchlist.expiryAfterTradingDays = 5;
     record.watchlist.presentation = {
       sharedPresentation:{
@@ -152,7 +154,7 @@ async function seedScenario(page, scenario){
 
     state.paperTradeApiKey = 'paper-key';
     state.paperTradeApiSecret = 'paper-secret';
-    state.paperTradeTesterSetupCompletedAt = '2026-06-29T09:00:00.000Z';
+    state.paperTradeTesterSetupCompletedAt = fixtureTimestamp;
     fxRateCache.set('USD', {
       gbpPerUnit:0.79,
       fetchedAt:new Date().toISOString()

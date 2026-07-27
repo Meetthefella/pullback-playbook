@@ -4875,6 +4875,18 @@ function buildTrackDiagnosticSnapshot(record){
     const globalVerdict = (simplifiedDebug.resolvedState
       ? simplifiedDebug.resolvedState
       : resolveGlobalVerdict(item));
+    const diagnosticResolverVerdict = resolveGlobalVerdict(item);
+    const diagnosticAnalysisState = typeof getReviewAnalysisState === 'function' ? getReviewAnalysisState(item) : null;
+    const diagnosticAnalysis = diagnosticAnalysisState && diagnosticAnalysisState.normalizedAnalysis && typeof diagnosticAnalysisState.normalizedAnalysis === 'object'
+      ? diagnosticAnalysisState.normalizedAnalysis
+      : {};
+    const diagnosticStoryContext = typeof buildCanonicalStoryContextForRecord === 'function'
+      ? buildCanonicalStoryContextForRecord(item, {
+        analysis:diagnosticAnalysis,
+        globalVerdict:diagnosticResolverVerdict,
+        derivedStates
+      })
+      : null;
     const renderModels = buildCanonicalModels(item, {
       surface:'track',
       source:'diagnostic_snapshot',
@@ -4941,9 +4953,7 @@ function buildTrackDiagnosticSnapshot(record){
     const authoritativeTrackDecisionProjection = typeof buildAuthoritativeDecisionProjection === 'function'
       ? buildAuthoritativeDecisionProjection({
         record:item,
-        finalVerdict:effectiveSharedPresentation && effectiveSharedPresentation.canonicalVerdict
-          ? effectiveSharedPresentation.canonicalVerdict
-          : (canonicalTrackRenderModel && canonicalTrackRenderModel.canonicalVerdict) || simplifiedState.canonicalVerdict || 'watch',
+        finalVerdict:simplifiedState.canonicalVerdict || simplifiedState.finalVerdict || 'watch',
         resolvedContract:{
           planStatusKey:String(
             effectiveSharedPresentation && effectiveSharedPresentation.planStatus
@@ -4953,7 +4963,9 @@ function buildTrackDiagnosticSnapshot(record){
           ).trim().toLowerCase()
         },
         derivedStates,
-        globalVerdict,
+        globalVerdict:diagnosticResolverVerdict,
+        analysis:diagnosticAnalysis,
+        storyContext:diagnosticStoryContext,
         authoritativeBlockerText:String(
           effectiveSharedPresentation && (
             effectiveSharedPresentation.trackBlocker
@@ -5002,10 +5014,10 @@ function buildTrackDiagnosticSnapshot(record){
       ? trackDebug.visibleModel
       : null;
     const diagnosticCanonicalVerdict = normalizeVerdictKey(
-      canonicalTrackRenderModel && canonicalTrackRenderModel.canonicalVerdict
+      simplifiedState.canonicalVerdict
+      || canonicalTrackRenderModel && canonicalTrackRenderModel.canonicalVerdict
       || canonicalContract && canonicalContract.canonicalVerdict
       || canonicalContract && canonicalContract.canonicalVerdictKey
-      || simplifiedState.canonicalVerdict
       || (!simplifiedStateFromPersistedCacheOnly && (
         trackVisibleModel.canonicalVerdict
         || effectiveSharedPresentation.canonicalVerdict
@@ -5014,9 +5026,9 @@ function buildTrackDiagnosticSnapshot(record){
       || 'watch'
     );
     const diagnosticVisualBucket = normalizeBucket(
-      canonicalTrackRenderModel && (canonicalTrackRenderModel.visibleBucket || canonicalTrackRenderModel.visualBucket)
+      simplifiedState.visualBucket
+      || canonicalTrackRenderModel && (canonicalTrackRenderModel.visibleBucket || canonicalTrackRenderModel.visualBucket)
       || canonicalContract && canonicalContract.canonicalVisualBucket
-      || simplifiedState.visualBucket
       || (!simplifiedStateFromPersistedCacheOnly && (
         trackVisibleModel.visibleBucket
         || effectiveSharedPresentation.visualBucket
@@ -5104,12 +5116,25 @@ function buildTrackDiagnosticSnapshot(record){
       persistedPresentationAvailable:persistedSharedPresentation != null,
       persistedPresentationCacheOnly:persistedSharedPresentation != null
     };
+    // Diagnostics must describe the same immutable publication currently
+    // rendered by Track. The older render-model contract remains useful
+    // context, but cannot become the diagnostic decision root.
+    const publicationDiagnosticContract = {
+      ...(canonicalContract && typeof canonicalContract === 'object' ? canonicalContract : {}),
+      canonicalVerdict:String(diagnosticCanonicalVerdict || ''),
+      canonicalVerdictKey:String(diagnosticCanonicalVerdict || ''),
+      canonicalVisualBucket:String(diagnosticVisualBucket || ''),
+      canonicalResultVersion:String(simplifiedState.canonicalResultVersion || ''),
+      canonicalNormVersion:String(simplifiedState.canonicalNormVersion || ''),
+      evidenceId:String(simplifiedState.evidenceId || ''),
+      publicationStatus:String(simplifiedState.publicationStatus || 'valid')
+    };
     const displayCacheDivergence = displayDivergenceSummary(
-      canonicalContract,
+      publicationDiagnosticContract,
       persistedSharedPresentation,
       canonicalTrackRenderModel || trackVisibleModel
     );
-    const persistenceInputDivergence = persistenceDivergenceSummary(item, canonicalContract);
+    const persistenceInputDivergence = persistenceDivergenceSummary(item, publicationDiagnosticContract);
     return {
       ticker:String(item.ticker || ''),
       canonicalVerdict:String(trackStateHealth.canonicalVerdict || ''),
@@ -5120,7 +5145,7 @@ function buildTrackDiagnosticSnapshot(record){
       statusText:String(trackStateHealth.statusText || ''),
       actionLabel:String(trackStateHealth.actionLabel || ''),
       contractFingerprint:String(trackStateHealth.contractFingerprint || ''),
-      contract:safeDiagnosticClone(canonicalContract || {}, {}),
+      contract:safeDiagnosticClone(publicationDiagnosticContract, {}),
       renderModels:safeDiagnosticClone({
         review:renderModels && renderModels.reviewRenderModel ? renderModels.reviewRenderModel : null,
         track:canonicalTrackRenderModel,
@@ -10864,8 +10889,8 @@ function buildPersistedTrackPresentation(record, bundle, options = {}){
     source:options.source || safeBundle.source || 'shared_refresh',
     reason:options.reason || safeBundle.reason || 'shared_refresh'
   });
-  const watchlistVisualState = persistedWatchlistVisualStateFromPresentation(sharedPresentation);
   const trackVisibleModel = persistedTrackVisibleModelFromPresentation(sharedPresentation);
+  const watchlistVisualState = persistedWatchlistVisualStateFromPresentation(sharedPresentation);
   return {
     schemaVersion:'watchlist-presentation-cache-v2',
     updatedAt:new Date().toISOString(),
@@ -14138,6 +14163,61 @@ function applyLifecycleStatePresentation(snapshot, nextState, context = {}){
   return nextSnapshot;
 }
 
+function currentCanonicalDecisionForLifecycle(record, globalVerdict){
+  const publication = globalVerdict && globalVerdict.canonicalPublication;
+  if(window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'){
+    return window.SimplifiedTradeState.resolveRecordState(record, {
+      publication,
+      surface:'track',
+      log:false
+    });
+  }
+  return {
+    publicationStatus:'validation_failed', canonicalVerdict:'watch', finalVerdict:'watch', actionable:false,
+    entryEligibility:null, nearEntryEligibility:null,
+    decisiveBlocker:'Canonical publication unavailable.',
+    decisiveBlockerCode:'canonical_publication_missing', decisiveBlockerCategory:'validation'
+  };
+}
+
+function applyCanonicalCurrentDecisionToLifecycleSnapshot(snapshot, currentDecision){
+  const historical = snapshot && typeof snapshot === 'object' ? snapshot : {};
+  const current = currentDecision && typeof currentDecision === 'object' ? currentDecision : {};
+  const verdict = normalizeGlobalVerdictKey(current.canonicalVerdict || current.finalVerdict || 'watch') || 'watch';
+  const badge = getBadge(verdict);
+  const historicalState = normalizeGlobalVerdictKey(historical.state || '');
+  const bucket = ({entry:'tradeable_entry', near_entry:'tradeable_entry', watch:'monitor_watch', avoid:'low_priority_avoid', dead:'low_priority_avoid'})[verdict] || 'monitor_watch';
+  return {
+    ...historical,
+    // Current decision is an immutable publication projection; lifecycle is
+    // historical context only and cannot promote/demote it.
+    state:verdict,
+    label:badge.text,
+    badgeClass:badge.className,
+    bucket,
+    status:current.publicationStatus === 'validation_failed' ? 'validation_failed' : (['avoid','dead'].includes(verdict) ? 'inactive' : 'active'),
+    reason:String(current.decisiveBlocker || historical.reason || '').trim(),
+    currentDecision:{
+      publicationStatus:String(current.publicationStatus || 'validation_failed'),
+      canonicalVersion:String(current.canonicalResultVersion || ''),
+      canonicalNormVersion:String(current.canonicalNormVersion || ''),
+      evidenceId:String(current.evidenceId || ''),
+      verdict,
+      actionable:current.actionable === true,
+      entryEligibility:current.entryEligibility || null,
+      nearEntryEligibility:current.nearEntryEligibility || null,
+      decisiveBlockerCode:String(current.decisiveBlockerCode || ''),
+      decisiveBlockerCategory:String(current.decisiveBlockerCategory || '')
+    },
+    lifecycleHistory:{
+      previousState:historicalState || '',
+      previousLabel:String(historical.label || ''),
+      currentOverrideApplied:historicalState && historicalState !== verdict,
+      authority:'historical_context_only'
+    }
+  };
+}
+
 function watchlistLifecycleSnapshot(record, options = {}){
   const item = normalizeTickerRecordReadOnly(record);
   const lifecycleSource = String(options.source || '').trim().toLowerCase();
@@ -14172,13 +14252,15 @@ function watchlistLifecycleSnapshot(record, options = {}){
   }
   const liveRefreshPending = isWatchlistLiveRefreshPending(item.ticker);
   if(liveRefreshPending){
+    const pendingGlobalVerdict = resolveGlobalVerdict(item);
+    const pendingCurrentDecision = currentCanonicalDecisionForLifecycle(item, pendingGlobalVerdict);
     const storedState = canonicalLifecycleState(item.watchlist && item.watchlist.lifecycleState);
     const state = storedState || 'watch';
     const expiryTradingDays = item.watchlist.expiryAfterTradingDays || WATCHLIST_EXPIRY_TRADING_DAYS;
     const addedAt = item.watchlist.addedAt || todayIsoDate();
     const expiryAt = item.watchlist.expiryAt || tradingDaysFrom(addedAt, expiryTradingDays);
     const remainingTradingDays = expiryAt ? countTradingDaysBetween(todayIsoDate(), expiryAt) : expiryTradingDays;
-    return {
+    return applyCanonicalCurrentDecisionToLifecycleSnapshot({
       state,
       label:getBadge(state).text,
       badgeClass:getBadge(state).className,
@@ -14202,9 +14284,10 @@ function watchlistLifecycleSnapshot(record, options = {}){
       rank:watchlistLifecycleStateRank(state),
       hasMeaningfulImprovement:false,
       pending:true
-    };
+    }, pendingCurrentDecision);
   }
   const globalVerdict = resolveGlobalVerdict(item);
+  const currentCanonicalDecision = currentCanonicalDecisionForLifecycle(item, globalVerdict);
   const structureGate = watchlistRefreshStructureGate(item);
   const derivedStates = analysisDerivedStatesFromRecord(item);
   const displayedPlan = deriveCurrentPlanState(
@@ -14386,7 +14469,7 @@ function watchlistLifecycleSnapshot(record, options = {}){
       ).trim() || 'Monitor setup - keep tracking.';
       snapshot.lifecycle_soft_promotion_suppressed = 'true';
       snapshot.lifecycle_soft_promotion_source = lifecycleSource;
-      return snapshot;
+      return applyCanonicalCurrentDecisionToLifecycleSnapshot(snapshot, currentCanonicalDecision);
     }
     snapshot = applyLifecycleStatePresentation(snapshot, transitionedState, {
       globalVerdict,
@@ -14408,7 +14491,7 @@ function watchlistLifecycleSnapshot(record, options = {}){
     snapshot.downgradeReason = '';
   }
 
-  return snapshot;
+  return applyCanonicalCurrentDecisionToLifecycleSnapshot(snapshot, currentCanonicalDecision);
 }
 
 function shouldSuppressWatchlistAddSoftDowngrade(record, snapshot, context = {}){
@@ -15811,8 +15894,29 @@ function renderWatchlistCardElement(record, options = {}){
     source:'renderWatchlistCardElement',
     reason:'renderWatchlistCardElement'
   });
-  const trackVisibleModel = persistedTrackVisibleModelFromPresentation(sharedPresentation);
-  const canonicalVerdict = normalizeGlobalVerdictKey(trackVisibleModel.canonicalVerdict || 'watch');
+  const legacyTrackVisibleModel = persistedTrackVisibleModelFromPresentation(sharedPresentation);
+  const canonicalVerdict = normalizeGlobalVerdictKey(
+    simplifiedState && (simplifiedState.canonicalVerdict || simplifiedState.finalVerdict)
+    || 'watch'
+  );
+  // The Track renderer may keep its layout/copy model, but current decision
+  // fields are one-way projections from Consumer 1—not lifecycle history.
+  const trackVisibleModel = {
+    ...legacyTrackVisibleModel,
+    canonicalVerdict,
+    visibleBucket:String(simplifiedState && simplifiedState.visualBucket || legacyTrackVisibleModel.visibleBucket || 'monitor'),
+    tone:String(simplifiedState && simplifiedState.tone || legacyTrackVisibleModel.tone || 'monitor'),
+    badgeLabel:String(simplifiedState && simplifiedState.badgeLabel || globalVerdictLabel(canonicalVerdict)),
+    headline:String(simplifiedState && simplifiedState.actionLabel || legacyTrackVisibleModel.headline || ''),
+    primaryReason:String(simplifiedState && simplifiedState.mainBlocker || legacyTrackVisibleModel.primaryReason || ''),
+    nextAction:String(simplifiedState && simplifiedState.actionLabel || legacyTrackVisibleModel.nextAction || ''),
+    planStatus:String(simplifiedState && simplifiedState.planStatus || legacyTrackVisibleModel.planStatus || 'unavailable'),
+    planVisible:simplifiedState && simplifiedState.planVisible === true,
+    publicationStatus:String(simplifiedState && simplifiedState.publicationStatus || 'validation_failed'),
+    compatibilityOnly:true,
+    mayFeedDecisionLogic:false,
+    sourceCanonicalFields:['verdict.value','verdict.actionable','eligibility','plan','verdict.decisiveBlocker']
+  };
   const trackStateDivergence = collectStateDivergence(record, 'track.render', simplifiedState, trackVisibleModel, [
     'canonicalVerdict',
     'visibleBucket',
@@ -15830,7 +15934,18 @@ function renderWatchlistCardElement(record, options = {}){
   const visualStateKey = presentationVisualStateForVerdict(canonicalVerdict);
   const className = `visual-state-card visual-state-${visualStateKey} visual-tone-${tone} ${cardClass}`;
   const trackAuthoritativeState = simplifiedState && typeof simplifiedState === 'object' ? simplifiedState : {};
-  const watchlistVisualState = persistedWatchlistVisualStateFromPresentation(sharedPresentation);
+  const watchlistVisualState = {
+    ...persistedWatchlistVisualStateFromPresentation(sharedPresentation),
+    badge:{text:trackVisibleModel.badgeLabel, className:badgeClass},
+    canonicalVerdict,
+    visualBucket,
+    tone,
+    mainBlocker:trackVisibleModel.primaryReason,
+    nextAction:trackVisibleModel.nextAction,
+    publicationStatus:trackVisibleModel.publicationStatus,
+    compatibilityOnly:true,
+    mayFeedDecisionLogic:false
+  };
   const rawViabilityBranchReason = String(globalVerdict && globalVerdict.viabilityBranchReason || '').trim();
   const staleTrackViabilityBranchReason = /needs structure repair/i.test(rawViabilityBranchReason)
     && ['alive'].includes(String(derivedStates.structureEligibility || globalVerdict && globalVerdict.structure_eligibility || '').trim().toLowerCase())
@@ -15950,6 +16065,24 @@ function renderWatchlistCardElement(record, options = {}){
     derivedStates,
     displayedPlan
   });
+  if(canonicalVerdict !== 'entry' && entryConditionsSummary && typeof entryConditionsSummary === 'object'){
+    const currentStatus = canonicalVerdict === 'near_entry' ? 'Near Entry' : (canonicalVerdict === 'avoid' ? 'Avoid' : 'Developing Watch');
+    entryConditionsSummary = {
+      ...entryConditionsSummary,
+      ready:false,
+      bucket:canonicalVerdict === 'watch' ? 'monitor' : canonicalVerdict,
+      canonicalVerdict,
+      header:currentStatus,
+      why:String(simplifiedState && simplifiedState.mainBlocker || 'Current canonical requirements are not yet satisfied.'),
+      primary:String(simplifiedState && simplifiedState.mainBlocker || 'Current canonical requirements are not yet satisfied.'),
+      nextRequiredAction:String(simplifiedState && simplifiedState.actionLabel || 'Wait for the next canonical requirement.'),
+      definitionLine:'',
+      triggerLine:'',
+      compatibilityOnly:true,
+      mayFeedDecisionLogic:false,
+      sourceCanonicalFields:['verdict.value','eligibility','verdict.decisiveBlocker','publicationStatus']
+    };
+  }
   if(authoritativeEntryPanel && entryConditionsSummary && typeof entryConditionsSummary === 'object'){
     const rrValue = typeof numericOrNull === 'function'
       ? numericOrNull(displayedPlan.rewardRisk && displayedPlan.rewardRisk.rrRatio)
@@ -22260,12 +22393,16 @@ function visualBucketReason(canonicalVerdict = '', visualBucket = '', context = 
   return 'presentation tone';
 }
 
-function resolveSimplifiedStateForSurface(record, surface = 'review', options = {}){
+// Legacy Consumer 1 pipeline retained for diagnostic comparison only. It is
+// deliberately not called by the exported surface bridge below.
+function legacyResolveSimplifiedStateForSurfaceObserverOnly(record, surface = 'review', options = {}){
   const item = record && typeof record === 'object' ? record : {};
   const ticker = normalizeTicker(item.ticker || item.symbol || '');
   const surfaceKey = String(surface || '').trim().toLowerCase();
   if(window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'){
+    const publicationSource = resolveGlobalVerdict(item);
     const resolved = window.SimplifiedTradeState.resolveRecordState(item, {
+      publication:publicationSource && publicationSource.canonicalPublication,
       surface,
       log:options.log !== false,
       renderPass:options.renderPass,
@@ -22293,6 +22430,9 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
           evaluateRiskFit
         }
       });
+    if(resolved && resolved.debug && resolved.debug.source === 'canonical-publication-mapper'){
+      return resolved;
+    }
     const planVerdictContract = buildCanonicalPlanVerdictContract(item, {
       surface:surfaceKey,
       source:String(options.source || '').trim(),
@@ -22427,6 +22567,51 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
     nearEntryGatePass:false,
     blockers:['Simplified pipeline unavailable.'],
     debug:{safeFallback:true}
+  };
+}
+
+// Consumer 1 surface bridge. Decision-bearing values are passed through from
+// the one validated publication snapshot; only surface identity/copy metadata
+// is appended here.
+function resolveSimplifiedStateForSurface(record, surface = 'review', options = {}){
+  const item = record && typeof record === 'object' ? record : {};
+  const publicationSource = resolveGlobalVerdict(item);
+  const publication = publicationSource && publicationSource.canonicalPublication;
+  if(window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'){
+    const mapped = window.SimplifiedTradeState.resolveRecordState(item, {
+      publication,
+      surface,
+      log:false
+    });
+    return {
+      ...mapped,
+      presentation:{
+        surface:String(surface || 'review').trim().toLowerCase() || 'review',
+        deviationCategory:'A',
+        compatibilityOnly:true,
+        mayFeedDecisionLogic:false,
+        sourceCanonicalFields:['verdict.value','verdict.actionable','verdict.decisiveBlocker','plan.visibility','publicationStatus']
+      }
+    };
+  }
+  return {
+    ticker:normalizeTicker(item.ticker || item.symbol || ''),
+    publicationStatus:'validation_failed',
+    canonicalNormVersion:'canonical-norm-v1.1',
+    canonicalResultVersion:'',
+    evidenceId:'',
+    canonicalVerdict:'watch', finalVerdict:'watch', actionable:false,
+    entryGatePass:false, nearEntryGatePass:false,
+    entryEligibility:null, nearEntryEligibility:null,
+    planState:'unavailable', planStatus:'unavailable', planVisible:false,
+    canonicalPlan:null,
+    entry:null, stop:null, target:null, resolvedRR:null,
+    decisiveBlocker:'Canonical publication unavailable.',
+    decisiveBlockerCode:'canonical_publication_missing',
+    decisiveBlockerCategory:'validation',
+    visualBucket:'watch', tone:'watch', badgeLabel:'Watch',
+    actionLabel:'Decision unavailable - validation failed.',
+    debug:{source:'canonical-publication-bridge', safeFallback:true, compatibilityOnly:true}
   };
 }
 

@@ -1975,7 +1975,7 @@
       })
       : [];
     const requestedBeforeGuards = normalizeVerdict(finalVerdict);
-    const guardedVerdict = applyPromotionGuards({
+    let guardedVerdict = applyPromotionGuards({
       final_verdict:finalVerdict,
       reason
     }, {
@@ -2046,6 +2046,30 @@
       structural_state:structurallyBroken ? 'dead' : String(resolved.structuralState || ''),
       structurally_broken:structurallyBroken
     });
+    // A provisional bounce/plan may be narrated, but it is not a qualified
+    // Near Entry prerequisite. Keep the gate and verdict hierarchy aligned.
+    if(
+      guardedVerdict.near_entry_gate_pass === true
+      && (!guardedVerdict.near_entry_gate_checks || guardedVerdict.near_entry_gate_checks.has_priceable_plan !== true)
+    ){
+      const reasons = Array.isArray(guardedVerdict.near_entry_gate_reasons)
+        ? guardedVerdict.near_entry_gate_reasons.slice()
+        : [];
+      if(!reasons.includes('Canonical Near Entry requires a priceable plan.')){
+        reasons.unshift('Canonical Near Entry requires a priceable plan.');
+      }
+      guardedVerdict = {
+        ...guardedVerdict,
+        final_verdict:normalizeVerdict(guardedVerdict.final_verdict) === 'near_entry' ? 'watch' : guardedVerdict.final_verdict,
+        near_entry_gate_pass:false,
+        near_entry_gate_reasons:reasons,
+        near_entry_gate_checks:{
+          ...(guardedVerdict.near_entry_gate_checks || {}),
+          canonical_priceable_plan_required:true,
+          canonical_priceable_plan_pass:false
+        }
+      };
+    }
     const nearEntryGateChecks = guardedVerdict.near_entry_gate_checks || {};
     const entryGateChecks = guardedVerdict.entry_gate_checks || {};
     const trendGateChecks = guardedVerdict.trend_gate_checks || {};
@@ -2236,6 +2260,11 @@
       reason = (guardedVerdict.entry_gate_reasons && guardedVerdict.entry_gate_reasons[0])
         || (guardedVerdict.near_entry_gate_reasons && guardedVerdict.near_entry_gate_reasons[0])
         || 'Entry prerequisites are not satisfied.';
+    }
+    if(normalizeVerdict(finalVerdict) === 'near_entry' && guardedVerdict.near_entry_gate_pass !== true){
+      finalVerdict = 'watch';
+      reason = (guardedVerdict.near_entry_gate_reasons && guardedVerdict.near_entry_gate_reasons[0])
+        || 'Near Entry prerequisites are not satisfied.';
     }
     const canonicalFinalVerdict = normalizeVerdict(finalVerdict);
     const tone = getTone(canonicalFinalVerdict);
@@ -2632,12 +2661,12 @@
         enforce:deps.enforceCanonicalNorm === true
       });
       if(publication.publicationStatus === 'validation_failed' && typeof console !== 'undefined' && console.error){
-        console.error('[CANONICAL_NORM_VALIDATION_FAILED]', {
+        console.error('[CANONICAL_NORM_VALIDATION_FAILED]', JSON.stringify({
           ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
           normVersion:publication.validation && publication.validation.normVersion,
           violations:publication.validation && publication.validation.violations,
           resolverSource:'resolver-core'
-        });
+        }));
       }
       return global.CanonicalDecisionResult.compatibilityProjection(rawResult, publication);
     }
