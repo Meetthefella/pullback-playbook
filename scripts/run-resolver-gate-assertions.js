@@ -12152,6 +12152,26 @@ function runLifecyclePublicationAuthorityAssertions(){
   }
 }
 
+function runPersistencePublicationAuthorityAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const builder = extractFunctionSource(appSource, 'buildPersistedTrackPresentation');
+  const liveBuilder = builder.split('  const safeBundle = bundle && typeof bundle === \'object\' ? bundle : {};')[0];
+  if(!/canonicalPersistenceArchiveFromPublication/.test(liveBuilder)
+    || /deriveCurrentPlanState|effectivePlanForRecord|resolveFinalStateContract|evaluateSetupQualityAdjustments/.test(liveBuilder)){
+    throw new Error('Persisted Track presentation must be derived only from the canonical publication archive.');
+  }
+  const projection = extractFunctionSource(appSource, 'buildTrackProjectionSnapshotFromPersistedPresentation');
+  const liveProjection = projection.split('  const journeyAuthority = typeof currentTickerJourneyAuthority === \'function\'')[0];
+  if(!/resolveSimplifiedStateForSurface/.test(liveProjection)
+    || /persistedSharedPresentation|resolveGlobalVerdict|deriveCurrentPlanState|buildCanonicalRenderModelsFromRecord/.test(liveProjection)){
+    throw new Error('Persisted projection must use the current publication and not reconstruct authority from persisted data.');
+  }
+  if(!/compatibilityOnly:true, mayFeedDecisionLogic:false/.test(liveBuilder)
+    || !/compatibilityOnly:true, mayFeedDecisionLogic:false/.test(liveProjection)){
+    throw new Error('Persistence compatibility projections must be explicitly non-authoritative.');
+  }
+}
+
 async function runAllAssertions(){
   runTrackPresentationAuthorityAssertions();
   runScannerPolicyCompatibilityAssertions();
@@ -12171,6 +12191,7 @@ async function runAllAssertions(){
   runCanonicalDecisionInvariantAssertions();
   runPaperTradePublicationAuthorityAssertions();
   runLifecyclePublicationAuthorityAssertions();
+  runPersistencePublicationAuthorityAssertions();
   await runTrackedStateTesterIsolationAssertions();
   await runTesterReportAssertions();
 
@@ -12195,6 +12216,7 @@ async function runAllAssertions(){
   console.log('Canonical decision invariant assertions passed.');
   console.log('Paper Trade publication-authority assertions passed.');
   console.log('Lifecycle publication-authority assertions passed.');
+  console.log('Persistence publication-authority assertions passed.');
   console.log('Tracked-state tester isolation assertions passed.');
   console.log('Tester report assertions passed.');
 }

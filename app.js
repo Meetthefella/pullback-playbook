@@ -338,7 +338,7 @@ function lightweightWatchlistRecordCount(){
 }
 
 function watchlistPriorityScoreCached(record){
-  const item = normalizeTickerRecordReadOnly(record || {});
+  const item = normalizeTickerRecord(record || {});
   const cached = numericOrNull(item.watchlist && item.watchlist.watchlist_priority_score);
   if(Number.isFinite(cached)) return Number(cached);
   return 0;
@@ -10990,7 +10990,69 @@ function persistedWatchlistVisualStateFromPresentation(presentation = {}){
   };
 }
 
+function canonicalPersistenceArchiveFromPublication(record, surface = 'track', source = 'persistence'){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const publication = resolveSimplifiedStateForSurface(item, surface, {log:false, source, reason:'canonical_persistence_archive'});
+  const failed = publication.publicationStatus === 'validation_failed';
+  const identity = {
+    canonicalNormVersion:String(publication.canonicalNormVersion || ''),
+    canonicalResultVersion:String(publication.canonicalResultVersion || ''),
+    evidenceId:String(publication.evidenceId || ''),
+    publicationStatus:failed ? 'validation_failed' : 'valid',
+    capturedAt:new Date().toISOString()
+  };
+  const canonicalSnapshot = failed ? null : {
+    ...identity,
+    verdict:publication.canonicalVerdict,
+    actionable:publication.actionable === true,
+    entryEligibility:publication.entryEligibility || null,
+    nearEntryEligibility:publication.nearEntryEligibility || null,
+    semanticStates:{structure:publication.structureState,support:publication.supportState,pullback:publication.pullbackState,buyerResponse:publication.buyerResponseState,buyerControl:publication.buyerControlState,followThrough:publication.followThroughState,market:publication.marketState,volume:publication.volumeState},
+    plan:publication.canonicalPlan || null,
+    planState:publication.planState,
+    blocker:{code:publication.decisiveBlockerCode || '',category:publication.decisiveBlockerCategory || '',message:publication.decisiveBlocker || ''}
+  };
+  const historical = item.lifecycle && Array.isArray(item.lifecycle.canonicalTransitions) ? item.lifecycle.canonicalTransitions.slice(-24) : [];
+  return {
+    schemaVersion:'canonical-persistence-v1',
+    currentCanonicalSnapshot:canonicalSnapshot,
+    historicalCanonicalSnapshots:historical,
+    executionHistory:Array.isArray(item.executionHistory) ? item.executionHistory.slice(-24) : [],
+    userMetadata:{notes:String(item.notes || item.review && item.review.notes || '')},
+    validationFailureEvent:failed ? {identity, operationalFallback:{verdict:'watch', actionable:false, reasonCode:'canonical_norm_validation_failed'}, diagnosticCandidate:null} : null,
+    diagnostics:{source, compatibilityOnly:false, mayFeedDecisionLogic:false}
+  };
+}
+
 function buildPersistedTrackPresentation(record, bundle, options = {}){
+  { // Consumer 8 live persistence path: archive publication, then project it.
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const source = String(options.source || bundle && bundle.source || 'shared_refresh');
+  const archive = canonicalPersistenceArchiveFromPublication(item, 'track', source);
+  const snapshot = archive.currentCanonicalSnapshot;
+  const failed = !snapshot;
+  const verdict = failed ? 'watch' : String(snapshot.verdict || 'watch');
+  const visualBucket = verdict === 'watch' ? 'monitor' : verdict;
+  const compatibility = {
+    compatibilityOnly:true,
+    mayFeedDecisionLogic:false,
+    owner:'persistence',
+    reviewDate:'post-stabilisation-release',
+    sourceCanonicalFields:['currentCanonicalSnapshot.verdict','currentCanonicalSnapshot.plan','currentCanonicalSnapshot.blocker','currentCanonicalSnapshot.evidenceId'],
+    visualBucket,
+    tone:visualBucket,
+    badgeLabel:globalVerdictLabel(verdict),
+    planVisible:!failed && snapshot.plan && snapshot.plan.visibility && snapshot.plan.visibility.mayShowPlan === true
+  };
+  return {
+    schemaVersion:'canonical-persistence-projection-v1', updatedAt:new Date().toISOString(), source, sourceSurface:'track', reason:String(options.reason || 'canonical_persistence_archive'),
+    archive, compatibilityOnly:true, mayFeedDecisionLogic:false, sourceCanonicalFields:compatibility.sourceCanonicalFields,
+    sharedPresentation:{...compatibility, canonicalVerdict:verdict, publicationStatus:failed ? 'validation_failed' : 'valid', canonicalResultVersion:failed ? '' : snapshot.canonicalResultVersion, evidenceId:failed ? '' : snapshot.evidenceId},
+    simplifiedState:resolveSimplifiedStateForSurface(item, 'track', {log:false, source, reason:'persistence_projection'}),
+    watchlistVisualState:{canonicalVerdict:verdict, visualBucket, tone:visualBucket, compatibilityOnly:true, mayFeedDecisionLogic:false},
+    trackVisibleModel:{canonicalVerdict:verdict, visibleBucket:visualBucket, tone:visualBucket, publicationStatus:failed ? 'validation_failed' : 'valid', compatibilityOnly:true, mayFeedDecisionLogic:false}
+  };
+  }
   const item = normalizeTickerRecordReadOnly(record || {});
   const safeBundle = bundle && typeof bundle === 'object' ? bundle : {};
   const explicitProjectionSnapshot = options.presentationProjectionSnapshot && typeof options.presentationProjectionSnapshot === 'object'
@@ -11078,6 +11140,7 @@ function persistTrackPresentationOnRecord(record, bundle, options = {}){
   if(!liveRecord || !liveRecord.watchlist || liveRecord.watchlist.inWatchlist !== true) return null;
   const persisted = buildPersistedTrackPresentation(liveRecord, bundle, options);
   liveRecord.watchlist.presentation = persisted;
+  liveRecord.watchlist.canonicalPersistence = persisted.archive;
   liveRecord.watchlistVisualState = persisted.watchlistVisualState;
   return persisted;
 }
@@ -41894,6 +41957,26 @@ function buildStableReviewProjectionSnapshot(record, context = 'review_open_duri
 }
 
 function buildTrackProjectionSnapshotFromPersistedPresentation(record, context = 'watchlist_add_projection'){
+  { // Consumer 8: persisted data is archived context, never projection authority.
+  const item = normalizeTickerRecord(record || {});
+  const ticker = normalizeTicker(item.ticker || '');
+  if(!ticker) return null;
+  const publication = resolveSimplifiedStateForSurface(item, 'track', {log:false, source:context, reason:'canonical_projection'});
+  const failed = publication.publicationStatus === 'validation_failed';
+  const verdict = normalizeGlobalVerdictKey(publication.canonicalVerdict || 'watch');
+  const visualBucket = verdict === 'watch' ? 'monitor' : verdict;
+  return {
+    ticker, context:String(context), canonicalVerdict:verdict, finalVerdict:verdict, renderedVerdict:verdict,
+    publicationStatus:failed ? 'validation_failed' : 'valid', canonicalResultVersion:String(publication.canonicalResultVersion || ''), evidenceId:String(publication.evidenceId || ''),
+    visualBucket, sourceOfTruthVisualBucket:visualBucket, renderedBucket:visualBucket, tone:visualBucket,
+    sectionKey:String(watchlistRenderGroupForBucket(visualBucket) || visualBucket), resolvedSectionKey:String(watchlistRenderGroupForBucket(visualBucket) || visualBucket),
+    decisionSummary:failed ? 'Decision unavailable - validation failed.' : String(publication.decisiveBlocker || publication.actionLabel || ''),
+    actionGuidance:failed ? 'Current decision unavailable; setup remains non-actionable.' : String(publication.actionLabel || ''),
+    persistedPresentationAvailable:!!(item.watchlist && item.watchlist.presentation), persistedPresentationCacheOnly:true,
+    compatibilityOnly:true, mayFeedDecisionLogic:false,
+    sourceCanonicalFields:['verdict.value','plan','eligibility','snapshot.evidenceId','publicationStatus'], capturedAt:new Date().toISOString(), source:'canonical_publication_projection'
+  };
+  }
   const item = normalizeTickerRecord(record || {});
   const journeyAuthority = typeof currentTickerJourneyAuthority === 'function'
     ? currentTickerJourneyAuthority(item)
