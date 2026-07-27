@@ -14378,7 +14378,61 @@ function applyCanonicalCurrentDecisionToLifecycleSnapshot(snapshot, currentDecis
   };
 }
 
+function canonicalLifecycleSnapshotFromPublication(record, options = {}){
+  const item = normalizeTickerRecordReadOnly(record || {});
+  const current = options.currentPublication && typeof options.currentPublication === 'object'
+    ? options.currentPublication
+    : resolveSimplifiedStateForSurface(item, 'track', {
+      log:false,
+      source:String(options.source || 'lifecycle_publication_snapshot'),
+      reason:'lifecycle_publication_snapshot'
+    });
+  const failed = current.publicationStatus === 'validation_failed';
+  const refreshPending = options.refreshPending === true || isWatchlistLiveRefreshPending(item.ticker);
+  const stale = options.stale === true;
+  const verdict = normalizeGlobalVerdictKey(current.canonicalVerdict || current.finalVerdict || 'watch') || 'watch';
+  // A stale or pending publication has no current actionable decision. Do not
+  // carry a former Entry/Near Entry forward as the current lifecycle state.
+  const lifecycleVerdict = (refreshPending || stale) && ['entry','near_entry'].includes(verdict) ? 'watch' : verdict;
+  const badge = getBadge(lifecycleVerdict);
+  const operationalState = failed ? 'validation_failed' : (refreshPending ? 'refresh_pending' : (stale ? 'stale' : 'current'));
+  const actionability = !failed && !refreshPending && !stale && current.actionable === true;
+  const bucket = ({entry:'tradeable_entry', near_entry:'tradeable_entry', watch:'monitor_watch', avoid:'low_priority_avoid', dead:'low_priority_avoid'})[lifecycleVerdict] || 'monitor_watch';
+  return {
+    state:lifecycleVerdict,
+    label:badge.text,
+    badgeClass:badge.className,
+    bucket,
+    stage:'canonical_observed',
+    status:operationalState,
+    reason:failed ? 'Current decision unavailable - validation failed.' : String(current.decisiveBlocker || current.mainBlocker || ''),
+    publicationStatus:failed ? 'validation_failed' : 'valid',
+    operationalState,
+    rank:watchlistLifecycleStateRank(lifecycleVerdict),
+    currentDecision:{
+      publicationStatus:failed ? 'validation_failed' : 'valid',
+      canonicalVersion:String(current.canonicalResultVersion || ''),
+      canonicalNormVersion:String(current.canonicalNormVersion || ''),
+      evidenceId:String(current.evidenceId || ''),
+      verdict:lifecycleVerdict,
+      sourceCanonicalVerdict:verdict,
+      actionable:actionability,
+      entryEligibility:failed ? null : current.entryEligibility || null,
+      nearEntryEligibility:failed ? null : current.nearEntryEligibility || null,
+      planState:failed ? 'unavailable' : String(current.planState || current.planStatus || 'unknown'),
+      decisiveBlockerCode:failed ? 'canonical_norm_validation_failed' : String(current.decisiveBlockerCode || ''),
+      decisiveBlockerCategory:failed ? 'validation' : String(current.decisiveBlockerCategory || '')
+    },
+    lifecycleHistory:{authority:'historical_context_only', entries:Array.isArray(item.lifecycle && item.lifecycle.canonicalTransitions) ? item.lifecycle.canonicalTransitions.slice(-24) : []},
+    ranking:{category:'B', mayFeedDecisionLogic:false, sourceCanonicalFields:['verdict.value','publicationStatus'], value:watchlistLifecycleStateRank(lifecycleVerdict)}
+  };
+}
+
 function watchlistLifecycleSnapshot(record, options = {}){
+  // Consumer 7 publication boundary. The lifecycle's live state is a
+  // publication projection; the previous resolver/plan/quality path below is
+  // retained only as unreachable migration reference.
+  return canonicalLifecycleSnapshotFromPublication(record, options);
   const item = normalizeTickerRecordReadOnly(record);
   const lifecycleSource = String(options.source || '').trim().toLowerCase();
   const passCache = options.passCache && typeof options.passCache === 'object' ? options.passCache : null;
@@ -14704,6 +14758,42 @@ function shouldSuppressWatchlistAddSoftDowngrade(record, snapshot, context = {})
 }
 
 function syncWatchlistLifecycle(record, options = {}){
+  { // live publication-only lifecycle path
+  if(!record || !record.watchlist || !record.watchlist.inWatchlist) return null;
+  const snapshot = canonicalLifecycleSnapshotFromPublication(record, options);
+  const current = snapshot.currentDecision;
+  record.lifecycle = record.lifecycle && typeof record.lifecycle === 'object' ? record.lifecycle : {};
+  record.watchlist.lifecycleState = snapshot.state;
+  record.watchlist.lifecycleLabel = snapshot.label;
+  record.watchlist.watchlist_priority_bucket = snapshot.bucket;
+  record.lifecycle.currentOperationalState = snapshot.operationalState;
+  record.lifecycle.currentDecision = {...current};
+  if(snapshot.publicationStatus === 'validation_failed'){
+    record.lifecycle.currentOperationalFallback = {status:'validation_failed', actionable:false, reasonCode:'canonical_norm_validation_failed', at:new Date().toISOString()};
+    record.lifecycle.validationFailureEvent = {at:new Date().toISOString(), diagnosticOnly:true, publicationStatus:'validation_failed'};
+    return snapshot;
+  }
+  const previous = record.lifecycle.lastValidCanonicalState && typeof record.lifecycle.lastValidCanonicalState === 'object'
+    ? record.lifecycle.lastValidCanonicalState : null;
+  const evidenceId = String(current.evidenceId || '');
+  if(snapshot.operationalState === 'current' && evidenceId && (!previous || String(previous.evidenceId || '') !== evidenceId)){
+    if(previous && previous.evidenceId){
+      record.lifecycle.canonicalTransitions = Array.isArray(record.lifecycle.canonicalTransitions) ? record.lifecycle.canonicalTransitions : [];
+      record.lifecycle.canonicalTransitions.push({
+        from:String(previous.verdict || 'watch'), to:String(current.verdict || 'watch'),
+        previousEvidenceId:String(previous.evidenceId || ''), currentEvidenceId:evidenceId,
+        previousCanonicalVersion:String(previous.canonicalVersion || ''), currentCanonicalVersion:String(current.canonicalVersion || ''),
+        previousBlockerCode:String(previous.decisiveBlockerCode || ''), currentBlockerCode:String(current.decisiveBlockerCode || ''),
+        timestamp:new Date().toISOString(), source:'canonical_publication', diagnosticOnly:false
+      });
+      record.lifecycle.canonicalTransitions = record.lifecycle.canonicalTransitions.slice(-24);
+    }
+    record.lifecycle.lastValidCanonicalState = {...current, recordedAt:new Date().toISOString()};
+  }
+  record.lifecycle.currentOperationalFallback = null;
+  record.lifecycle.validationFailureEvent = null;
+  return snapshot;
+  }
   if(!record || !record.watchlist || !record.watchlist.inWatchlist) return null;
   if(hasLockedLifecycle(record)) return watchlistLifecycleSnapshot(record, options);
   const snapshot = watchlistLifecycleSnapshot(record, options);
@@ -14777,6 +14867,42 @@ function shouldEvaluateWatchlistLifecycleRecord(record, options = {}){
 }
 
 function runWatchlistLifecycleEvaluation(options = {}){
+  // Consumer 7 live loop: record canonical transitions and operational events
+  // only. It must not recompute or repair a current trading decision.
+  const canonicalSource = String(options.source || 'system');
+  if(uiState.watchlistLifecycleRunning) return {changed:false, skipped:true, source:canonicalSource};
+  uiState.watchlistLifecycleRunning = true;
+  uiState.watchlistLifecycleLastSource = canonicalSource;
+  uiState.watchlistLifecycleLastRunAt = new Date().toISOString();
+  const requestedCanonicalTickers = Array.isArray(options.tickers)
+    ? new Set(options.tickers.map(normalizeTicker).filter(Boolean)) : null;
+  let canonicalChanged = false;
+  try{
+    allTickerRecords().forEach((record) => {
+      if(!record.watchlist || !record.watchlist.inWatchlist) return;
+      if(requestedCanonicalTickers && !requestedCanonicalTickers.has(record.ticker)) return;
+      const before = JSON.stringify({state:record.watchlist.lifecycleState, current:record.lifecycle && record.lifecycle.currentDecision, transitions:record.lifecycle && record.lifecycle.canonicalTransitions});
+      const snapshot = syncWatchlistLifecycle(record, {source:canonicalSource, stale:options.stale === true});
+      record.watchlist.debug = record.watchlist.debug && typeof record.watchlist.debug === 'object' ? record.watchlist.debug : {};
+      record.watchlist.debug.lifecycleAuthority = {
+        currentCanonical:snapshot && snapshot.currentDecision || null,
+        operationalState:snapshot && snapshot.operationalState || 'unavailable',
+        lifecycleHistoryAuthority:'historical_context_only',
+        mayFeedDecisionLogic:false
+      };
+      const after = JSON.stringify({state:record.watchlist.lifecycleState, current:record.lifecycle && record.lifecycle.currentDecision, transitions:record.lifecycle && record.lifecycle.canonicalTransitions});
+      canonicalChanged = canonicalChanged || before !== after;
+    });
+    if(canonicalChanged && options.persist !== false) commitTickerState();
+    if(options.render !== false && (canonicalChanged || options.forceRender === true)){
+      renderWatchlist();
+      renderFocusQueue();
+      if(activeReviewTicker()) renderReviewLifecycleSummary(activeReviewTicker());
+    }
+    return {changed:canonicalChanged, skipped:false, source:canonicalSource};
+  }finally{
+    uiState.watchlistLifecycleRunning = false;
+  }
   const source = String(options.source || 'system');
   const logUnchanged = options.logUnchanged !== false;
   if(uiState.watchlistLifecycleRunning){

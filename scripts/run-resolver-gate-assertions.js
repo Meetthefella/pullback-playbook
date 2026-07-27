@@ -12129,6 +12129,29 @@ function runPaperTradePublicationAuthorityAssertions(){
   }
 }
 
+function runLifecyclePublicationAuthorityAssertions(){
+  const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const snapshotSource = extractFunctionSource(appSource, 'watchlistLifecycleSnapshot');
+  const liveSnapshotSource = snapshotSource.split('const item = normalizeTickerRecordReadOnly(record);')[0];
+  if(!/return canonicalLifecycleSnapshotFromPublication\(record, options\);/.test(liveSnapshotSource)){
+    throw new Error('Lifecycle snapshot must return the canonical publication projection.');
+  }
+  ['resolveGlobalVerdict', 'deriveCurrentPlanState', 'evaluateSetupQualityAdjustments', 'deriveActionStateForRecord', 'resolveEmojiPresentation'].forEach((forbidden) => {
+    if(liveSnapshotSource.includes(forbidden)) throw new Error(`Lifecycle live snapshot must not invoke ${forbidden}.`);
+  });
+  const syncSource = extractFunctionSource(appSource, 'syncWatchlistLifecycle');
+  const liveSyncSource = syncSource.split('if(!record || !record.watchlist || !record.watchlist.inWatchlist) return null;')[0] + syncSource.split('if(!record || !record.watchlist || !record.watchlist.inWatchlist) return null;')[1].split('  }\n  if(!record || !record.watchlist || !record.watchlist.inWatchlist) return null;')[0];
+  if(!/canonicalTransitions/.test(liveSyncSource) || !/previousEvidenceId/.test(liveSyncSource) || !/snapshot\.publicationStatus === 'validation_failed'/.test(liveSyncSource)){
+    throw new Error('Lifecycle sync must record canonical transitions and preserve validation-failed operational state separately.');
+  }
+  const evaluationSource = extractFunctionSource(appSource, 'runWatchlistLifecycleEvaluation');
+  const liveEvaluationSource = evaluationSource.split('  const source = String(options.source || \'system\');')[0];
+  if(!/syncWatchlistLifecycle\(record, \{source:canonicalSource, stale:options\.stale === true\}\)/.test(liveEvaluationSource)
+    || /reevaluateTickerProgress|deriveCurrentPlanState|evaluateSetupQualityAdjustments|resolveScannerStateWithTrace/.test(liveEvaluationSource)){
+    throw new Error('Lifecycle evaluation must only record publication-derived state and must not recompute decisions.');
+  }
+}
+
 async function runAllAssertions(){
   runTrackPresentationAuthorityAssertions();
   runScannerPolicyCompatibilityAssertions();
@@ -12147,6 +12170,7 @@ async function runAllAssertions(){
   runTesterProfileResetAssertions();
   runCanonicalDecisionInvariantAssertions();
   runPaperTradePublicationAuthorityAssertions();
+  runLifecyclePublicationAuthorityAssertions();
   await runTrackedStateTesterIsolationAssertions();
   await runTesterReportAssertions();
 
@@ -12170,6 +12194,7 @@ async function runAllAssertions(){
   console.log('Tester profile reset assertions passed.');
   console.log('Canonical decision invariant assertions passed.');
   console.log('Paper Trade publication-authority assertions passed.');
+  console.log('Lifecycle publication-authority assertions passed.');
   console.log('Tracked-state tester isolation assertions passed.');
   console.log('Tester report assertions passed.');
 }
