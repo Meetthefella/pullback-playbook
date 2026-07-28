@@ -84,6 +84,25 @@
     });
   }
 
+  // Stage 2: immutable hand-off from factual/semantic evaluation to the
+  // unchanged verdict selector. Inputs are the existing helper outputs; this
+  // function deliberately does not choose a verdict or presentation fields.
+  function evaluateCanonicalSemanticsAndGates(context, inputs = {}){
+    const source = inputs && typeof inputs === 'object' ? inputs : {};
+    return freezeResolutionValue({
+      schemaVersion:'canonical-evaluation-result-v1',
+      evidence:context && context.evidence ? cloneResolutionValue(context.evidence) : null,
+      provenance:context && context.provenance ? cloneResolutionValue(context.provenance) : {},
+      semanticStates:cloneResolutionValue(source.semanticStates || {}),
+      gates:cloneResolutionValue(source.gates || {}),
+      eligibilityInputs:cloneResolutionValue(source.eligibilityInputs || {}),
+      promotionGuards:cloneResolutionValue(source.promotionGuards || {}),
+      terminalBlockers:cloneResolutionValue(source.terminalBlockers || {}),
+      planEvaluation:cloneResolutionValue(source.planEvaluation || {}),
+      diagnostics:cloneResolutionValue(source.diagnostics || {})
+    });
+  }
+
   function shouldPreserveScanAuthorityCanonicalPath(record){
     const item = record && typeof record === 'object' ? record : {};
     const authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
@@ -2472,6 +2491,30 @@
     const canonicalDecisiveBlocker = canonicalFinalVerdict === 'entry'
       ? ''
       : (reason || trackedReason || viability.mainBlocker || '');
+    const canonicalEvaluation = evaluateCanonicalSemanticsAndGates(resolutionContext, {
+      semanticStates:{
+        structure:{state:structureState, eligibility:structureLayer.structureEligibility},
+        support:supportAuthority,
+        pullback:resolveCanonicalPullbackContext({pullback_zone:pullbackZone, ...derivedStates}),
+        buyerResponse:bounceState,
+        buyerControl:guardedVerdict.buyer_control_gate_checks || {},
+        followThrough:guardedVerdict.confirmation_gate_checks || {},
+        market:{severity:marketSeverity, weak:marketWeak}, volume:{state:volumeState},
+        plan:{priceability:priceabilityState, displayedPlan}
+      },
+      gates:{
+        trend:{pass:guardedVerdict.trend_gate_pass === true, reasons:guardedVerdict.trend_gate_reasons || []},
+        buyerControl:{pass:guardedVerdict.buyer_control_gate_pass === true, reasons:guardedVerdict.buyer_control_gate_reasons || []},
+        confirmation:{pass:guardedVerdict.confirmation_gate_pass === true, reasons:guardedVerdict.confirmation_gate_reasons || []},
+        nearEntry:{pass:guardedVerdict.near_entry_gate_pass === true, reasons:guardedVerdict.near_entry_gate_reasons || []},
+        entry:{pass:guardedVerdict.entry_gate_pass === true, reasons:guardedVerdict.entry_gate_reasons || []}
+      },
+      eligibilityInputs:{hasEntry, hasStop, hasTarget, planVisible, tradeabilityState, capitalFit, affordability},
+      promotionGuards:guardedVerdict,
+      terminalBlockers:{structurallyBroken, nonTerminalRecoveryBlocker, explicitInvalidationReason},
+      planEvaluation:{displayedPlan, rawDisplayedPlan, priceabilityState, priceabilityInferred, priceabilityInferenceReason},
+      diagnostics:{viability, fallingKnifeApplied}
+    });
     const rawResult = {
       base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
@@ -2507,16 +2550,16 @@
       structure_to_label_mapping_source:'resolveGlobalVerdict(structure_state)',
       lifecycle_drop_reason:lifecycleDropReason || '(none)',
       avoid_allowed_by_structure_consistency_guard:avoidAllowedByStructureConsistencyGuard,
-      entry_gate_pass:guardedVerdict.entry_gate_pass,
-      entry_gate_reasons:guardedVerdict.entry_gate_reasons,
-      near_entry_gate_pass:guardedVerdict.near_entry_gate_pass,
-      near_entry_gate_reasons:guardedVerdict.near_entry_gate_reasons,
-      trend_gate_pass:guardedVerdict.trend_gate_pass,
-      trend_gate_reasons:guardedVerdict.trend_gate_reasons,
-      buyer_control_gate_pass:guardedVerdict.buyer_control_gate_pass,
-      buyer_control_gate_reasons:guardedVerdict.buyer_control_gate_reasons,
-      confirmation_gate_pass:guardedVerdict.confirmation_gate_pass,
-      confirmation_gate_reasons:guardedVerdict.confirmation_gate_reasons,
+      entry_gate_pass:canonicalEvaluation.gates.entry.pass,
+      entry_gate_reasons:canonicalEvaluation.gates.entry.reasons,
+      near_entry_gate_pass:canonicalEvaluation.gates.nearEntry.pass,
+      near_entry_gate_reasons:canonicalEvaluation.gates.nearEntry.reasons,
+      trend_gate_pass:canonicalEvaluation.gates.trend.pass,
+      trend_gate_reasons:canonicalEvaluation.gates.trend.reasons,
+      buyer_control_gate_pass:canonicalEvaluation.gates.buyerControl.pass,
+      buyer_control_gate_reasons:canonicalEvaluation.gates.buyerControl.reasons,
+      confirmation_gate_pass:canonicalEvaluation.gates.confirmation.pass,
+      confirmation_gate_reasons:canonicalEvaluation.gates.confirmation.reasons,
       late_pullback_gate_pass:guardedVerdict.late_pullback_gate_pass,
       late_pullback_gate_reasons:guardedVerdict.late_pullback_gate_reasons,
       entry_gate_checks:guardedVerdict.entry_gate_checks,
@@ -4030,6 +4073,7 @@
     normalizeGlobalVerdictKey,
     normalizeVerdict,
     buildCanonicalResolutionContext,
+    evaluateCanonicalSemanticsAndGates,
     globalVerdictLabel,
     getTone,
     getBucket,
