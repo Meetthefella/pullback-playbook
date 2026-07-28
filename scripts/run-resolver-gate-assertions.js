@@ -18,7 +18,6 @@ sandbox.window.setTimeout = setTimeout;
 sandbox.window.clearTimeout = clearTimeout;
 sandbox.window.setInterval = setInterval;
 sandbox.window.clearInterval = clearInterval;
-sandbox.window.__PP_ASSERT_SHADOW_SELECTOR_PARITY__ = true;
 
 function runBrowserModule(relativePath){
   const filePath = path.join(root, relativePath);

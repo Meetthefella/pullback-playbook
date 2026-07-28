@@ -29,6 +29,12 @@ const cases = [
     groups:['all', 'resolver', 'pure']
   },
   {
+    id:'resolver-legacy-retirement',
+    label:'Resolver legacy-retirement assertions',
+    script:'scripts/run-resolver-legacy-retirement-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
     id:'canonical-norm',
     label:'Canonical Norm assertions',
     script:'scripts/run-canonical-norm-assertions.js',

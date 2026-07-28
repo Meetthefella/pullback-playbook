@@ -16,7 +16,7 @@ assert.ok(/allow_plan:canonicalDecisionSelection\.actionability,/.test(rawBlock)
 assert.ok(/reason:canonicalDecisionSelection\.decisiveBlocker\.reason,/.test(rawBlock), 'candidate reason must be copied directly from CanonicalDecisionSelection');
 assert.ok(/main_blocker:canonicalDecisionSelection\.decisiveBlocker\.reason,/.test(rawBlock), 'candidate decisive blocker text must be copied directly from CanonicalDecisionSelection');
 assert.ok(/primary_blocker_source:canonicalDecisionSelection\.decisiveBlocker\.category,/.test(rawBlock), 'candidate decisive blocker category must be copied directly from CanonicalDecisionSelection');
-assert.ok(/canonical_decision_trace:canonicalDecisionSelection\.shadowDecisionTrace,/.test(rawBlock), 'published decision trace must come from CanonicalDecisionSelection');
+assert.ok(/canonical_decision_trace:canonicalDecisionSelection\.decisionTrace,/.test(rawBlock), 'published decision trace must come from CanonicalDecisionSelection');
 assert.ok(!/final_verdict:canonicalFinalVerdict/.test(rawBlock), 'legacy final verdict must not enter candidate construction');
 assert.ok(!/legacy_decision_trace[^\n]*\.outputVerdict/.test(rawBlock), 'legacy trace must not feed candidate decision fields');
 assert.ok(!/rawResult\.(?:final_verdict|allow_plan|main_blocker|primary_blocker_source)\s*=/.test(rawBlock), 'no post-selector reassignment may mutate candidate decision fields');
@@ -40,17 +40,15 @@ const candidate = {
     actionability:false,
     decisiveBlocker:{code:'selector_blocker', category:'selector_category', reason:'Selector authority blocks promotion.'},
     reasonSource:'selector_reason',
-    shadowDecisionTrace:[]
+    decisionTrace:[]
   },
-  legacy_decision_trace:[{outputVerdict:'entry'}],
-  legacy_decision_selection:{verdict:'entry', actionability:true}
+  decisionTrace:[]
 };
 const published = api.createCanonicalDecisionResult(candidate, evidence);
 assert.strictEqual(published.verdict.value, 'watch', 'legacy observer output cannot promote the candidate');
 assert.strictEqual(published.eligibility.nearEntry.qualified, true, 'candidate eligibility must come from CanonicalDecisionSelection');
-candidate.legacy_decision_selection.verdict = 'avoid';
-candidate.legacy_decision_trace[0].outputVerdict = 'avoid';
-assert.strictEqual(published.verdict.value, 'watch', 'mutating a legacy observer after construction cannot alter publication');
+candidate.canonicalDecisionSelection.decisionTrace.push({outputVerdict:'avoid'});
+assert.strictEqual(published.verdict.value, 'watch', 'mutating a caller-owned selection fixture after construction cannot alter publication');
 
 const invalidSelectorCandidate = {
   ...candidate,
@@ -65,4 +63,4 @@ const invalidSelectorCandidate = {
 const invalid = api.createCanonicalDecisionResult(invalidSelectorCandidate, evidence);
 assert.ok(invalid.validation.violations.some(item => item.code === 'entry_verdict_without_entry_eligibility'), 'a selector/candidate mismatch must be rejected by Canonical Norm validation');
 
-console.log('Resolver authority-switch assertions passed (selector candidate authority, legacy observer isolation, and norm rejection).');
+console.log('Resolver authority-switch assertions passed (selector candidate authority, immutable trace isolation, and norm rejection).');

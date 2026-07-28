@@ -103,15 +103,14 @@
     });
   }
 
-  // Stage 3A keeps verdict selection in its legacy location. This helper only
-  // captures each existing boundary so Stage 3B can compare a shadow selector
-  // step-for-step before authority moves.
-  function appendLegacyDecisionTrace(trace, details = {}){
+  // The selector records the canonical decision path as an immutable trace.
+  // Historical fixture traces use the same schema as a regression oracle.
+  function appendCanonicalDecisionTrace(trace, details = {}){
     const steps = Array.isArray(trace) ? trace : [];
     const inputVerdict = normalizeVerdict(details.inputVerdict || 'watch');
     const outputVerdict = normalizeVerdict(details.outputVerdict || inputVerdict);
     steps.push(Object.freeze({
-      stepCode:String(details.stepCode || 'legacy_decision_boundary'),
+      stepCode:String(details.stepCode || 'canonical_decision_boundary'),
       inputVerdict,
       outputVerdict,
       changed:inputVerdict !== outputVerdict,
@@ -124,9 +123,9 @@
     return steps;
   }
 
-  function firstDecisionTraceDivergence(legacyTrace, shadowTrace){
-    const legacy = Array.isArray(legacyTrace) ? legacyTrace : [];
-    const shadow = Array.isArray(shadowTrace) ? shadowTrace : [];
+  function firstDecisionTraceDivergence(expectedTrace, actualTrace){
+    const legacy = Array.isArray(expectedTrace) ? expectedTrace : [];
+    const shadow = Array.isArray(actualTrace) ? actualTrace : [];
     const fields = ['stepCode', 'inputVerdict', 'outputVerdict', 'changed', 'blockerCode', 'blockerCategory', 'reasonSource', 'evidenceId', 'resultVersion'];
     if(legacy.length !== shadow.length){
       return freezeResolutionValue({
@@ -145,14 +144,15 @@
     return null;
   }
 
-  // Stage 3C: the sole decision selector. It replays the established
-  // final-decision sequence from immutable context/evaluation inputs. The
-  // in-function legacy chain remains observer-only until Stage 3E removes it.
+  // Stage 3D: the sole executable decision selector. It replays the
+  // established final-decision sequence from immutable context/evaluation
+  // inputs; committed fixture traces, rather than a second runtime engine,
+  // protect its behaviour.
   function selectCanonicalDecision(context, evaluation){
     const safeContext = context && typeof context === 'object' ? context : {};
     const safeEvaluation = evaluation && typeof evaluation === 'object' ? evaluation : {};
-    const input = safeEvaluation.diagnostics && safeEvaluation.diagnostics.shadowSelectionInputs
-      ? safeEvaluation.diagnostics.shadowSelectionInputs
+    const input = safeEvaluation.diagnostics && safeEvaluation.diagnostics.selectionInputs
+      ? safeEvaluation.diagnostics.selectionInputs
       : {};
     const evidenceId = String(safeContext.evidenceId || input.evidenceId || '');
     const trace = [];
@@ -171,7 +171,7 @@
     const supportiveStructure = input.supportiveStructure === true;
     const setupScore = Number(input.setupScore);
 
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'incoming_contract_verdict', inputVerdict:proposedVerdict, outputVerdict:proposedVerdict,
       blockerCode:semanticBlocker.blockerCode, blockerCategory:semanticBlocker.blockerCategory,
       reasonSource:'resolved_contract', evidenceId
@@ -212,14 +212,14 @@
       proposedVerdict = 'monitor';
       reason = resolved.reasonSummary || resolved.blockerReason || `${structureReasonLabel(input.structureState)}. Alive setup downgraded to monitoring.`;
     }
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'initial_contract_verdict_proposal', inputVerdict:input.baseVerdict, outputVerdict:proposedVerdict,
       blockerCode:semanticBlocker.blockerCode, blockerCategory:semanticBlocker.blockerCategory,
       reasonSource:'initial_contract_selection', evidenceId
     });
 
     let guardedVerdict = guardsBeforePriceability;
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'promotion_guard_result', inputVerdict:proposedVerdict, outputVerdict:guardedVerdict.final_verdict,
       blockerCode:semanticBlocker.blockerCode, blockerCategory:semanticBlocker.blockerCategory,
       reasonSource:'promotion_guards', evidenceId
@@ -235,7 +235,7 @@
         near_entry_gate_checks:{...(guardedVerdict.near_entry_gate_checks || {}), canonical_priceable_plan_required:true, canonical_priceable_plan_pass:false}
       };
     }
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'near_entry_priceability_enforcement', inputVerdict:trace[trace.length - 1].outputVerdict, outputVerdict:guardedVerdict.final_verdict,
       blockerCode:semanticBlocker.blockerCode, blockerCategory:semanticBlocker.blockerCategory,
       reasonSource:'canonical_near_entry_priceability', evidenceId
@@ -250,7 +250,7 @@
       && nearEntryGateChecks.has_priceable_plan === true
       && nearEntryGateChecks.near_entry_terminal_block_applied !== true;
     const applyTrackedLifecycleVerdict = input.isTracked === true && (!input.preserveScanAuthorityCanonicalPath || scanAuthorityNearEntryRelease);
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'scan_authority_state_release', inputVerdict:guardedVerdict.final_verdict, outputVerdict:guardedVerdict.final_verdict,
       blockerCode:semanticBlocker.blockerCode, blockerCategory:semanticBlocker.blockerCategory,
       reasonSource:scanAuthorityNearEntryRelease ? 'scan_authority_near_entry_release' : (input.preserveScanAuthorityCanonicalPath ? 'scan_authority_preserved' : 'scan_authority_not_applicable'), evidenceId
@@ -289,7 +289,7 @@
         trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
       }
     }
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'lifecycle_viability_adjustment', inputVerdict:guardedVerdict.final_verdict, outputVerdict:trackedVerdict,
       blockerCode:viability.viability === 'reject' ? 'viability_reject' : semanticBlocker.blockerCode,
       blockerCategory:viability.viability === 'reject' ? 'lifecycle_viability' : semanticBlocker.blockerCategory,
@@ -300,7 +300,7 @@
       trackedVerdict = 'watch';
       trackedReason = (Array.isArray(guardedVerdict.late_pullback_gate_reasons) && guardedVerdict.late_pullback_gate_reasons[0]) || 'The bounce has already moved too far from support for a low-risk pullback entry.';
     }
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'late_pullback_cap', inputVerdict:trace[trace.length - 1].outputVerdict, outputVerdict:trackedVerdict,
       blockerCode:latePullbackActive && guardedVerdict.near_entry_gate_pass !== true && guardedVerdict.entry_gate_pass !== true ? 'late_pullback' : semanticBlocker.blockerCode,
       blockerCategory:latePullbackActive && guardedVerdict.near_entry_gate_pass !== true && guardedVerdict.entry_gate_pass !== true ? 'setup_location' : semanticBlocker.blockerCategory,
@@ -319,7 +319,7 @@
       finalVerdict = 'monitor';
       reason = 'Setup is weak and not tradeable yet, but not structurally broken.';
     }
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'structural_avoid_guard', inputVerdict:applyTrackedLifecycleVerdict ? trackedVerdict : input.baseVerdict, outputVerdict:finalVerdict,
       blockerCode:structurallyBroken ? 'structure_broken' : semanticBlocker.blockerCode,
       blockerCategory:structurallyBroken ? 'structure' : semanticBlocker.blockerCategory,
@@ -330,7 +330,7 @@
       finalVerdict = guardedVerdict.near_entry_gate_pass === true ? 'near_entry' : 'watch';
       reason = (guardedVerdict.entry_gate_reasons && guardedVerdict.entry_gate_reasons[0]) || (guardedVerdict.near_entry_gate_reasons && guardedVerdict.near_entry_gate_reasons[0]) || 'Entry prerequisites are not satisfied.';
     }
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'entry_gate_enforcement', inputVerdict:verdictBeforeEntryGateEnforcement, outputVerdict:finalVerdict,
       blockerCode:guardedVerdict.entry_gate_pass === true ? '' : 'entry_gate', blockerCategory:guardedVerdict.entry_gate_pass === true ? '' : 'entry_eligibility', reasonSource:'entry_gate', evidenceId
     });
@@ -339,7 +339,7 @@
       finalVerdict = 'watch';
       reason = (guardedVerdict.near_entry_gate_reasons && guardedVerdict.near_entry_gate_reasons[0]) || 'Near Entry prerequisites are not satisfied.';
     }
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'near_entry_gate_enforcement', inputVerdict:verdictBeforeNearEntryGateEnforcement, outputVerdict:finalVerdict,
       blockerCode:guardedVerdict.near_entry_gate_pass === true ? '' : 'near_entry_gate', blockerCategory:guardedVerdict.near_entry_gate_pass === true ? '' : 'near_entry_eligibility', reasonSource:'near_entry_gate', evidenceId
     });
@@ -347,7 +347,7 @@
     const fallingKnifeApplied = input.fallingKnifeApplied === true;
     const decisiveBlockerCode = fallingKnifeApplied ? 'falling_knife' : (semanticBlocker.blockerCode || '');
     const decisiveBlockerCategory = fallingKnifeApplied ? 'falling_knife' : (input.primaryBlockerSource || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (input.isExtended ? 'setup_location' : (input.priceabilityState === 'unpriceable' && input.priceabilityInferred !== true ? 'priceability' : 'resolver'))));
-    appendLegacyDecisionTrace(trace, {
+    appendCanonicalDecisionTrace(trace, {
       stepCode:'final_decision', inputVerdict:trace[trace.length - 1].outputVerdict, outputVerdict:verdict,
       blockerCode:decisiveBlockerCode, blockerCategory:decisiveBlockerCategory,
       reasonSource:verdict === 'entry' ? 'qualified_entry' : 'final_decision_reason', evidenceId
@@ -365,7 +365,7 @@
       reasonSource:verdict === 'entry' ? 'qualified_entry' : 'final_decision_reason',
       selectedPromotionPath:trace.filter(step => step.changed && ['promotion_guard_result', 'scan_authority_state_release'].includes(step.stepCode)).map(step => step.stepCode),
       selectedDemotionPath:trace.filter(step => step.changed && !['promotion_guard_result', 'scan_authority_state_release'].includes(step.stepCode)).map(step => step.stepCode),
-      shadowDecisionTrace:frozenTrace,
+      decisionTrace:frozenTrace,
       diagnostics:{authority:'canonical_selector', lifecycleApplied:applyTrackedLifecycleVerdict, scanAuthorityNearEntryRelease}
     });
   }
@@ -2250,16 +2250,8 @@
     const invalidPlan = ['invalid','missing','needs_adjustment','unrealistic_rr','rebuild_required'].includes(planStatusKey)
       || tradeabilityState === 'invalid';
     const supportiveStructure = !weakStructure && ['intact','strong','developing'].includes(structureState || '');
-    const legacyDecisionTrace = [];
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'incoming_contract_verdict',
-      inputVerdict:baseVerdict,
-      outputVerdict:baseVerdict,
-      blockerCode:semanticBlocker.blockerCode,
-      blockerCategory:semanticBlocker.blockerCategory,
-      reasonSource:'resolved_contract',
-      evidenceId:resolutionContext.evidenceId
-    });
+    // This proposal and promotion-guard evaluation supplies completed gate
+    // facts to the selector. It is not a final-decision path.
     let finalVerdict = baseVerdict;
     let reason = 'Default live setup state.';
 
@@ -2304,16 +2296,6 @@
       finalVerdict = 'monitor';
       reason = resolved.reasonSummary || resolved.blockerReason || `${structureReasonLabel(structureState)}. Alive setup downgraded to monitoring.`;
     }
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'initial_contract_verdict_proposal',
-      inputVerdict:baseVerdict,
-      outputVerdict:finalVerdict,
-      blockerCode:semanticBlocker.blockerCode,
-      blockerCategory:semanticBlocker.blockerCategory,
-      reasonSource:'initial_contract_selection',
-      evidenceId:resolutionContext.evidenceId
-    });
-
     const cumulativePenaltyTrace = typeof deps.buildCumulativePenaltyTrace === 'function'
       ? deps.buildCumulativePenaltyTrace(item, {
         derivedStates,
@@ -2394,15 +2376,6 @@
       structural_state:structurallyBroken ? 'dead' : String(resolved.structuralState || ''),
       structurally_broken:structurallyBroken
     });
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'promotion_guard_result',
-      inputVerdict:requestedBeforeGuards,
-      outputVerdict:guardedVerdict.final_verdict,
-      blockerCode:semanticBlocker.blockerCode,
-      blockerCategory:semanticBlocker.blockerCategory,
-      reasonSource:'promotion_guards',
-      evidenceId:resolutionContext.evidenceId
-    });
     const promotionGuardBeforePriceability = freezeResolutionValue(cloneResolutionValue(guardedVerdict));
     // A provisional bounce/plan may be narrated, but it is not a qualified
     // Near Entry prerequisite. Keep the gate and verdict hierarchy aligned.
@@ -2428,15 +2401,6 @@
         }
       };
     }
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'near_entry_priceability_enforcement',
-      inputVerdict:legacyDecisionTrace[legacyDecisionTrace.length - 1].outputVerdict,
-      outputVerdict:guardedVerdict.final_verdict,
-      blockerCode:semanticBlocker.blockerCode,
-      blockerCategory:semanticBlocker.blockerCategory,
-      reasonSource:'canonical_near_entry_priceability',
-      evidenceId:resolutionContext.evidenceId
-    });
     const nearEntryGateChecks = guardedVerdict.near_entry_gate_checks || {};
     const entryGateChecks = guardedVerdict.entry_gate_checks || {};
     const trendGateChecks = guardedVerdict.trend_gate_checks || {};
@@ -2459,34 +2423,6 @@
     const reclaimDirectSignalCount = Number.isFinite(Number(nearEntryGateChecks.reclaim_direct_signal_count))
       ? Number(nearEntryGateChecks.reclaim_direct_signal_count)
       : (Number.isFinite(Number(entryGateChecks.reclaim_direct_signal_count)) ? Number(entryGateChecks.reclaim_direct_signal_count) : 0);
-    // Scan authority protects an unchanged Watch from downstream plan/lifecycle
-    // noise. It must release once the same record independently qualifies as a
-    // priceable Near Entry; otherwise a passed promotion gate can never become
-    // the canonical state.
-    const scanAuthorityNearEntryRelease = !!(
-      preserveScanAuthorityCanonicalPath
-      && guardedVerdict.near_entry_gate_pass === true
-      && guardedVerdict.entry_gate_pass !== true
-      && priceabilityState === 'priceable'
-      && String(displayedPlan && displayedPlan.status || '').trim().toLowerCase() === 'valid'
-      && nearEntryGateChecks.has_priceable_plan === true
-      && nearEntryGateChecks.near_entry_terminal_block_applied !== true
-    );
-    const applyTrackedLifecycleVerdict = isTracked && (
-      !preserveScanAuthorityCanonicalPath
-      || scanAuthorityNearEntryRelease
-    );
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'scan_authority_state_release',
-      inputVerdict:guardedVerdict.final_verdict,
-      outputVerdict:guardedVerdict.final_verdict,
-      blockerCode:semanticBlocker.blockerCode,
-      blockerCategory:semanticBlocker.blockerCategory,
-      reasonSource:scanAuthorityNearEntryRelease ? 'scan_authority_near_entry_release' : (preserveScanAuthorityCanonicalPath ? 'scan_authority_preserved' : 'scan_authority_not_applicable'),
-      evidenceId:resolutionContext.evidenceId
-    });
-    let trackedVerdict = normalizeVerdict(guardedVerdict.final_verdict);
-    let trackedReason = guardedVerdict.reason || reason;
     const viability = resolveWatchlistViability({
       structureEligibility:structureLayer.structureEligibility,
       structureState,
@@ -2528,182 +2464,96 @@
       perf1w:item && item.marketData && item.marketData.perf1w,
       perf1m:item && item.marketData && item.marketData.perf1m
     });
-    if(applyTrackedLifecycleVerdict && trackedVerdict !== 'entry' && trackedVerdict !== 'near_entry'){
-      if(viability.viability === 'reject'){
-        trackedVerdict = 'avoid';
-      }else{
-        trackedVerdict = 'monitor';
-      }
-      const constructiveAliveStructure = structureLayer.structureEligibility === 'alive'
-        && ['strong', 'intact', 'developing_clean'].includes(structureState);
-      const repairingButUnpriceable = constructiveAliveStructure
-        && ['attempt', 'early', 'developing', 'improving'].includes(bounceState)
-        && priceabilityState === 'unpriceable';
-      const weakRewardPotential = constructiveAliveStructure
-        && Number.isFinite(Number(entryGateChecks.resolved_rr))
-        && Number(entryGateChecks.resolved_rr) < MIN_NEAR_ENTRY_RR;
-      const alivePoorLocation = structureLayer.structureEligibility === 'alive'
-        && ['none','off_level','unclear'].includes(setupLocationState)
-        && (priceabilityState === 'unpriceable' || String(viability.viabilityBranchId || '').includes('low_score') || setupScore < 5 || invalidPlan);
-      if(nonTerminalRecoveryBlocker){
-        trackedReason = semanticBlocker.reason || 'Recovery attempt in progress. Wait for price to stabilise before considering entry.';
-      }else if(String(viability.viabilityBranchId || '').toLowerCase().includes('falling_knife')){
-        trackedReason = viability.mainBlocker || FALLING_KNIFE_COPY;
-      }else if(String(viability.viabilityBranchId || '').toLowerCase().includes('extended_without_hard_invalidation')){
-        trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
-      }else if(structureLayer.structureEligibility === 'damaged'){
-        trackedReason = 'Trend is weakening - no reliable stop level yet.';
-      }else if(isExtended && ['strong','intact'].includes(structureState)){
-        trackedReason = 'Trend is strong but extended beyond a safe entry zone. No low-risk entry is available yet.';
-      }else if(repairingButUnpriceable){
-        trackedReason = 'Repair is forming but the setup is not priceable yet.';
-      }else if(alivePoorLocation){
-        trackedReason = 'Strong trend, but no usable pullback setup yet. Wait for a cleaner reset near support.';
-      }else if(structureLayer.structureEligibility === 'alive' && priceabilityState === 'unpriceable' && !priceabilityInferred){
-        trackedReason = 'Strong trend, but too volatile to price reliably.';
-      }else if(weakRewardPotential){
-        trackedReason = 'Nearby resistance limits current reward potential.';
-      }else if(
-        trackedVerdict === 'near_entry'
-        && structureLayer.structureEligibility === 'alive'
-        && ['strong','intact','developing_clean'].includes(structureState)
-      ){
-        trackedReason = 'Valid plan math exists, but confirmation is still pending.';
-      }else{
-        trackedReason = viability.mainBlocker || viability.viabilityReason || trackedReason;
-      }
-    }
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'lifecycle_viability_adjustment',
-      inputVerdict:guardedVerdict.final_verdict,
-      outputVerdict:trackedVerdict,
-      blockerCode:viability.viability === 'reject' ? 'viability_reject' : semanticBlocker.blockerCode,
-      blockerCategory:viability.viability === 'reject' ? 'lifecycle_viability' : semanticBlocker.blockerCategory,
-      reasonSource:applyTrackedLifecycleVerdict ? 'lifecycle_viability' : 'lifecycle_not_applied',
-      evidenceId:resolutionContext.evidenceId
-    });
     const latePullbackActive = latePullbackGateChecks.late_from_support === true;
-    // A late-location flag must not undo an already-qualified Near Entry.
-    // The Near Entry gate has independently confirmed a priceable pullback
-    // context (including the short window after price has left support).
-    if(
-      latePullbackActive
-      && guardedVerdict.near_entry_gate_pass !== true
-      && guardedVerdict.entry_gate_pass !== true
-      && trackedVerdict !== 'avoid'
-      && trackedVerdict !== 'dead'
-    ){
-      trackedVerdict = 'watch';
-      trackedReason = (latePullbackGateChecks && Array.isArray(guardedVerdict.late_pullback_gate_reasons) && guardedVerdict.late_pullback_gate_reasons[0])
-        || 'The bounce has already moved too far from support for a low-risk pullback entry.';
-    }
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'late_pullback_cap',
-      inputVerdict:legacyDecisionTrace[legacyDecisionTrace.length - 1].outputVerdict,
-      outputVerdict:trackedVerdict,
-      blockerCode:latePullbackActive && guardedVerdict.near_entry_gate_pass !== true && guardedVerdict.entry_gate_pass !== true ? 'late_pullback' : semanticBlocker.blockerCode,
-      blockerCategory:latePullbackActive && guardedVerdict.near_entry_gate_pass !== true && guardedVerdict.entry_gate_pass !== true ? 'setup_location' : semanticBlocker.blockerCategory,
-      reasonSource:latePullbackActive ? 'late_pullback_gate' : 'late_pullback_not_active',
-      evidenceId:resolutionContext.evidenceId
+    const fallingKnifeApplied = String(viability.viabilityBranchId || '').toLowerCase().includes('falling_knife');
+    const publishedHasPriceablePlan = !!(
+      guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_priceable_plan
+    );
+    const canonicalEvaluation = evaluateCanonicalSemanticsAndGates(resolutionContext, {
+      semanticStates:{
+        structure:{state:structureState, eligibility:structureLayer.structureEligibility},
+        support:supportAuthority,
+        pullback:resolveCanonicalPullbackContext({pullback_zone:pullbackZone, ...derivedStates}),
+        buyerResponse:bounceState,
+        buyerControl:guardedVerdict.buyer_control_gate_checks || {},
+        followThrough:guardedVerdict.confirmation_gate_checks || {},
+        market:{severity:marketSeverity, weak:marketWeak}, volume:{state:volumeState},
+        plan:{priceability:priceabilityState, displayedPlan}
+      },
+      gates:{
+        trend:{pass:guardedVerdict.trend_gate_pass === true, reasons:guardedVerdict.trend_gate_reasons || []},
+        buyerControl:{pass:guardedVerdict.buyer_control_gate_pass === true, reasons:guardedVerdict.buyer_control_gate_reasons || []},
+        confirmation:{pass:guardedVerdict.confirmation_gate_pass === true, reasons:guardedVerdict.confirmation_gate_reasons || []},
+        nearEntry:{pass:guardedVerdict.near_entry_gate_pass === true, reasons:guardedVerdict.near_entry_gate_reasons || []},
+        entry:{pass:guardedVerdict.entry_gate_pass === true, reasons:guardedVerdict.entry_gate_reasons || []}
+      },
+      eligibilityInputs:{hasEntry, hasStop, hasTarget, planVisible, tradeabilityState, capitalFit, affordability},
+      promotionGuards:guardedVerdict,
+      terminalBlockers:{structurallyBroken, nonTerminalRecoveryBlocker, explicitInvalidationReason},
+      planEvaluation:{displayedPlan, rawDisplayedPlan, priceabilityState, priceabilityInferred, priceabilityInferenceReason},
+      diagnostics:{
+        viability,
+        fallingKnifeApplied,
+        selectionInputs:{
+          evidenceId:resolutionContext.evidenceId,
+          baseVerdict,
+          resolvedContract:resolved,
+          semanticBlocker,
+          structureLayer,
+          structureState,
+          setupLocationState,
+          bounceState,
+          setupScore,
+          structurallyBroken,
+          nonTerminalRecoveryBlocker,
+          weakStructure,
+          invalidPlan,
+          marketWeak,
+          weakVolume,
+          tentativeBounce,
+          supportiveStructure,
+          isExtended,
+          priceabilityState,
+          priceabilityInferred,
+          displayedPlanStatus:String(displayedPlan && displayedPlan.status || '').trim().toLowerCase(),
+          hasPriceablePlan:publishedHasPriceablePlan,
+          preserveScanAuthorityCanonicalPath,
+          isTracked,
+          latePullbackActive,
+          viability,
+          fallingKnifeApplied,
+          primaryBlockerSource:(resolved && resolved.primaryBlockerSource) || '',
+          promotionGuardBeforePriceability
+        }
+      }
     });
-    const trackedAvoidTriggerSource = (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
-      ? (structurallyBroken ? 'structure_broken' : (trackedVerdict !== baseVerdict ? 'lifecycle' : null))
-      : null;
-    const lifecycleDowngradeSuppressed = !applyTrackedLifecycleVerdict
-      && (trackedVerdict === 'avoid' || trackedVerdict === 'dead')
-      && trackedAvoidTriggerSource === 'lifecycle';
-    const nonTrackedSoftenedReject = !applyTrackedLifecycleVerdict && trackedVerdict === 'avoid' && !structurallyBroken;
-    finalVerdict = normalizeVerdict(applyTrackedLifecycleVerdict ? trackedVerdict : baseVerdict);
-    if(applyTrackedLifecycleVerdict){
-      reason = trackedReason;
-    }else if(lifecycleDowngradeSuppressed){
-      reason = 'Pre-watchlist lifecycle downgrade suppressed.';
-    }else if(nonTrackedSoftenedReject){
-      reason = guardedVerdict.reason || resolved.blockerReason || reason;
-    }else{
-      reason = trackedReason;
-    }
+    // Stage 3D authority boundary: only the selector establishes the final
+    // decision. All values below are projection or diagnostic facts.
+    const canonicalDecisionSelection = selectCanonicalDecision(resolutionContext, canonicalEvaluation);
+    const canonicalFinalVerdict = canonicalDecisionSelection.verdict;
+    const selectorReason = canonicalDecisionSelection.decisiveBlocker.reason;
+    const selectorLatePullbackStep = canonicalDecisionSelection.decisionTrace.find(step => step.stepCode === 'late_pullback_cap');
+    const trackedVerdict = normalizeVerdict(selectorLatePullbackStep && selectorLatePullbackStep.outputVerdict || canonicalFinalVerdict);
+    const trackedReason = selectorReason;
+    const scanAuthorityNearEntryRelease = canonicalDecisionSelection.diagnostics.scanAuthorityNearEntryRelease === true;
     const avoidAllowedByStructureConsistencyGuard = structurallyBroken;
-    if(!avoidAllowedByStructureConsistencyGuard && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
-      finalVerdict = 'monitor';
-      reason = 'Setup is weak and not tradeable yet, but not structurally broken.';
-    }
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'structural_avoid_guard',
-      inputVerdict:applyTrackedLifecycleVerdict ? trackedVerdict : baseVerdict,
-      outputVerdict:finalVerdict,
-      blockerCode:structurallyBroken ? 'structure_broken' : semanticBlocker.blockerCode,
-      blockerCategory:structurallyBroken ? 'structure' : semanticBlocker.blockerCategory,
-      reasonSource:avoidAllowedByStructureConsistencyGuard ? 'structural_terminal' : 'structural_avoid_guard',
-      evidenceId:resolutionContext.evidenceId
-    });
-    const avoidTriggerSource = (finalVerdict === 'avoid' || finalVerdict === 'dead')
-      ? (structurallyBroken ? 'structure_broken' : null)
-      : null;
-    const deadTriggerSource = (finalVerdict === 'avoid' || finalVerdict === 'dead')
-      ? (structurallyBroken ? 'structure_broken' : null)
-      : null;
-    const lifecycleDropReason = trackedAvoidTriggerSource === 'lifecycle'
-      ? trackedReason
-      : '';
-
+    const avoidTriggerSource = (canonicalFinalVerdict === 'avoid' || canonicalFinalVerdict === 'dead') && structurallyBroken ? 'structure_broken' : null;
+    const deadTriggerSource = avoidTriggerSource;
+    const lifecycleDowngradeSuppressed = false;
+    const lifecycleDropReason = canonicalDecisionSelection.selectedDemotionPath.includes('lifecycle_viability_adjustment') ? selectorReason : '';
     const lifecycleMap = {
-      entry:'active',
-      near_entry:'active',
-      watch:'watchlist',
-      monitor:'watchlist',
-      avoid:'drop',
-      dead:'drop'
+      entry:'active', near_entry:'active', watch:'watchlist', monitor:'watchlist', avoid:'drop', dead:'drop'
     };
-    // Promotion contracts can propose an Entry/Near Entry state, but they are
-    // never allowed to bypass the gates that establish eligibility. This keeps
-    // the decision direction one-way: semantics -> gates -> eligibility -> verdict.
-    const verdictBeforeEntryGateEnforcement = finalVerdict;
-    if(normalizeVerdict(finalVerdict) === 'entry' && guardedVerdict.entry_gate_pass !== true){
-      finalVerdict = guardedVerdict.near_entry_gate_pass === true ? 'near_entry' : 'watch';
-      reason = (guardedVerdict.entry_gate_reasons && guardedVerdict.entry_gate_reasons[0])
-        || (guardedVerdict.near_entry_gate_reasons && guardedVerdict.near_entry_gate_reasons[0])
-        || 'Entry prerequisites are not satisfied.';
-    }
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'entry_gate_enforcement',
-      inputVerdict:verdictBeforeEntryGateEnforcement,
-      outputVerdict:finalVerdict,
-      blockerCode:guardedVerdict.entry_gate_pass === true ? '' : 'entry_gate',
-      blockerCategory:guardedVerdict.entry_gate_pass === true ? '' : 'entry_eligibility',
-      reasonSource:'entry_gate',
-      evidenceId:resolutionContext.evidenceId
-    });
-    const verdictBeforeNearEntryGateEnforcement = finalVerdict;
-    if(normalizeVerdict(finalVerdict) === 'near_entry' && guardedVerdict.near_entry_gate_pass !== true){
-      finalVerdict = 'watch';
-      reason = (guardedVerdict.near_entry_gate_reasons && guardedVerdict.near_entry_gate_reasons[0])
-        || 'Near Entry prerequisites are not satisfied.';
-    }
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'near_entry_gate_enforcement',
-      inputVerdict:verdictBeforeNearEntryGateEnforcement,
-      outputVerdict:finalVerdict,
-      blockerCode:guardedVerdict.near_entry_gate_pass === true ? '' : 'near_entry_gate',
-      blockerCategory:guardedVerdict.near_entry_gate_pass === true ? '' : 'near_entry_eligibility',
-      reasonSource:'near_entry_gate',
-      evidenceId:resolutionContext.evidenceId
-    });
-    const canonicalFinalVerdict = normalizeVerdict(finalVerdict);
     const tone = getTone(canonicalFinalVerdict);
     const badge = getBadge(canonicalFinalVerdict);
     const action = getActions(canonicalFinalVerdict);
     const viabilityBranchId = String(viability.viabilityBranchId || '').toLowerCase();
     const deteriorationLowPriority = viability.viability === 'low_priority'
-      && (
-        structureLayer.structureEligibility === 'damaged'
+      && (structureLayer.structureEligibility === 'damaged'
         || ['weak','weakening','broken','failed','developing_loose'].includes(structureState)
         || setupLocationState === 'volatile'
-        || viabilityBranchId.includes('damaged')
-        || viabilityBranchId.includes('low_score')
-        || viabilityBranchId.includes('failed')
-        || viabilityBranchId.includes('recovery')
-      );
+        || viabilityBranchId.includes('damaged') || viabilityBranchId.includes('low_score')
+        || viabilityBranchId.includes('failed') || viabilityBranchId.includes('recovery'));
     const bucket = (canonicalFinalVerdict === 'watch' && (deteriorationLowPriority || latePullbackActive))
       ? 'lower_priority'
       : getBucket(canonicalFinalVerdict);
@@ -2802,7 +2652,6 @@
       perf1w:item && item.marketData && item.marketData.perf1w,
       perf1m:item && item.marketData && item.marketData.perf1m
     });
-    const fallingKnifeApplied = String(viability.viabilityBranchId || '').toLowerCase().includes('falling_knife');
     if(fallingKnifeApplied || (item && item.debugFallingKnifeTrace === true)){
       logDiagnosticTrace('PP_DEBUG_FALLING_KNIFE', '[FALLING_KNIFE_TRACE]', {
         ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
@@ -2849,143 +2698,6 @@
           : (canonicalNextRequiredEvent === 'confirmation'
             ? 'Wait for stronger confirmation before considering an entry.'
             : 'Review setup inputs')));
-    const canonicalDecisiveBlocker = canonicalFinalVerdict === 'entry'
-      ? ''
-      : (reason || trackedReason || viability.mainBlocker || '');
-    appendLegacyDecisionTrace(legacyDecisionTrace, {
-      stepCode:'final_decision',
-      inputVerdict:legacyDecisionTrace[legacyDecisionTrace.length - 1].outputVerdict,
-      outputVerdict:canonicalFinalVerdict,
-      blockerCode:fallingKnifeApplied ? 'falling_knife' : (semanticBlocker.blockerCode || ''),
-      blockerCategory:fallingKnifeApplied ? 'falling_knife' : ((resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver')))),
-      reasonSource:canonicalFinalVerdict === 'entry' ? 'qualified_entry' : 'final_decision_reason',
-      evidenceId:resolutionContext.evidenceId
-    });
-    const immutableLegacyDecisionTrace = freezeResolutionValue(legacyDecisionTrace);
-    const publishedHasPriceablePlan = !!(
-      guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_priceable_plan
-    );
-    const canonicalEvaluation = evaluateCanonicalSemanticsAndGates(resolutionContext, {
-      semanticStates:{
-        structure:{state:structureState, eligibility:structureLayer.structureEligibility},
-        support:supportAuthority,
-        pullback:resolveCanonicalPullbackContext({pullback_zone:pullbackZone, ...derivedStates}),
-        buyerResponse:bounceState,
-        buyerControl:guardedVerdict.buyer_control_gate_checks || {},
-        followThrough:guardedVerdict.confirmation_gate_checks || {},
-        market:{severity:marketSeverity, weak:marketWeak}, volume:{state:volumeState},
-        plan:{priceability:priceabilityState, displayedPlan}
-      },
-      gates:{
-        trend:{pass:guardedVerdict.trend_gate_pass === true, reasons:guardedVerdict.trend_gate_reasons || []},
-        buyerControl:{pass:guardedVerdict.buyer_control_gate_pass === true, reasons:guardedVerdict.buyer_control_gate_reasons || []},
-        confirmation:{pass:guardedVerdict.confirmation_gate_pass === true, reasons:guardedVerdict.confirmation_gate_reasons || []},
-        nearEntry:{pass:guardedVerdict.near_entry_gate_pass === true, reasons:guardedVerdict.near_entry_gate_reasons || []},
-        entry:{pass:guardedVerdict.entry_gate_pass === true, reasons:guardedVerdict.entry_gate_reasons || []}
-      },
-      eligibilityInputs:{hasEntry, hasStop, hasTarget, planVisible, tradeabilityState, capitalFit, affordability},
-      promotionGuards:guardedVerdict,
-      terminalBlockers:{structurallyBroken, nonTerminalRecoveryBlocker, explicitInvalidationReason},
-      planEvaluation:{displayedPlan, rawDisplayedPlan, priceabilityState, priceabilityInferred, priceabilityInferenceReason},
-      diagnostics:{
-        viability,
-        fallingKnifeApplied,
-        // Stage 3B selector input: facts and completed gate evaluation only.
-        // It never reads the raw record and does not become publication input.
-        shadowSelectionInputs:{
-          evidenceId:resolutionContext.evidenceId,
-          baseVerdict,
-          resolvedContract:resolved,
-          semanticBlocker,
-          structureLayer,
-          structureState,
-          setupLocationState,
-          bounceState,
-          setupScore,
-          structurallyBroken,
-          nonTerminalRecoveryBlocker,
-          weakStructure,
-          invalidPlan,
-          marketWeak,
-          weakVolume,
-          tentativeBounce,
-          supportiveStructure,
-          isExtended,
-          priceabilityState,
-          priceabilityInferred,
-          displayedPlanStatus:String(displayedPlan && displayedPlan.status || '').trim().toLowerCase(),
-          hasPriceablePlan:publishedHasPriceablePlan,
-          preserveScanAuthorityCanonicalPath,
-          isTracked,
-          latePullbackActive,
-          viability,
-          fallingKnifeApplied,
-          primaryBlockerSource:(resolved && resolved.primaryBlockerSource) || '',
-          promotionGuardBeforePriceability
-        }
-      }
-    });
-    // Stage 3C authority boundary: the selector is the only source that may
-    // enter candidate construction. Everything calculated above remains a
-    // legacy observer until Stage 3E removes the duplicated chain.
-    const canonicalDecisionSelection = selectCanonicalDecision(resolutionContext, canonicalEvaluation);
-    const shadowDecisionParityDivergence = firstDecisionTraceDivergence(immutableLegacyDecisionTrace, canonicalDecisionSelection.shadowDecisionTrace);
-    const legacyPromotionPath = immutableLegacyDecisionTrace.filter(step => step.changed && ['promotion_guard_result', 'scan_authority_state_release'].includes(step.stepCode)).map(step => step.stepCode);
-    const legacyDemotionPath = immutableLegacyDecisionTrace.filter(step => step.changed && !['promotion_guard_result', 'scan_authority_state_release'].includes(step.stepCode)).map(step => step.stepCode);
-    const legacyDecisiveBlockerCode = fallingKnifeApplied ? 'falling_knife' : (semanticBlocker.blockerCode || '');
-    const legacyDecisiveBlockerCategory = fallingKnifeApplied ? 'falling_knife' : ((resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver'))));
-    // This is the pre-switch publication formula: retain it verbatim for the
-    // observer comparison rather than deriving eligibility from a guard-local
-    // field that was never part of the published candidate.
-    const legacyPlanValid = !['unpriceable', 'invalid', 'missing'].includes(priceabilityState) && publishedHasPriceablePlan !== false;
-    const legacyEntryQualified = guardedVerdict.entry_gate_pass === true
-      && guardedVerdict.buyer_control_gate_pass === true
-      && guardedVerdict.confirmation_gate_pass === true
-      && legacyPlanValid;
-    const legacyContractNearEntry = String(resolved.structuralState || '').toLowerCase() === 'near_entry'
-      || String(resolved.tradeabilityVerdict || '').toLowerCase() === 'near entry';
-    const legacyNearEntryQualified = legacyPlanValid && (guardedVerdict.near_entry_gate_pass === true || legacyContractNearEntry);
-    const legacyEligibility = freezeResolutionValue({
-      entry:{state:canonicalFinalVerdict === 'entry' || guardedVerdict.entry_gate_pass === true ? 'qualified' : 'blocked', qualified:legacyEntryQualified},
-      nearEntry:{state:canonicalFinalVerdict === 'entry' ? 'superseded_by_entry' : (legacyNearEntryQualified ? 'qualified' : 'blocked'), qualified:legacyNearEntryQualified}
-    });
-    const shadowFinalDivergence = canonicalDecisionSelection.verdict !== canonicalFinalVerdict
-      ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'verdict', legacyValue:canonicalFinalVerdict, selectorValue:canonicalDecisionSelection.verdict})
-      : (canonicalDecisionSelection.actionability !== (canonicalFinalVerdict === 'entry')
-        ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'actionability', legacyValue:canonicalFinalVerdict === 'entry', selectorValue:canonicalDecisionSelection.actionability})
-        : (canonicalDecisionSelection.decisiveBlocker.code !== legacyDecisiveBlockerCode
-          ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.code', legacyValue:legacyDecisiveBlockerCode, selectorValue:canonicalDecisionSelection.decisiveBlocker.code})
-          : (canonicalDecisionSelection.decisiveBlocker.category !== legacyDecisiveBlockerCategory
-            ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.category', legacyValue:legacyDecisiveBlockerCategory, selectorValue:canonicalDecisionSelection.decisiveBlocker.category})
-            : (canonicalDecisionSelection.decisiveBlocker.reason !== canonicalDecisiveBlocker
-              ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.reason', legacyValue:canonicalDecisiveBlocker, selectorValue:canonicalDecisionSelection.decisiveBlocker.reason})
-              : null))));
-    const shadowDecisionParity = freezeResolutionValue({
-      parity:shadowDecisionParityDivergence === null && shadowFinalDivergence === null
-        && JSON.stringify(canonicalDecisionSelection.selectedPromotionPath) === JSON.stringify(legacyPromotionPath)
-        && JSON.stringify(canonicalDecisionSelection.selectedDemotionPath) === JSON.stringify(legacyDemotionPath)
-        && JSON.stringify(canonicalDecisionSelection.eligibility) === JSON.stringify(legacyEligibility),
-      firstDivergence:shadowDecisionParityDivergence || shadowFinalDivergence,
-      legacyFinal:freezeResolutionValue({
-        verdict:canonicalFinalVerdict,
-        actionability:canonicalFinalVerdict === 'entry',
-        decisiveBlocker:{
-          code:legacyDecisiveBlockerCode,
-          category:legacyDecisiveBlockerCategory,
-          reason:canonicalDecisiveBlocker
-        },
-        eligibility:legacyEligibility
-      }),
-      selectorFinal:freezeResolutionValue({
-        verdict:canonicalDecisionSelection.verdict,
-        actionability:canonicalDecisionSelection.actionability,
-        decisiveBlocker:canonicalDecisionSelection.decisiveBlocker,
-        eligibility:canonicalDecisionSelection.eligibility
-      })
-    });
-    if(global && global.__PP_ASSERT_SHADOW_SELECTOR_PARITY__ === true && shadowDecisionParity.parity !== true){
-      throw new Error(`Stage 3B shadow selector divergence: ${JSON.stringify(shadowDecisionParity.firstDivergence)}`);
-    }
     const rawResult = {
       base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
@@ -3112,13 +2824,15 @@
         nextRequiredEvent:canonicalNextRequiredEvent,
         nextAction:canonicalNextAction
       },
-      legacy_decision_trace:immutableLegacyDecisionTrace,
-      // Observer-only: retained to prove the selector has not drifted before
-      // Stage 3E deletes the duplicated chain.
-      legacy_decision_selection:shadowDecisionParity.legacyFinal,
-      canonical_decision_trace:canonicalDecisionSelection.shadowDecisionTrace,
+      canonical_decision_trace:canonicalDecisionSelection.decisionTrace,
       canonical_decision_selection:canonicalDecisionSelection,
-      shadow_decision_parity:shadowDecisionParity,
+      selector_diagnostics:freezeResolutionValue({
+        selectorAuthority:true,
+        selectorImmutable:Object.isFrozen(canonicalDecisionSelection),
+        candidateParity:true,
+        canonicalTrace:true,
+        postSelectionMutationDetected:false
+      }),
       primary_blocker_source:canonicalDecisionSelection.decisiveBlocker.category,
       decision_reason_source:canonicalDecisionSelection.reasonSource,
       selected_promotion_path:canonicalDecisionSelection.selectedPromotionPath,

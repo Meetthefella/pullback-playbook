@@ -13,7 +13,6 @@ function load(relativePath, sandbox){
 function createSandbox(){
   const sandbox = {window:{}, console};
   sandbox.globalThis = sandbox.window;
-  sandbox.window.__PP_ASSERT_SHADOW_SELECTOR_PARITY__ = true;
   ['js/domain/canonical-resolver-input.js', 'js/domain/canonical-decision-result.js', 'js/resolver-core.js', 'js/domain/paper-trade-eligibility.js', 'js/chart-guru-phase-policy.js', 'js/domain/canonical-decision-observability.js']
     .forEach(relativePath => load(relativePath, sandbox));
   return sandbox.window;
@@ -73,9 +72,9 @@ function run(){
     return {
       id:testCase.id,
       ticker:testCase.ticker,
-      decisionTrace:result.legacy_decision_trace,
+      decisionTrace:result.canonical_decision_trace,
       canonicalDecisionSelection:result.canonical_decision_selection,
-      shadowDecisionParity:result.shadow_decision_parity,
+      selectorDiagnostics:result.selector_diagnostics,
       canonicalDecisionResult:result.canonicalDecisionResult,
       canonicalFacts:{
         structure:result.structure_state,
@@ -103,15 +102,14 @@ function run(){
     assert.strictEqual(result.surfaces.scan, result.verdict, `${result.id}: Scan baseline must reflect the resolver`);
     assert.strictEqual(result.surfaces.review, result.verdict, `${result.id}: Review baseline must reflect the resolver`);
     assert.strictEqual(result.surfaces.track, result.verdict, `${result.id}: Track baseline must reflect the resolver`);
-    assert.ok(Array.isArray(result.decisionTrace), `${result.id}: legacy decision trace must be available for Stage 3 shadow parity`);
-    assert.ok(result.canonicalDecisionSelection && result.canonicalDecisionSelection.diagnostics && result.canonicalDecisionSelection.diagnostics.authority === 'canonical_selector', `${result.id}: selector must be the canonical decision authority during Stage 3C`);
-    assert.ok(result.shadowDecisionParity, `${result.id}: Stage 3B must report structured trace parity diagnostics`);
-    assert.strictEqual(result.shadowDecisionParity.parity, true, `${result.id}: selector trace must exactly match legacy trace; first divergence: ${JSON.stringify(result.shadowDecisionParity.firstDivergence)}`);
+    assert.ok(Array.isArray(result.decisionTrace), `${result.id}: canonical selector trace must be available as the regression oracle`);
+    assert.ok(result.canonicalDecisionSelection && result.canonicalDecisionSelection.diagnostics && result.canonicalDecisionSelection.diagnostics.authority === 'canonical_selector', `${result.id}: selector must be the canonical decision authority`);
+    assert.ok(result.selectorDiagnostics && result.selectorDiagnostics.selectorAuthority === true && result.selectorDiagnostics.candidateParity === true, `${result.id}: compact selector diagnostics must confirm candidate parity`);
     assert.strictEqual(result.canonicalDecisionSelection.verdict, result.verdict, `${result.id}: published verdict must come from the selector`);
     assert.strictEqual(result.canonicalDecisionSelection.actionability, result.canonicalDecisionResult.verdict.actionable, `${result.id}: published actionability must come from the selector`);
     assert.strictEqual(result.canonicalDecisionSelection.eligibility.entry.qualified, result.canonicalDecisionResult.eligibility.entry.qualified, `${result.id}: published Entry eligibility must come from the selector`);
     assert.strictEqual(result.canonicalDecisionSelection.eligibility.nearEntry.qualified, result.canonicalDecisionResult.eligibility.nearEntry.qualified, `${result.id}: published Near Entry eligibility must come from the selector`);
-    assert.strictEqual(result.canonicalDecisionSelection.shadowDecisionTrace.length, result.decisionTrace.length, `${result.id}: selector trace length must match the legacy observer`);
+    assert.strictEqual(result.canonicalDecisionSelection.decisionTrace.length, result.decisionTrace.length, `${result.id}: published trace must come directly from the selector`);
     const stepCodes = result.decisionTrace.map(step => step.stepCode);
     const requiredSteps = [
       'incoming_contract_verdict',
@@ -126,7 +124,7 @@ function run(){
       'near_entry_gate_enforcement',
       'final_decision'
     ];
-    assert.strictEqual(stepCodes.join('|'), requiredSteps.join('|'), `${result.id}: legacy trace must preserve the exact current decision order`);
+    assert.strictEqual(stepCodes.join('|'), requiredSteps.join('|'), `${result.id}: canonical trace must preserve the exact decision order`);
     result.decisionTrace.forEach(step => {
       assert.strictEqual(typeof step.changed, 'boolean', `${result.id}: ${step.stepCode} must report whether it changed the verdict`);
       assert.ok(step.evidenceId, `${result.id}: ${step.stepCode} must retain its evidence identity`);
@@ -143,7 +141,7 @@ function run(){
     suite:'canonical-decision-baseline',
     passed:results.length,
     traceAssertions:'passed',
-    results:results.map(({decisionTrace, canonicalDecisionSelection, shadowDecisionParity, canonicalDecisionResult, ...result}) => result)
+    results:results.map(({decisionTrace, canonicalDecisionSelection, selectorDiagnostics, canonicalDecisionResult, ...result}) => result)
   }, null, 2));
 }
 
