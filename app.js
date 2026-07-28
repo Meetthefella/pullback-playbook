@@ -6704,6 +6704,58 @@ function baseTickerRecord(ticker){
 
 function analysisDerivedStatesFromRecord(record){
   const rawRecord = record && typeof record === 'object' ? record : {};
+  // Stage 3F: this live resolver input is factual-record-only.  Scan and
+  // Review projections remain available to observer diagnostics below, but
+  // cannot establish canonical semantics.
+  const setup = rawRecord.setup && typeof rawRecord.setup === 'object' ? rawRecord.setup : {};
+  const reviewNormalized = rawRecord.review && rawRecord.review.analysisState
+    && rawRecord.review.analysisState.normalized && typeof rawRecord.review.analysisState.normalized === 'object'
+    ? rawRecord.review.analysisState.normalized
+    : (rawRecord.review && rawRecord.review.normalizedAnalysis && typeof rawRecord.review.normalizedAnalysis === 'object'
+      ? rawRecord.review.normalizedAnalysis
+      : {});
+  const hasReviewObservation = Object.keys(reviewNormalized).length > 0;
+  const observationHints = hasReviewObservation && typeof aiObservationEvidenceStates === 'function'
+    ? aiObservationEvidenceStates(reviewNormalized)
+    : {};
+  const observationOnly = reviewNormalized.ai_observation_only === true;
+  const raw = (name, fallback = '') => String(
+    setup[name] ?? setup[name.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`)] ?? rawRecord[name] ?? fallback
+  ).trim().toLowerCase();
+  return {
+    trendState:raw('trendState'),
+    pullbackZone:raw('pullbackZone', observationOnly ? 'none' : ''),
+    pullbackState:raw('pullbackState', raw('pullbackZone', observationOnly ? 'none' : '')),
+    pullbackQuality:raw('pullbackQuality'),
+    structureState:raw('structureState', observationOnly ? 'unknown' : ''),
+    setupLocationState:raw('setupLocationState', raw('pullbackZone', observationOnly ? 'none' : '')),
+    priceabilityState:raw('priceabilityState'),
+    stabilisationState:raw('stabilisationState'),
+    bounceState:raw('bounceState'),
+    volumeState:raw('volumeState'),
+    derivedStateSource:'raw_record_factual_evidence',
+    scannerProjectionFieldsPresent:[],
+    scannerProjectionTrustedFieldsApplied:[],
+    // Kept for Chart Guru/diagnostic telemetry only. These values do not
+    // populate any semantic state used by ResolverCore.
+    aiObservationEvidence:hasReviewObservation,
+    aiObservationEvidenceApplied:hasReviewObservation,
+    aiEvidenceStructureHint:String(observationHints.aiEvidenceStructureHint || '').trim(),
+    aiEvidenceLocationHint:String(observationHints.aiEvidenceLocationHint || '').trim(),
+    aiEvidencePriceabilityHint:String(observationHints.aiEvidencePriceabilityHint || '').trim(),
+    aiEvidenceBounceHint:String(observationHints.aiEvidenceBounceHint || '').trim(),
+    alivePullbackReboundGuardApplied:false,
+    alivePullbackReboundGuardReason:'',
+    candleEvidenceUpClosesAfterLow:numericOrNull(rawRecord.candleEvidenceUpClosesAfterLow),
+    candleEvidenceReclaimedPriorDayHigh:rawRecord.candleEvidenceReclaimedPriorDayHigh === true,
+    candleEvidenceDownsideMomentumSlowing:rawRecord.candleEvidenceDownsideMomentumSlowing === true,
+    candleEvidenceTighterRanges:rawRecord.candleEvidenceTighterRanges === true,
+    candleEvidenceSmallerBodies:rawRecord.candleEvidenceSmallerBodies === true,
+    candleEvidenceHigherLowHold:rawRecord.candleEvidenceHigherLowHold === true,
+    candleEvidenceReclaimRangeMeaningful:rawRecord.candleEvidenceReclaimRangeMeaningful === true
+  };
+  /* observer-only legacy derivation retained after this return during the
+     stabilisation release; it must not be used by live resolver authority. */
   const analysisProjection = rawRecord.scan && rawRecord.scan.analysisProjection && typeof rawRecord.scan.analysisProjection === 'object'
     ? rawRecord.scan.analysisProjection
     : {};
@@ -54514,11 +54566,13 @@ function resolvePreLifecycleStateContract(record, options = {}){
 
 function resolveGlobalVerdict(record, deps = {}){
   const item = record && typeof record === 'object' ? record : {};
-  const analysisDerivedStates = deps.analysisDerivedStatesFromRecord || analysisDerivedStatesFromRecord;
   const effectivePlanResolver = deps.effectivePlanForRecord || effectivePlanForRecord;
   const deriveDisplayedPlan = deps.deriveCurrentPlanState || deriveCurrentPlanState;
   const applyPlanGate = deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate;
-  const derivedStates = analysisDerivedStates(item);
+  // This wrapper supplies factual plan services only. Semantic state, verdict
+  // contracts, Scan preservation, Review readiness, and lifecycle history are
+  // intentionally excluded from ResolverCore authority.
+  const derivedStates = {};
   const effectivePlan = effectivePlanResolver(item, {allowScannerFallback:true});
   let displayedPlan = applyPlanGate(
     item,
@@ -54530,17 +54584,7 @@ function resolveGlobalVerdict(record, deps = {}){
     ),
     derivedStates
   );
-  const preLifecycleResolver = deps.resolvePreLifecycleStateContract || resolvePreLifecycleStateContract;
   const resolverDeps = {
-    resolveFinalStateContract:deps.resolveFinalStateContract || resolveFinalStateContract,
-    resolvePreLifecycleStateContract:inputRecord => preLifecycleResolver(inputRecord, {
-      derivedStates,
-      effectivePlan,
-      displayedPlan
-    }),
-    baseVerdictFromResolvedContract:deps.baseVerdictFromResolvedContract || baseVerdictFromResolvedContract,
-    analysisDerivedStatesFromRecord:() => derivedStates,
-    effectivePlanForRecord:() => effectivePlan,
     applySetupConfirmationPlanGate:applyPlanGate,
     deriveCurrentPlanState:() => displayedPlan,
     evaluatePlanRealism:deps.evaluatePlanRealism || evaluatePlanRealism,
@@ -54549,53 +54593,20 @@ function resolveGlobalVerdict(record, deps = {}){
     buildCumulativePenaltyTrace:deps.buildCumulativePenaltyTrace || cumulativePenaltyTraceForRecord,
     isHostileMarketStatus:deps.isHostileMarketStatus || isHostileMarketStatus,
     state:deps.state || state,
-    scannerScoreGradientClass:deps.scannerScoreGradientClass || scannerScoreGradientClass,
-    preserveReviewCanonicalForSoftReadiness:deps.preserveReviewCanonicalForSoftReadiness === true,
-    preserveScanAuthorityCanonicalPath:deps.preserveScanAuthorityCanonicalPath === true
+    scannerScoreGradientClass:deps.scannerScoreGradientClass || scannerScoreGradientClass
   };
-  const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true
-    || (
-      typeof shouldPreserveScanAuthorityCanonicalPath === 'function'
-      && shouldPreserveScanAuthorityCanonicalPath(item)
-    );
-  resolverDeps.preserveReviewCanonicalForSoftReadiness = deps.preserveReviewCanonicalForSoftReadiness === true;
-  resolverDeps.preserveScanAuthorityCanonicalPath = preserveScanAuthorityCanonicalPath;
   const verdict = resolveGlobalVerdictImpl(record, resolverDeps);
-  const authorityResolvedContract = typeof selectedAuthorityContractForGlobalVerdict === 'function'
-    ? selectedAuthorityContractForGlobalVerdict(item, resolverDeps)
-    : (
-      item.in_watchlist
-      || item.watchlist_entry_exists
-      || (item.watchlist && item.watchlist.inWatchlist)
-    ) && !preserveScanAuthorityCanonicalPath
-      ? resolverDeps.resolveFinalStateContract(item, {context:'global'})
-      : resolverDeps.resolvePreLifecycleStateContract(item);
-  const selectedAuthoritySource = typeof selectedAuthorityContractSource === 'function'
-    ? selectedAuthorityContractSource(item, resolverDeps)
-    : (preserveScanAuthorityCanonicalPath ? 'scan_authority_preserved' : 'final_state_contract');
-  const canonicalAuthoritySource = typeof canonicalVerdictAuthoritySource === 'function'
-    ? canonicalVerdictAuthoritySource(item, {
-      ...resolverDeps,
-      canonicalSoftReadinessAlignmentApplied:verdict.canonical_soft_readiness_alignment_applied === true
-    })
-    : selectedAuthoritySource;
-  verdict.selected_authority_contract_source = verdict.selected_authority_contract_source || selectedAuthoritySource;
-  verdict.canonical_soft_readiness_alignment_source = verdict.canonical_soft_readiness_alignment_source || canonicalAuthoritySource;
-  verdict.contractDiagnostics = authorityResolvedContract && authorityResolvedContract.contractDiagnostics && typeof authorityResolvedContract.contractDiagnostics === 'object'
-    ? {
-      ...authorityResolvedContract.contractDiagnostics,
-      authoritySelectionSource:selectedAuthoritySource,
-      canonicalAuthoritySelectionSource:canonicalAuthoritySource
-    }
-    : {
-      authoritySelectionSource:selectedAuthoritySource,
-      canonicalAuthoritySelectionSource:canonicalAuthoritySource
-    };
+  const authorityResolvedContract = null;
+  const selectedAuthoritySource = 'canonical_selector';
+  const canonicalAuthoritySource = 'canonical_selector';
+  verdict.selected_authority_contract_source = selectedAuthoritySource;
+  verdict.canonical_soft_readiness_alignment_source = canonicalAuthoritySource;
+  verdict.contractDiagnostics = {authoritySelectionSource:selectedAuthoritySource, canonicalAuthoritySelectionSource:canonicalAuthoritySource, compatibilityOnly:true, mayFeedDecisionLogic:false};
   verdict.decision_summary = buildDecisionSummary({
     record:item,
     finalVerdict:verdict.final_verdict,
     displayedPlan,
-    resolvedContract:authorityResolvedContract,
+    resolvedContract:null,
     derivedStates,
     globalVerdict:verdict
   });
@@ -54611,7 +54622,6 @@ function resolveGlobalVerdict(record, deps = {}){
       || verdict.main_blocker
       || verdict.mainBlocker
       || verdict.reason
-      || authorityResolvedContract && (authorityResolvedContract.blockerReason || authorityResolvedContract.reasonSummary)
       || ''
     ).trim();
   const supportTestState = String(verdict.support_test_state || '').trim().toLowerCase();

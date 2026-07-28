@@ -216,18 +216,21 @@
     const normalizedAnalysis = safeObject(review.analysisState).normalized && typeof safeObject(review.analysisState).normalized === 'object'
       ? stableClone(safeObject(review.analysisState).normalized)
       : (review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object' ? stableClone(review.normalizedAnalysis) : null);
-    if(analysisProjection){
+    // Scan and Review projections describe a previous consumer view.  They
+    // are retained below as audit material, never selected as canonical
+    // semantic evidence.  Canonical semantics must start with raw facts.
+    if(analysisProjection || normalizedAnalysis){
       return {
-        source:'scanner_projection',
-        states:analysisProjection,
-        reasons:['scanner_analysis_projection_present']
-      };
-    }
-    if(normalizedAnalysis){
-      return {
-        source:'review_normalized',
-        states:normalizedAnalysis,
-        reasons:['review_normalized_analysis_present']
+        source:'consumer_projection_diagnostic_only',
+        states:null,
+        reasons:[
+          analysisProjection ? 'scanner_analysis_projection_diagnostic_only' : '',
+          normalizedAnalysis ? 'review_normalized_analysis_diagnostic_only' : ''
+        ].filter(Boolean),
+        diagnosticCandidates:{
+          scan:analysisProjection,
+          review:normalizedAnalysis
+        }
       };
     }
     return {
@@ -319,7 +322,9 @@
           asOf:String(marketData.asOf || marketData.timestamp || '').trim()
         },
         scanner: {
-          analysisProjection:selectedDerivedStateAuthority.source === 'scanner_projection' ? stableClone(selectedDerivedStateAuthority.states) : (scan.analysisProjection && typeof scan.analysisProjection === 'object' ? stableClone(scan.analysisProjection) : null),
+          // Consumer projections are intentionally excluded from canonical
+          // evidence. Keep a copy in diagnostics only for migration telemetry.
+          analysisProjection:null,
           checks:scan.flags && typeof scan.flags === 'object' ? stableClone(scan.flags.checks || null) : null,
           resolvedVerdict:String(scan.resolvedVerdict || scan.verdict || '').trim(),
           estimatedRR:numericOrNull(scan.estimatedRR)
@@ -492,8 +497,8 @@
       entry:evidenceValue(plan.numericFields.entry),
       stop:evidenceValue(plan.numericFields.stop),
       firstTarget:evidenceValue(plan.numericFields.firstTarget),
-      scannerProjection:evidenceValue(scanner.analysisProjection),
-      scannerVerdict:evidenceValue(scanner.resolvedVerdict)
+      scannerProjection:evidenceValue(null),
+      scannerVerdict:evidenceValue(null)
     };
     const source = {
       schemaVersion:'normalised-decision-evidence-v1',

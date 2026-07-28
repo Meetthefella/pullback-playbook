@@ -6484,8 +6484,8 @@ function runAiContractAssertions(){
       }
     }
   });
-  if(directDerived.derivedStateSource !== 'ai_observation_hints' || directDerived.aiObservationEvidenceApplied !== true || directDerived.structureState !== 'unknown' || directDerived.pullbackZone !== 'none' || directDerived.setupLocationState !== 'none' || directDerived.priceabilityState !== '' || directDerived.aiEvidenceStructureHint !== 'mixed' || directDerived.aiEvidenceLocationHint !== 'extended' || directDerived.aiEvidencePriceabilityHint !== 'unpriceable' || directDerived.aiEvidenceBounceHint !== 'attempt_observed'){
-    throw new Error('Direct chart-analysis records without scanner projection must expose non-authoritative ai_observation_evidence hints.');
+  if(directDerived.derivedStateSource !== 'raw_record_factual_evidence' || directDerived.structureState !== 'unknown' || directDerived.pullbackZone !== 'none' || directDerived.setupLocationState !== 'none' || directDerived.priceabilityState !== ''){
+    throw new Error('Direct chart-analysis records must remain diagnostic-only and cannot establish canonical semantic state.');
   }
   const directEvidence = evidenceSandbox.aiObservationEvidenceStates({
     ai_observation_only:true,
@@ -6515,8 +6515,8 @@ function runAiContractAssertions(){
       }
     }
   });
-  if(metadataOnlyDerived.derivedStateSource !== 'ai_observation_hints' || metadataOnlyDerived.structureState !== 'unknown' || metadataOnlyDerived.aiEvidenceStructureHint !== 'damaged_context'){
-    throw new Error('Metadata-only scanner projection must not suppress neutral AI evidence fallback.');
+  if(metadataOnlyDerived.derivedStateSource !== 'raw_record_factual_evidence' || metadataOnlyDerived.structureState !== 'unknown'){
+    throw new Error('Metadata-only Scan/Review projections must remain outside canonical semantic authority.');
   }
   const camelCaseProjected = evidenceSandbox.analysisDerivedStatesFromRecord({
     scan:{analysisProjection:{structureState:'broken', bounceState:'none', pullbackZone:'near_50ma', stabilisationState:'none'}},
@@ -6527,8 +6527,8 @@ function runAiContractAssertions(){
       }
     }
   });
-  if(camelCaseProjected.derivedStateSource !== 'scanner_projection+ai_observation_hints' || camelCaseProjected.structureState !== 'broken' || camelCaseProjected.bounceState !== 'none' || camelCaseProjected.pullbackZone !== 'near_50ma' || camelCaseProjected.aiObservationEvidenceApplied !== true || !camelCaseProjected.scannerProjectionTrustedFieldsApplied.includes('structureState')){
-    throw new Error('CamelCase scanner projection fields must be detected and consumed consistently.');
+  if(camelCaseProjected.derivedStateSource !== 'raw_record_factual_evidence' || camelCaseProjected.structureState === 'broken' || camelCaseProjected.bounceState === 'none' || camelCaseProjected.pullbackZone === 'near_50ma'){
+    throw new Error('Scan projection fields must not be consumed as canonical semantic evidence.');
   }
   const projectedDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
     scan:{analysisProjection:{structure_state:'weak', bounce_state:'none', priceability_state:'unpriceable'}},
@@ -6540,8 +6540,8 @@ function runAiContractAssertions(){
       }
     }
   });
-  if(projectedDerived.derivedStateSource !== 'scanner_projection+ai_observation_hints' || projectedDerived.aiObservationEvidenceApplied !== true || projectedDerived.structureState !== 'weak' || projectedDerived.bounceState !== 'none' || projectedDerived.priceabilityState !== 'unpriceable' || !projectedDerived.scannerProjectionTrustedFieldsApplied.includes('bounceState') || projectedDerived.aiEvidenceBounceHint !== 'confirmed_observed'){
-    throw new Error('Scanner projection must win over AI observation evidence hints.');
+  if(projectedDerived.derivedStateSource !== 'raw_record_factual_evidence' || projectedDerived.structureState === 'weak' || projectedDerived.bounceState === 'none' || projectedDerived.priceabilityState === 'unpriceable'){
+    throw new Error('Neither Scan nor Review projection may establish canonical semantic state.');
   }
   const ftiAlivePullbackDerived = evidenceSandbox.analysisDerivedStatesFromRecord({
     marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87},
@@ -6554,8 +6554,8 @@ function runAiContractAssertions(){
       priceability_state:'unpriceable'
     }}
   });
-  if(ftiAlivePullbackDerived.structureState === 'weak' || ftiAlivePullbackDerived.structureState === 'weakening' || ftiAlivePullbackDerived.bounceState === 'none' || ftiAlivePullbackDerived.alivePullbackReboundGuardApplied !== true){
-    throw new Error('Alive pullback/rebound evidence near support must prevent scanner weak/no-bounce downgrade.');
+  if(ftiAlivePullbackDerived.derivedStateSource !== 'raw_record_factual_evidence' || ftiAlivePullbackDerived.structureState === 'weak' || ftiAlivePullbackDerived.bounceState === 'none'){
+    throw new Error('Scanner semantic projection must remain diagnostic-only even near an alive pullback.');
   }
   const freshSyntheticBounceGuard = evidenceSandbox.resolveAlivePullbackReboundGuard({
     marketData:{price:73.19, ma20:75.4, ma50:71.6, ma200:52, previousClose:71.15, changePercent:2.87},
@@ -6642,8 +6642,8 @@ function runAiContractAssertions(){
       bounce_state:'none'
     }}
   });
-  if(trueBrokenProjection.structureState !== 'broken' || trueBrokenProjection.bounceState !== 'none' || trueBrokenProjection.alivePullbackReboundGuardApplied === true){
-    throw new Error('Alive pullback guard must not soften true broken scanner projections.');
+  if(trueBrokenProjection.derivedStateSource !== 'raw_record_factual_evidence' || trueBrokenProjection.structureState === 'broken' || trueBrokenProjection.bounceState === 'none'){
+    throw new Error('Broken Scan projection must remain diagnostic-only until raw factual evidence establishes it.');
   }
   const trueWeakeningProjection = evidenceSandbox.analysisDerivedStatesFromRecord({
     marketData:{price:49, ma20:52, ma50:55, ma200:44, previousClose:48.5, changePercent:1.1},
@@ -6655,15 +6655,15 @@ function runAiContractAssertions(){
       bounce_state:'none'
     }}
   });
-  if(trueWeakeningProjection.structureState !== 'weakening' || trueWeakeningProjection.bounceState !== 'none' || trueWeakeningProjection.alivePullbackReboundGuardApplied === true){
-    throw new Error('Alive pullback guard must not soften genuine weak/weakening trend projections.');
+  if(trueWeakeningProjection.derivedStateSource !== 'raw_record_factual_evidence' || trueWeakeningProjection.structureState === 'weakening' || trueWeakeningProjection.bounceState === 'none'){
+    throw new Error('Weakening Scan projection must remain diagnostic-only until raw factual evidence establishes it.');
   }
   const priceabilityOnlyProjected = evidenceSandbox.analysisDerivedStatesFromRecord({
     scan:{analysisProjection:{priceability_state:'unpriceable'}},
     review:{normalizedAnalysis:null}
   });
-  if(priceabilityOnlyProjected.derivedStateSource !== 'scanner_projection' || priceabilityOnlyProjected.priceabilityState !== 'unpriceable' || !priceabilityOnlyProjected.scannerProjectionTrustedFieldsApplied.includes('priceabilityState')){
-    throw new Error('Consumed scanner priceability field must be reflected in source diagnostics.');
+  if(priceabilityOnlyProjected.derivedStateSource !== 'raw_record_factual_evidence' || priceabilityOnlyProjected.priceabilityState === 'unpriceable'){
+    throw new Error('Scan priceability projection must not establish canonical priceability.');
   }
   const mathematicallyPriceableProjection = evidenceSandbox.analysisDerivedStatesFromRecord({
     plan:{entry:62.73, stop:56.58, firstTarget:81.19},
@@ -6677,8 +6677,8 @@ function runAiContractAssertions(){
     scan:{analysisProjection:{scan_type:'20MA', setup_type_reason:'metadata only'}},
     review:{normalizedAnalysis:null}
   });
-  if(metadataOnlyProjectionFields.derivedStateSource !== 'unknown' || metadataOnlyProjectionFields.scannerProjectionTrustedFieldsApplied.length !== 0 || !metadataOnlyProjectionFields.scannerProjectionFieldsPresent.includes('scanType')){
-    throw new Error('Metadata-only scanner projection must be present but not trusted/applied.');
+  if(metadataOnlyProjectionFields.derivedStateSource !== 'raw_record_factual_evidence' || metadataOnlyProjectionFields.scannerProjectionTrustedFieldsApplied.length !== 0){
+    throw new Error('Metadata-only scanner projection must remain diagnostic-only.');
   }
   const partialProjected = evidenceSandbox.analysisDerivedStatesFromRecord({
     scan:{analysisProjection:{pullback_zone:'near_20ma'}},
@@ -6690,8 +6690,8 @@ function runAiContractAssertions(){
       }
     }
   });
-  if(partialProjected.derivedStateSource !== 'scanner_projection+ai_observation_hints' || partialProjected.aiObservationEvidenceApplied !== true || partialProjected.pullbackZone !== 'near_20ma' || partialProjected.structureState !== 'unknown' || partialProjected.bounceState !== '' || partialProjected.aiEvidenceStructureHint !== 'damaged_context' || !partialProjected.scannerProjectionTrustedFieldsApplied.includes('pullbackZone')){
-    throw new Error('Partial scanner projection must merge per-field without allowing AI to emit canonical structure/bounce.');
+  if(partialProjected.derivedStateSource !== 'raw_record_factual_evidence' || partialProjected.pullbackZone === 'near_20ma' || partialProjected.structureState !== 'unknown'){
+    throw new Error('Partial Scan/Review projections must not merge into canonical semantics.');
   }
   const unknownStructurePromotion = resolverCore.resolveGlobalVerdict({
     ticker:'AINEUTRAL',
@@ -7048,11 +7048,8 @@ function runPlanSemanticsAssertions(){
     throw new Error('Soft readiness only must not be treated as a hard unpriceable blocker in resolveFinalStateContract.');
   }
   const liveLikeResolvedVerdict = sandbox.resolveGlobalVerdict(trowLikeRecord);
-  if(!liveLikeResolvedVerdict.contractDiagnostics || liveLikeResolvedVerdict.contractDiagnostics.softReadinessOnlyDemotion !== true){
-    throw new Error('Dirty persisted TROW-like record must keep soft-readiness protection through the real resolveGlobalVerdict path.');
-  }
-  if(liveLikeResolvedVerdict.contractDiagnostics.structuredBlockersPresent === true){
-    throw new Error('Stale persisted plan-owned blocker metadata must not count as a current structured blocker in soft-readiness protection.');
+  if(!liveLikeResolvedVerdict.contractDiagnostics || liveLikeResolvedVerdict.contractDiagnostics.authoritySelectionSource !== 'canonical_selector'){
+    throw new Error('Dirty persisted TROW-like record must resolve through the canonical selector, not an app-level soft-readiness contract.');
   }
   const preservedScanAuthorityRecord = {
     ticker:'MIXED_DIAGNOSTICS',
@@ -7137,23 +7134,9 @@ function runPlanSemanticsAssertions(){
   sandbox.analysisDerivedStatesFromRecord = originalAnalysisDerivedStatesFromRecord;
   sandbox.resolvePreLifecycleStateContract = originalResolvePreLifecycleStateContract;
   sandbox.resolveFinalStateContract = originalResolveFinalStateContract;
-  if(!mixedDiagnosticsVerdict.contractDiagnostics || mixedDiagnosticsVerdict.contractDiagnostics.authorityContract !== 'pre_lifecycle'){
-    throw new Error('resolveGlobalVerdict must source contractDiagnostics from the same preserved authority contract as final_verdict.');
-  }
-  if(mixedDiagnosticsVerdict.contractDiagnostics.blockerSource !== 'setup_location'){
-    throw new Error('Preserved watch verdict must not expose tracked plan_state diagnostics.');
-  }
-  if(mixedDiagnosticsVerdict.canonical_soft_readiness_alignment_source !== 'scan_authority_preserved'){
-    throw new Error('Unchanged scan-authority preservation must report scan_authority_preserved provenance.');
-  }
-  if(mixedDiagnosticsVerdict.contractDiagnostics.canonicalAuthoritySelectionSource !== 'scan_authority_preserved'){
-    throw new Error('Preserved scan-authority diagnostics must expose scan_authority_preserved as canonical provenance.');
-  }
-  if(mixedDiagnosticsVerdict.contractDiagnostics.authoritySelectionSource !== 'scan_authority_preserved'){
-    throw new Error('Preserved scan-authority diagnostics must expose scan_authority_preserved as the selected contract path.');
-  }
-  if(mixedDiagnosticsVerdict.canonical_soft_readiness_alignment_source === 'review_soft_readiness_override'){
-    throw new Error('Unchanged scan-authority preservation must not report review_soft_readiness_override.');
+  if(!mixedDiagnosticsVerdict.contractDiagnostics || mixedDiagnosticsVerdict.contractDiagnostics.authoritySelectionSource !== 'canonical_selector'
+    || mixedDiagnosticsVerdict.canonical_soft_readiness_alignment_source !== 'canonical_selector'){
+    throw new Error('Scan/lifecycle contract diagnostics must be observer-only; canonical selector remains the sole authority.');
   }
   const originalResolveGlobalVerdictImpl = sandbox.resolveGlobalVerdictImpl;
   sandbox.resolveGlobalVerdictImpl = () => ({
@@ -7272,17 +7255,9 @@ function runPlanSemanticsAssertions(){
     })
   });
   sandbox.resolveGlobalVerdictImpl = originalResolveGlobalVerdictImpl;
-  if(reviewSoftReadinessVerdict.canonical_final_verdict !== 'entry'){
-    throw new Error('Review soft-readiness override must preserve the canonical entry verdict.');
-  }
-  if(reviewSoftReadinessVerdict.canonical_soft_readiness_alignment_source !== 'review_soft_readiness_override'){
-    throw new Error('Review soft-readiness override must report review_soft_readiness_override provenance.');
-  }
-  if(reviewSoftReadinessVerdict.contractDiagnostics.canonicalAuthoritySelectionSource !== 'review_soft_readiness_override'){
-    throw new Error('Review soft-readiness diagnostics must expose review_soft_readiness_override as canonical provenance.');
-  }
-  if(reviewSoftReadinessVerdict.canonical_soft_readiness_alignment_source === 'scan_authority_preserved'){
-    throw new Error('Review soft-readiness override must not report scan_authority_preserved.');
+  if(reviewSoftReadinessVerdict.canonical_soft_readiness_alignment_source !== 'canonical_selector'
+    || reviewSoftReadinessVerdict.contractDiagnostics.canonicalAuthoritySelectionSource !== 'canonical_selector'){
+    throw new Error('Review soft-readiness projection must not establish canonical authority.');
   }
   const trowLikeGlobalVerdict = {
     allow_plan:false,
@@ -7296,8 +7271,8 @@ function runPlanSemanticsAssertions(){
   };
   sandbox.resolveGlobalVerdict = () => trowLikeGlobalVerdict;
   sandbox.applyGlobalVerdictGates(trowLikeRecord, {source:'track_focus'});
-  if(trowLikeRecord.plan.blockedReasonCode === 'resolver_block'){
-    throw new Error('Soft readiness only must not persist generic resolver_block on a valid tradable scanner_estimate plan.');
+  if(trowLikeRecord.plan.blockedReasonCode === 'resolver_block' && trowLikeGlobalVerdict.allow_plan === true){
+    throw new Error('A persisted plan blocker must not contradict current canonical execution permission.');
   }
 
   sandbox.resolveGlobalVerdict = sandbox.resolveGlobalVerdictImpl;

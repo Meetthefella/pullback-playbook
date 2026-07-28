@@ -242,14 +242,11 @@
     });
     const nearEntryGateChecks = guardedVerdict.near_entry_gate_checks || {};
     const entryGateChecks = guardedVerdict.entry_gate_checks || {};
-    const scanAuthorityNearEntryRelease = input.preserveScanAuthorityCanonicalPath === true
-      && guardedVerdict.near_entry_gate_pass === true
-      && guardedVerdict.entry_gate_pass !== true
-      && input.priceabilityState === 'priceable'
-      && input.displayedPlanStatus === 'valid'
-      && nearEntryGateChecks.has_priceable_plan === true
-      && nearEntryGateChecks.near_entry_terminal_block_applied !== true;
-    const applyTrackedLifecycleVerdict = input.isTracked === true && (!input.preserveScanAuthorityCanonicalPath || scanAuthorityNearEntryRelease);
+    // Stage 3F: prior Scan and lifecycle state are historical context only.
+    // They cannot release, promote, demote, or otherwise affect today's
+    // canonical decision.
+    const scanAuthorityNearEntryRelease = false;
+    const applyTrackedLifecycleVerdict = false;
     appendCanonicalDecisionTrace(trace, {
       stepCode:'scan_authority_state_release', inputVerdict:guardedVerdict.final_verdict, outputVerdict:guardedVerdict.final_verdict,
       blockerCode:semanticBlocker.blockerCode, blockerCategory:semanticBlocker.blockerCategory,
@@ -306,25 +303,32 @@
       blockerCategory:latePullbackActive && guardedVerdict.near_entry_gate_pass !== true && guardedVerdict.entry_gate_pass !== true ? 'setup_location' : semanticBlocker.blockerCategory,
       reasonSource:latePullbackActive ? 'late_pullback_gate' : 'late_pullback_not_active', evidenceId
     });
-    const trackedAvoidTriggerSource = (trackedVerdict === 'avoid' || trackedVerdict === 'dead') ? (structurallyBroken ? 'structure_broken' : (trackedVerdict !== normalizeVerdict(input.baseVerdict) ? 'lifecycle' : null)) : null;
-    const lifecycleDowngradeSuppressed = !applyTrackedLifecycleVerdict && (trackedVerdict === 'avoid' || trackedVerdict === 'dead') && trackedAvoidTriggerSource === 'lifecycle';
-    const nonTrackedSoftenedReject = !applyTrackedLifecycleVerdict && trackedVerdict === 'avoid' && !structurallyBroken;
-    let finalVerdict = normalizeVerdict(applyTrackedLifecycleVerdict ? trackedVerdict : input.baseVerdict);
-    if(applyTrackedLifecycleVerdict) reason = trackedReason;
-    else if(lifecycleDowngradeSuppressed) reason = 'Pre-watchlist lifecycle downgrade suppressed.';
-    else if(nonTrackedSoftenedReject) reason = guardedVerdict.reason || resolved.blockerReason || reason;
-    else reason = trackedReason;
+    const lifecycleDowngradeSuppressed = false;
+    let finalVerdict = normalizeVerdict(trackedVerdict);
+    reason = trackedReason;
     const avoidAllowedByStructureConsistencyGuard = structurallyBroken;
     if(!avoidAllowedByStructureConsistencyGuard && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
       finalVerdict = 'monitor';
       reason = 'Setup is weak and not tradeable yet, but not structurally broken.';
     }
     appendCanonicalDecisionTrace(trace, {
-      stepCode:'structural_avoid_guard', inputVerdict:applyTrackedLifecycleVerdict ? trackedVerdict : input.baseVerdict, outputVerdict:finalVerdict,
+      stepCode:'structural_avoid_guard', inputVerdict:trackedVerdict, outputVerdict:finalVerdict,
       blockerCode:structurallyBroken ? 'structure_broken' : semanticBlocker.blockerCode,
       blockerCategory:structurallyBroken ? 'structure' : semanticBlocker.blockerCategory,
       reasonSource:avoidAllowedByStructureConsistencyGuard ? 'structural_terminal' : 'structural_avoid_guard', evidenceId
     });
+    // The initial proposal is intentionally neutral now that app-level
+    // verdict contracts are excluded.  Promotion is selected here from the
+    // completed canonical gates, never from Scan, Review, or lifecycle state.
+    if(finalVerdict !== 'avoid' && finalVerdict !== 'dead'){
+      if(guardedVerdict.entry_gate_pass === true){
+        finalVerdict = 'entry';
+        reason = guardedVerdict.reason || 'Canonical Entry gates are qualified.';
+      }else if(guardedVerdict.near_entry_gate_pass === true){
+        finalVerdict = 'near_entry';
+        reason = guardedVerdict.reason || 'Canonical Near Entry gates are qualified.';
+      }
+    }
     const verdictBeforeEntryGateEnforcement = finalVerdict;
     if(normalizeVerdict(finalVerdict) === 'entry' && guardedVerdict.entry_gate_pass !== true){
       finalVerdict = guardedVerdict.near_entry_gate_pass === true ? 'near_entry' : 'watch';
@@ -1119,15 +1123,12 @@
   }
 
   function nearEntryTerminalBlocked(ctx = {}){
-    const lifecycleState = String(ctx.lifecycle_state || ctx.lifecycle || '').trim().toLowerCase();
     const terminalSource = String(ctx.terminal_avoid_source || ctx.avoid_trigger_source || ctx.dead_trigger_source || '').trim().toLowerCase();
     const structuralState = String(ctx.structural_state || ctx.structuralState || '').trim().toLowerCase();
     return !!(
       ctx.terminal_avoid_applied === true
       || ctx.terminalAvoidFlag === true
-      || ctx.dead_lifecycle_state === true
       || ctx.structurally_broken === true
-      || ['dead','avoid','terminal','expired','inactive'].includes(lifecycleState)
       || ['terminal','terminal_avoid','structure_broken','dead','avoid'].includes(terminalSource)
       || ['dead','broken','invalid','failed'].includes(structuralState)
     );
@@ -2104,6 +2105,51 @@
     return candidate;
   }
 
+  // Stage 3F factual boundary.  This is deliberately not a verdict contract:
+  // it only exposes raw setup observations that existed before any consumer
+  // rendered Scan, Review, Track, or lifecycle state.
+  function canonicalFactualStatesFromRecord(record){
+    const item = record && typeof record === 'object' ? record : {};
+    const setup = item.setup && typeof item.setup === 'object' ? item.setup : {};
+    // `derivedStates` is the explicit raw-evidence packet used by deterministic
+    // resolver fixtures and ingestion. It is not a Scan/Review projection.
+    const evidenceStates = item.derivedStates && typeof item.derivedStates === 'object' ? item.derivedStates : {};
+    const value = (camel, fallback = '') => String(
+      evidenceStates[camel] ?? setup[camel] ?? setup[camel.replace(/[A-Z]/g, character => `_${character.toLowerCase()}`)] ?? item[camel] ?? fallback
+    ).trim().toLowerCase();
+    return freezeResolutionValue({
+      structureState:value('structureState'),
+      trendState:value('trendState'),
+      pullbackZone:value('pullbackZone'),
+      setupLocationState:value('setupLocationState', value('pullbackZone')),
+      priceabilityState:value('priceabilityState'),
+      stabilisationState:value('stabilisationState'),
+      bounceState:value('bounceState'),
+      volumeState:value('volumeState'),
+      candleEvidenceUpClosesAfterLow:numericValueOrNull(evidenceStates.candleEvidenceUpClosesAfterLow ?? item.candleEvidenceUpClosesAfterLow),
+      candleEvidenceReclaimedPriorDayHigh:(evidenceStates.candleEvidenceReclaimedPriorDayHigh ?? item.candleEvidenceReclaimedPriorDayHigh) === true,
+      candleEvidenceDownsideMomentumSlowing:(evidenceStates.candleEvidenceDownsideMomentumSlowing ?? item.candleEvidenceDownsideMomentumSlowing) === true,
+      candleEvidenceTighterRanges:(evidenceStates.candleEvidenceTighterRanges ?? item.candleEvidenceTighterRanges) === true,
+      candleEvidenceSmallerBodies:(evidenceStates.candleEvidenceSmallerBodies ?? item.candleEvidenceSmallerBodies) === true,
+      candleEvidenceHigherLowHold:(evidenceStates.candleEvidenceHigherLowHold ?? item.candleEvidenceHigherLowHold) === true,
+      candleEvidenceReclaimRangeMeaningful:(evidenceStates.candleEvidenceReclaimRangeMeaningful ?? item.candleEvidenceReclaimRangeMeaningful) === true,
+      provenance:Object.keys(evidenceStates).length ? 'raw_evidence_packet' : 'raw_record.setup'
+    });
+  }
+
+  function canonicalEvaluationContract(displayedPlan){
+    const plan = displayedPlan && typeof displayedPlan === 'object' ? displayedPlan : {};
+    return freezeResolutionValue({
+      // Neutral factual packet consumed by evaluation only.  Final selection
+      // belongs solely to selectCanonicalDecision.
+      finalVerdict:'Watch', baseVerdict:'watch', structuralState:'developing',
+      actionStateKey:'recalculate_plan', tradeabilityVerdict:'Watch',
+      planStatusKey:String(plan.status || 'missing').trim().toLowerCase(),
+      blockerReason:String(plan.status || '').trim() === 'valid' ? 'Awaiting canonical gate confirmation.' : 'Plan not ready.',
+      reasonSummary:'Raw factual canonical evaluation.'
+    });
+  }
+
   function resolveGlobalVerdict(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
     const normalisedEvidence = global.CanonicalResolverInput
@@ -2114,53 +2160,38 @@
       resolverSource:'resolver-core',
       policy:{minimumEntryRr:MIN_ENTRY_RR, minimumNearEntryRr:MIN_NEAR_ENTRY_RR}
     });
-    const preLifecycleResolved = deps.resolvePreLifecycleStateContract(item);
-    const preserveReviewCanonicalForSoftReadiness = deps.preserveReviewCanonicalForSoftReadiness === true;
-    const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true
-      || shouldPreserveScanAuthorityCanonicalPath(item);
-    const isTracked = !!(
-      item.in_watchlist
-      || item.watchlist_entry_exists
-      || (item.watchlist && item.watchlist.inWatchlist)
-    );
-    const resolved = selectedAuthorityContractForGlobalVerdict(item, {
-      ...deps,
-      preserveScanAuthorityCanonicalPath
-    });
-    const baseVerdict = deps.baseVerdictFromResolvedContract(preLifecycleResolved);
-    const derivedStates = deps.analysisDerivedStatesFromRecord(item);
-    const effectivePlan = typeof deps.effectivePlanForRecord === 'function'
-      ? deps.effectivePlanForRecord(item, {allowScannerFallback:true})
+    const derivedStates = canonicalFactualStatesFromRecord(item);
+    const effectivePlan = item.effectivePlan && typeof item.effectivePlan === 'object'
+      ? item.effectivePlan
       : {
         entry:item.plan && item.plan.entry,
         stop:item.plan && item.plan.stop,
-        firstTarget:item.plan && item.plan.firstTarget
+        firstTarget:item.plan && (item.plan.firstTarget ?? item.plan.target)
       };
-    const rawDisplayedPlan = deps.deriveCurrentPlanState(
+    const rawDisplayedPlan = item.rawDisplayedPlan && typeof item.rawDisplayedPlan === 'object'
+      ? item.rawDisplayedPlan
+      : deps.deriveCurrentPlanState(
       effectivePlan && effectivePlan.entry,
       effectivePlan && effectivePlan.stop,
       effectivePlan && effectivePlan.firstTarget,
       item.marketData && item.marketData.currency
     );
-    const displayedPlan = typeof deps.applySetupConfirmationPlanGate === 'function'
+    const displayedPlan = item.displayedPlan && typeof item.displayedPlan === 'object'
+      ? item.displayedPlan
+      : (typeof deps.applySetupConfirmationPlanGate === 'function'
       ? deps.applySetupConfirmationPlanGate(item, rawDisplayedPlan, derivedStates)
-      : rawDisplayedPlan;
-    const canonicalSoftReadinessOverrideAllowed = !isTracked
-      || preserveReviewCanonicalForSoftReadiness
-      || preserveScanAuthorityCanonicalPath;
-    const nonTrackedCanonicalContract = canonicalSoftReadinessOverrideAllowed && typeof deps.resolveFinalStateContract === 'function'
-      ? deps.resolveFinalStateContract(item, {
-        context:'global',
-        derivedStates,
-        displayedPlan
-      })
-      : null;
-    const canonicalSetupScore = typeof deps.canonicalSetupScoreForRecord === 'function'
-      ? numericValueOrNull(deps.canonicalSetupScoreForRecord(item))
-      : null;
+      : rawDisplayedPlan);
+    const resolved = canonicalEvaluationContract(displayedPlan);
+    const baseVerdict = 'watch';
+    const isTracked = false;
+    const preserveScanAuthorityCanonicalPath = false;
+    const preserveReviewCanonicalForSoftReadiness = false;
+    const canonicalSoftReadinessOverrideAllowed = false;
+    const nonTrackedCanonicalContract = null;
+    const canonicalSetupScore = numericValueOrNull(item.setupScore ?? (item.setup && item.setup.score));
     const setupScore = canonicalSetupScore !== null
       ? canonicalSetupScore
-      : deps.setupScoreForRecord(item);
+      : 0;
     const structureState = String(derivedStates.structureState || '').toLowerCase();
     const trendState = String(derivedStates.trendState || '').toLowerCase();
     const bounceState = String(derivedStates.bounceState || '').toLowerCase();
@@ -2447,9 +2478,9 @@
       ma50_below_200ma:ma50Below200MA,
       terminal_avoid_applied:item && item.terminal_avoid_applied === true,
       terminalAvoidFlag:item && item.terminal_avoid_applied === true,
-      lifecycle_state:(item && item.lifecycle && item.lifecycle.state) || (item && item.watchlist && item.watchlist.lifecycleState),
-      terminal_avoid_source:(item && item.terminal_avoid_source) || (item && item.watchlist && item.watchlist.terminalAvoidSource),
-      avoid_trigger_source:(item && item.avoid_trigger_source) || (item && item.watchlist && item.watchlist.avoidTriggerSource),
+      // Lifecycle/watchlist are historical context, never a current gate.
+      terminal_avoid_source:item && item.terminal_avoid_source,
+      avoid_trigger_source:item && item.avoid_trigger_source,
       dead_trigger_source:structurallyBroken ? 'structure_broken' : '',
       structural_state:structurallyBroken ? 'dead' : String(resolved.structuralState || ''),
       structurally_broken:structurallyBroken
@@ -2691,19 +2722,8 @@
       && ['entry','near_entry'].includes(nonTrackedCanonicalVerdict)
       && nonTrackedCanonicalPriceabilityState === 'priceable'
     );
-    const selectedAuthoritySource = scanAuthorityNearEntryRelease
-      ? 'scan_authority_near_entry_release'
-      : selectedAuthorityContractSource(item, {
-      preserveReviewCanonicalForSoftReadiness,
-      preserveScanAuthorityCanonicalPath
-    });
-    const canonicalAuthoritySource = scanAuthorityNearEntryRelease
-      ? 'scan_authority_near_entry_release'
-      : canonicalVerdictAuthoritySource(item, {
-      preserveReviewCanonicalForSoftReadiness,
-      preserveScanAuthorityCanonicalPath,
-      canonicalSoftReadinessAlignmentApplied:nonTrackedCanonicalAlignmentApplied
-    });
+    const selectedAuthoritySource = 'canonical_selector';
+    const canonicalAuthoritySource = 'canonical_selector';
     const canonicalReviewVerdict = nonTrackedCanonicalAlignmentApplied
       ? nonTrackedCanonicalVerdict
       : canonicalFinalVerdict;
@@ -2919,6 +2939,12 @@
       resolvedPlanStop:planStop,
       resolvedPlanTarget:planTarget,
       resolvedPlanCurrentPrice:currentPrice,
+      planCurrency:String((item.marketData && item.marketData.currency) || (item.plan && item.plan.currency) || '').trim().toUpperCase(),
+      planUnits:{
+        entry:String((item.plan && (item.plan.entryCurrency || item.plan.currency)) || (item.marketData && item.marketData.currency) || '').trim().toUpperCase(),
+        stop:String((item.plan && (item.plan.stopCurrency || item.plan.currency)) || (item.marketData && item.marketData.currency) || '').trim().toUpperCase(),
+        firstTarget:String((item.plan && (item.plan.firstTargetCurrency || item.plan.targetCurrency || item.plan.currency)) || (item.marketData && item.marketData.currency) || '').trim().toUpperCase()
+      },
       resolverCoreEntry:planEntry,
       resolverCoreStop:planStop,
       resolverCoreTarget:planTarget,
@@ -3780,8 +3806,9 @@
             && result.near_entry_gate_pass === true
             && result.entry_gate_pass === false
             && result.near_entry_gate_checks && result.near_entry_gate_checks.market_blocked === true
-            && result.scan_authority_near_entry_release === true
-            && result.contractDiagnostics && result.contractDiagnostics.canonicalAuthoritySelectionSource === 'scan_authority_near_entry_release'
+            // Stage 3F: the same raw evidence qualifies without a prior Scan
+            // release. Lifecycle/Scan are no longer selector inputs.
+            && result.scan_authority_near_entry_release === false
             && result.late_pullback_gate_checks && result.late_pullback_gate_checks.late_from_support === true;
         }
       },
@@ -4024,16 +4051,13 @@
           }
         },
         assert(result){
-          return result.tracked === true
+          return result.tracked === false
             && result.final_verdict === 'watch'
             && result.canonical_final_verdict === 'watch'
             && result.canonical_visual_bucket === 'diminishing'
             && result.canonical_soft_readiness_alignment_applied === false
-            && result.contractDiagnostics
-            && result.contractDiagnostics.authorityContract === 'pre_lifecycle'
-            && result.contractDiagnostics.blockerSource === 'setup_location'
-            && result.contractDiagnostics.canonicalAuthoritySelectionSource === 'scan_authority_preserved'
-            && result.canonical_soft_readiness_alignment_source === 'scan_authority_preserved';
+            && result.selected_authority_contract_source !== 'scan_authority_preserved'
+            && result.canonical_soft_readiness_alignment_source !== 'scan_authority_preserved';
         }
       },
       {
@@ -4112,16 +4136,13 @@
           }
         },
         assert(result){
-          return result.tracked === true
+          return result.tracked === false
             && result.final_verdict === 'watch'
             && result.canonical_final_verdict === 'watch'
             && result.canonical_visual_bucket === 'diminishing'
             && result.canonical_soft_readiness_alignment_applied === false
-            && result.contractDiagnostics
-            && result.contractDiagnostics.authorityContract === 'pre_lifecycle'
-            && result.contractDiagnostics.blockerSource === 'setup_location'
-            && result.contractDiagnostics.canonicalAuthoritySelectionSource === 'scan_authority_preserved'
-            && result.canonical_soft_readiness_alignment_source === 'scan_authority_preserved';
+            && result.selected_authority_contract_source !== 'scan_authority_preserved'
+            && result.canonical_soft_readiness_alignment_source !== 'scan_authority_preserved';
         }
       },
       {

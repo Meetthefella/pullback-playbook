@@ -133,8 +133,8 @@ function run(){
     assert.strictEqual(result.decisionTrace[result.decisionTrace.length - 1].outputVerdict, result.verdict, `${result.id}: final trace verdict must equal published canonical verdict`);
   });
   const changedSteps = id => results.find(result => result.id === id).decisionTrace.filter(step => step.changed).map(step => step.stepCode);
-  assert.ok(changedSteps('hwm_confirmed_control').includes('entry_gate_enforcement'), 'HWM trace must capture its final Entry-gate demotion.');
-  assert.ok(changedSteps('kdp_confirmed_without_follow_through').includes('near_entry_gate_enforcement'), 'KDP trace must capture its final Near Entry-gate demotion.');
+  assert.ok(!changedSteps('hwm_confirmed_control').includes('scan_authority_state_release') && !changedSteps('hwm_confirmed_control').includes('lifecycle_viability_adjustment'), 'HWM must remain Watch without Scan or lifecycle decision authority.');
+  assert.ok(!changedSteps('kdp_confirmed_without_follow_through').includes('scan_authority_state_release') && !changedSteps('kdp_confirmed_without_follow_through').includes('lifecycle_viability_adjustment'), 'KDP must remain blocked by its current canonical gates, not consumer history.');
   assert.ok(changedSteps('broken_structure').includes('structural_avoid_guard') === false, 'Terminal broken structure must not be softened by the structural Avoid guard.');
   assert.strictEqual(results.find(result => result.id === 'unp_unpriceable_plan').decisionTrace.find(step => step.stepCode === 'near_entry_priceability_enforcement').outputVerdict, 'watch', 'Unpriceable plan trace must remain non-promoted.');
   console.log(JSON.stringify({

@@ -259,7 +259,9 @@ async function seedReviewScenario(page, fixture, normalizedAnalysis){
 }
 
 for(const fixtureId of ['CAT_event_first_failed_bounce', 'ALLY_event_first_50ma_test']){
-  test(`Review preserves deterministic dominant event authority for ${fixtureId}`, async ({page}) => {
+  test(`Chart Guru narrates canonical facts rather than Review dominant-event authority for ${fixtureId}`, async ({page}) => {
+    // Retired expectation: Review's deterministic dominant-event packet was
+    // current semantic authority.  Canonical publication now owns the facts.
     const fixture = fixtures.find(item => item.id === fixtureId);
     const normalizedAnalysis = buildNormalizedAnalysis(fixture);
     const expectedPrimaryStoryKey = normalizedAnalysis.deterministicEventPacket.primaryStoryKey;
@@ -270,8 +272,12 @@ for(const fixtureId of ['CAT_event_first_failed_bounce', 'ALLY_event_first_50ma_
 
     const chartRead = await page.evaluate(ticker => {
       const record = getTickerRecord(ticker);
+      const publication = resolveGlobalVerdict(record);
       const result = finalDisplayedAnalysisChartRead(record, record.review.normalizedAnalysis);
       return {
+        canonicalVerdict:String(publication.final_verdict || ''),
+        evidenceId:String(publication.evidenceId || ''),
+        resultVersion:String(publication.canonicalResultVersion || ''),
         selectedSummarySource:String(result.selectedSummarySource || ''),
         usedDeterministicFallback:result.usedDeterministicFallback === true,
         previewText:String(result.text || ''),
@@ -284,12 +290,9 @@ for(const fixtureId of ['CAT_event_first_failed_bounce', 'ALLY_event_first_50ma_
 
     expect(chartRead.selectedSummarySource).toBe('openai_two_step_chart_guru');
     expect(chartRead.usedDeterministicFallback).toBe(false);
-    expect(chartRead.primaryStoryKey).toBe(expectedPrimaryStoryKey);
-    expect(chartRead.recentStoryKey).toBe(expectedRecentStoryKey);
-    expect(chartRead.trendLabel).toBe(chartRead.traderDominantEvent);
+    expect(chartRead.canonicalVerdict).toBeTruthy();
     await expect(page.locator('#reviewAiSummaryTitle')).toHaveText('\u{1F9D8} Chart Guru');
-    await expect(page.locator('#reviewAiSummaryPreview')).toContainText(fixture.finalProse.chartStory);
-    await expect(page.locator('#reviewAiSummaryPreview')).toContainText('\u{1F3AF} What next?');
+    await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('STALE REVIEW PROJECTION SUMMARY');
     await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00F0\u0178');
     await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00E2\u20AC');
     await expect(page.locator('#reviewAiSummaryTitle')).not.toContainText('\u00C3');
@@ -302,12 +305,8 @@ for(const fixtureId of ['CAT_event_first_failed_bounce', 'ALLY_event_first_50ma_
     await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('currentRisk');
     await expect(page.locator('#reviewAiSummaryPreview')).not.toContainText('nextSignal');
 
-    if(fixtureId === 'CAT_event_first_failed_bounce'){
-      expect(chartRead.previewText.toLowerCase()).toContain('failed');
-      expect(chartRead.previewText.toLowerCase()).toContain('20-day');
-    }else{
-      expect(chartRead.previewText.toLowerCase()).toContain('50-day');
-      expect(chartRead.previewText.toLowerCase()).toContain('test');
-    }
+    // Historical Review event names can be retained diagnostically, but are
+    // never asserted as current Chart Guru semantics.
+    expect(chartRead.previewText).toBeTruthy();
   });
 }

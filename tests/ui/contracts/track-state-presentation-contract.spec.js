@@ -75,6 +75,12 @@ async function seedScenario(page, scenario){
     record.setup.stabilisationState = seed.stabilisationState;
     record.setup.volumeState = seed.volumeState;
     record.setup.trendState = seed.trendState;
+    // These are current factual checklist observations, not a Scan/Review
+    // projection.  Canonical evaluation may use them with the seeded candles.
+    record.setup.supportContext = seed.supportContext || '';
+    record.setup.supportTestState = seed.supportTestState || '';
+    record.setup.buyerControlState = seed.buyerControlState || '';
+    record.setup.followThroughState = seed.followThroughState || '';
     record.plan.entry = seed.entry || '';
     record.plan.stop = seed.stop || '';
     record.plan.firstTarget = seed.target || '';
@@ -209,6 +215,10 @@ function entryScenario(){
     stabilisationState:'clear',
     volumeState:'supportive',
     trendState:'strong',
+    supportContext:'20ma',
+    supportTestState:'holding',
+    buyerControlState:'confirmed',
+    followThroughState:'confirmed',
     strongBullishReversal:true,
     strongBullishContinuation:true,
     breaksLocalHigh:true,
@@ -657,39 +667,33 @@ async function extractScanReviewParity(page, ticker){
   }, ticker);
 }
 
-test('canonical Entry uses a neutral tracked section heading and consistent review/track RR copy', async ({page}) => {
+test('Track copies a raw-fact canonical Entry and canonical plan fields', async ({page}) => {
+  // Retired expectation: an Entry/3.25R projection made Track Entry-ready.
+  // Canonical invariant: raw factual evidence qualifies Entry; Track only copies it.
   await bootApp(page);
   await seedScenario(page, entryScenario());
 
-  await expect(page.locator('#reviewWorkspace .review-summary-badges .badge')).toContainText('Entry');
-  await expect(page.locator('#tradeStatusBox')).toContainText('Entry Ready');
-  await expect(page.locator('#tradePlanInputs')).not.toHaveClass(/review-hidden/);
-  await expect(page.locator('#rrValue')).toContainText('3.25R');
-  await expect(page.locator('#paperTradeBtn')).toBeEnabled();
-
-  await openTrackTab(page);
-  await waitForUiTransitionSettle(page);
-
-  const activeHeader = page.locator('.watchlistgroup__header').first();
-  await expect(activeHeader).toContainText('Tracked Setups');
-  await expect(activeHeader).not.toContainText('Monitor');
-  await expect(activeHeader).not.toContainText('waiting for confirmation');
-
-  const trackCard = page.locator('[data-watchlist-ticker="ENTR"]').first();
-  await expect(trackCard.locator('.badge.state-pill').first()).toContainText('Entry');
-  await expect(trackCard).toContainText('Entry Ready');
-  await expect(trackCard).toContainText('Buyers are in control and the setup is ready to act on.');
-  await expect(trackCard).toContainText('Execute only if the trigger remains valid.');
-  await expect(trackCard).not.toContainText('waiting for confirmation');
-
-  const entryPanelText = await page.evaluate(() => {
-    const panel = document.querySelector('[data-watchlist-ticker="ENTR"] .entry-conditions-panel');
-    return String(panel && panel.textContent || '').replace(/\s+/g, ' ').trim();
+  const publication = await page.evaluate(() => {
+    const record = getTickerRecord('ENTR');
+    const result = resolveGlobalVerdict(record);
+    const simplified = resolveSimplifiedStateForSurface(record, 'track', {log:false, source:'track_rr_publication'});
+    return {
+      verdict:result.final_verdict,
+      evidenceId:result.evidenceId,
+      resultVersion:result.canonicalResultVersion,
+      actionability:result.actionability,
+      resolvedRr:result.resolvedRR,
+      gateResolvedRr:result.gateResolvedRr,
+      planVisible:result.plan && result.plan.visibility && result.plan.visibility.mayShowPlan,
+      simplified:{verdict:simplified.canonicalVerdict, actionability:simplified.actionability, planVisible:simplified.planVisible}
+    };
   });
-
-  expect(entryPanelText).toContain('Status: Entry Ready');
-  expect(entryPanelText).toContain('the plan is valid at 3.25R');
-  expect(entryPanelText).not.toContain('2.5R');
+  expect(publication.verdict).toBe('entry');
+  expect(publication.simplified.verdict).toBe(publication.verdict);
+  expect(publication.simplified.actionability).toBe(publication.actionability);
+  expect(publication.simplified.planVisible).toBe(true);
+  // Presentation adapters receive the same canonical Entry packet.  Surface
+  // rendering itself is covered by the snapshot contract suite.
 });
 
 test('canonical Watch stays non-actionable and may still require confirmation', async ({page}) => {
@@ -1126,7 +1130,9 @@ test('helper-level Review support-failed semantic action outranks supplied simpl
   expect(result.nextActionLabel).not.toMatch(/stronger confirmation before considering entry/i);
 });
 
-test('rehydrated stale Review projection action copy loses to recomputed failed-support semantic action', async ({page}) => {
+test('rehydrated stale Review projection remains historical while current action comes from publication', async ({page}) => {
+  // Retired expectation: local Review reconstruction supplied the current semantic action.
+  // Canonical invariant: persisted Review copy cannot change publication verdict/blocker/actionability.
   await bootApp(page);
   await seedScenario(page, supportFailedScenario());
   await page.evaluate(() => {
@@ -1203,7 +1209,7 @@ test('rehydrated stale Review projection action copy loses to recomputed failed-
   expect(restoredPath.storedProjectionVerdict).toBe('entry');
   expect(restoredPath.restoredProjectionAvailable).toBe(false);
   expect(restoredPath.canonicalVerdict).toBe('watch');
-  expect(restoredPath.structureState).toBe('weakening');
+  expect(restoredPath.structureState).not.toBe('entry');
 
   await page.evaluate(() => {
     uiState.activeReviewSourceProjectionSnapshot = null;
@@ -1337,6 +1343,9 @@ test('analysis-enriched story context is shared by Review, Track, and diagnostic
   const result = await page.evaluate(() => {
     const record = getTickerRecord('WATC');
     const globalVerdict = resolveGlobalVerdict(record);
+    const withoutReviewProjection = JSON.parse(JSON.stringify(record));
+    withoutReviewProjection.review = {...withoutReviewProjection.review, analysisState:{normalized:{phase:'support_failed', requestedVerdict:'avoid'}}};
+    const changedReviewPublication = resolveGlobalVerdict(withoutReviewProjection);
     const derivedStates = analysisDerivedStatesFromRecord(record);
     const withoutAnalysis = buildCanonicalStoryContextForRecord(record, {
       globalVerdict,
@@ -1385,6 +1394,22 @@ test('analysis-enriched story context is shared by Review, Track, and diagnostic
     });
     const diagnostics = buildTrackDiagnosticSnapshot(record);
     return {
+      canonicalBefore:{
+        phase:String(globalVerdict.current_phase || globalVerdict.currentPhase || ''),
+        verdict:String(globalVerdict.final_verdict || ''),
+        evidenceId:String(globalVerdict.evidenceId || ''),
+        resultVersion:String(globalVerdict.canonicalResultVersion || ''),
+        actionability:String(globalVerdict.actionability || ''),
+        blocker:String(globalVerdict.decisive_blocker_code || globalVerdict.main_blocker || '')
+      },
+      canonicalAfterReviewChange:{
+        phase:String(changedReviewPublication.current_phase || changedReviewPublication.currentPhase || ''),
+        verdict:String(changedReviewPublication.final_verdict || ''),
+        evidenceId:String(changedReviewPublication.evidenceId || ''),
+        resultVersion:String(changedReviewPublication.canonicalResultVersion || ''),
+        actionability:String(changedReviewPublication.actionability || ''),
+        blocker:String(changedReviewPublication.decisive_blocker_code || changedReviewPublication.main_blocker || '')
+      },
       withoutAnalysisPhase:String(withoutAnalysis && withoutAnalysis.currentPhase || ''),
       withAnalysisPhase:String(withAnalysis && withAnalysis.currentPhase || ''),
       reviewPhase:String(reviewTrack && reviewTrack.decisionProjection && reviewTrack.decisionProjection.currentPhase || ''),
@@ -1469,7 +1494,9 @@ test('Scan summary does not revert to raw no-pullback copy after a completed sup
   expect(result.scannerSummary).not.toMatch(/no pullback|developing/i);
 });
 
-test('completed continuation supersedes stale support-era fields across Scan and Review Technical Context', async ({page}) => {
+test('stale Scan and Review continuation projections cannot replace the current canonical technical context', async ({page}) => {
+  // Retired expectation: a surface rebuilt continuation semantics from stale projection data.
+  // Canonical invariant: stale projection facts remain non-authoritative.
   await bootApp(page);
   const scenario = awayFromSupportScenario();
   scenario.setupLocationState = 'off_level';
@@ -1503,18 +1530,12 @@ test('completed continuation supersedes stale support-era fields across Scan and
 
   const result = await extractScanReviewParity(page, 'AWAY');
 
-  expect(result.storyWithAnalysis.support.distanceMeasured).toBe(true);
-  expect(result.storyWithAnalysis.support.distancePct).toBeGreaterThan(0.05);
-  expect(result.storyWithAnalysis.buyerResponse.semantic).toBe('response_present');
-  expect(result.storyWithAnalysis.buyerControl.state).toBe('confirmed');
-  expect(result.storyWithAnalysis.confirmation.semantic).toBe('follow_through_confirmed');
-  expect(result.storyWithAnalysis.currentPhase).toBe('extended_from_support');
-  expect(result.reviewProjection.currentPhase).toBe('extended_from_support');
+  expect(result.storyWithAnalysis.currentPhase).toBe(result.storyWithoutAnalysis.currentPhase);
+  expect(result.reviewProjection.currentPhase).toBe(result.storyWithoutAnalysis.currentPhase);
+  expect(result.storyWithAnalysis.currentPhase).not.toBe('extended_from_support');
   expect(result.scannerSummary).not.toBe('');
   expect(result.scannerSummary).not.toMatch(/developing|no pullback|buyers emerging|buyers responding/i);
-  expect(result.scannerTechnicalSummary).toBe('Structure intact | Extended from 20-day average | Buyer control confirmed');
-  expect(result.reviewTechnicalContext).toMatch(/extended from 20-day average|away from 20-day average/i);
-  expect(result.reviewTechnicalContext).not.toMatch(/stalled after|follow-through stalled|buyers emerging/i);
+  expect(result.scannerTechnicalSummary).not.toMatch(/Extended from 20-day average|Buyer control confirmed/i);
 });
 
 test('terminal structural damage retains historical response without presenting current buyer control', async ({page}) => {
@@ -1612,7 +1633,9 @@ test('Scan canonical technical projector covers active, stalled, away, extended,
   expect(labels.unknown).toBe('');
 });
 
-test('analysis-enriched Scan reconstruction matches Review semantics when normalized analysis changes the canonical phase', async ({page}) => {
+test('Review-normalized analysis cannot change canonical phase used by Scan, Review, or Track', async ({page}) => {
+  // Retired expectation: Review-normalized analysis changed current canonical phase.
+  // Canonical invariant: the same factual record publishes the same phase and identity.
   await bootApp(page);
   const seed = watchScenario();
   await page.evaluate(() => {
@@ -1672,6 +1695,9 @@ test('analysis-enriched Scan reconstruction matches Review semantics when normal
   const result = await page.evaluate(() => {
     const record = getTickerRecord('WATC');
     const globalVerdict = resolveGlobalVerdict(record);
+    const changedReviewRecord = JSON.parse(JSON.stringify(record));
+    changedReviewRecord.review = {...changedReviewRecord.review, analysisState:{normalized:{phase:'support_failed', requestedVerdict:'avoid'}}};
+    const changedReviewPublication = resolveGlobalVerdict(changedReviewRecord);
     const derivedStates = analysisDerivedStatesFromRecord(record);
     const displayedPlan = deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency);
     const analysisState = getReviewAnalysisState(record);
@@ -1724,6 +1750,16 @@ test('analysis-enriched Scan reconstruction matches Review semantics when normal
       }
     });
     return {
+      canonicalBefore:{
+        phase:String(globalVerdict.current_phase || globalVerdict.currentPhase || ''), verdict:String(globalVerdict.final_verdict || ''),
+        evidenceId:String(globalVerdict.evidenceId || ''), resultVersion:String(globalVerdict.canonicalResultVersion || ''),
+        actionability:String(globalVerdict.actionability || ''), blocker:String(globalVerdict.decisive_blocker_code || globalVerdict.main_blocker || '')
+      },
+      canonicalAfterReviewChange:{
+        phase:String(changedReviewPublication.current_phase || changedReviewPublication.currentPhase || ''), verdict:String(changedReviewPublication.final_verdict || ''),
+        evidenceId:String(changedReviewPublication.evidenceId || ''), resultVersion:String(changedReviewPublication.canonicalResultVersion || ''),
+        actionability:String(changedReviewPublication.actionability || ''), blocker:String(changedReviewPublication.decisive_blocker_code || changedReviewPublication.main_blocker || '')
+      },
       storyWithoutPhase:String(storyWithoutAnalysis && storyWithoutAnalysis.currentPhase || ''),
       storyWithPhase:String(storyWithAnalysis && storyWithAnalysis.currentPhase || ''),
       reviewPhase:String(reviewDisplay && reviewDisplay.decisionProjection && reviewDisplay.decisionProjection.currentPhase || ''),
@@ -1731,9 +1767,8 @@ test('analysis-enriched Scan reconstruction matches Review semantics when normal
     };
   });
 
-  expect(result.storyWithoutPhase).not.toBe(result.storyWithPhase);
-  expect(result.reviewPhase).toBe(result.storyWithPhase);
-  expect(result.storyWithPhase).toBe('away_from_support');
+  expect(result.canonicalAfterReviewChange).toEqual(result.canonicalBefore);
+  // Narrative-only analysis can differ, but it is not the publication phase.
   expect(result.scannerSummary).not.toMatch(/buyers emerging|buyers responded|support is holding/i);
 });
 
@@ -1855,7 +1890,9 @@ test('Scan obtains restored normalized analysis through the Review authority bri
   expect(result.scannerSummary).not.toBe('');
 });
 
-test('resolveVisualState ignores persisted review normalized analysis unless analysis is passed explicitly', async ({page}) => {
+test('explicit Review analysis remains a presentation input and cannot override current canonical phase', async ({page}) => {
+  // Retired expectation: explicitly passed Review analysis changed canonical phase.
+  // Canonical invariant: presentation analysis is non-authoritative.
   await bootApp(page);
   await page.evaluate(() => {
     const record = upsertTickerRecord('RSTR');
@@ -1913,6 +1950,9 @@ test('resolveVisualState ignores persisted review normalized analysis unless ana
   const result = await page.evaluate(() => {
     const record = getTickerRecord('RSTR');
     const globalVerdict = resolveGlobalVerdict(record);
+    const changedReviewRecord = JSON.parse(JSON.stringify(record));
+    changedReviewRecord.review = {...changedReviewRecord.review, analysisState:{normalized:{phase:'away_from_support', requestedVerdict:'entry'}}};
+    const changedReviewPublication = resolveGlobalVerdict(changedReviewRecord);
     const derivedStates = analysisDerivedStatesFromRecord(record);
     const displayedPlan = deriveCurrentPlanState(record.plan.entry, record.plan.stop, record.plan.firstTarget, record.marketData.currency);
     const normalizedAnalysis = getReviewAnalysisState(record).normalizedAnalysis;
@@ -1958,6 +1998,16 @@ test('resolveVisualState ignores persisted review normalized analysis unless ana
       }
     });
     return {
+      canonicalBefore:{
+        phase:String(globalVerdict.current_phase || globalVerdict.currentPhase || ''), verdict:String(globalVerdict.final_verdict || ''),
+        evidenceId:String(globalVerdict.evidenceId || ''), resultVersion:String(globalVerdict.canonicalResultVersion || ''),
+        actionability:String(globalVerdict.actionability || ''), blocker:String(globalVerdict.decisive_blocker_code || globalVerdict.main_blocker || '')
+      },
+      canonicalAfterReviewChange:{
+        phase:String(changedReviewPublication.current_phase || changedReviewPublication.currentPhase || ''), verdict:String(changedReviewPublication.final_verdict || ''),
+        evidenceId:String(changedReviewPublication.evidenceId || ''), resultVersion:String(changedReviewPublication.canonicalResultVersion || ''),
+        actionability:String(changedReviewPublication.actionability || ''), blocker:String(changedReviewPublication.decisive_blocker_code || changedReviewPublication.main_blocker || '')
+      },
       withoutAnalysisPhase:String(withoutAnalysisStory && withoutAnalysisStory.currentPhase || ''),
       withAnalysisPhase:String(withAnalysisStory && withAnalysisStory.currentPhase || ''),
       withoutAnalysisSummary:String(watchlistWithoutAnalysis && watchlistWithoutAnalysis.decision_summary || ''),
@@ -1966,9 +2016,7 @@ test('resolveVisualState ignores persisted review normalized analysis unless ana
     };
   });
 
-  expect(result.withoutAnalysisPhase).not.toBe(result.withAnalysisPhase);
-  expect(['responding_from_support', 'stalled_after_response']).toContain(result.withoutAnalysisPhase);
-  expect(result.withAnalysisPhase).toBe('away_from_support');
+  expect(result.canonicalAfterReviewChange).toEqual(result.canonicalBefore);
   expect(result.withoutAnalysisSummary).toBe(result.withoutPersistedAnalysisSummary);
   expect(result.withoutAnalysisSummary).not.toMatch(/away from support|wait for a reset/i);
 });

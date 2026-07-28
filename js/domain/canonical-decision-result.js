@@ -63,6 +63,7 @@
 
   function numberOrNull(value){ const number = Number(value); return Number.isFinite(number) ? number : null; }
   function valueState(value){ return Number.isFinite(value) ? 'present' : 'absent'; }
+  function unitKey(value){ return String(value || '').trim().toUpperCase(); }
   function canonicalPlan(candidate, evidence){
     const entry = numberOrNull(candidate.resolvedPlanEntry);
     const stop = numberOrNull(candidate.resolvedPlanStop);
@@ -78,11 +79,20 @@
     const priceability = key(candidate.priceability_state, 'unknown');
     const state = ['priceable','provisional'].includes(priceability) ? (priceability === 'provisional' ? 'provisional' : 'valid') : (priceability === 'unpriceable' ? 'unpriceable' : 'unavailable');
     const actionable = key(candidate.final_verdict) === 'entry';
-    const mayShow = state === 'valid' && entry !== null && stop !== null && firstTarget !== null;
+    const currency = unitKey(candidate.planCurrency || candidate.currency);
+    const units = candidate.planUnits && typeof candidate.planUnits === 'object' ? candidate.planUnits : {};
+    const entryCurrency = unitKey(units.entry || currency);
+    const stopCurrency = unitKey(units.stop || currency);
+    const targetCurrency = unitKey(units.firstTarget || units.target || currency);
+    const rrThreshold = actionable ? 2 : 1.5;
+    const gatePasses = gateRr === null ? null : gateRr >= rrThreshold;
+    // A mathematically favourable display RR is never execution authority.
+    // Visibility requires the conservative gate RR to pass when it is known.
+    const mayShow = state === 'valid' && entry !== null && stop !== null && firstTarget !== null && gatePasses !== false;
     return {
       state, priceability:{status:priceability, reasonCode:String(candidate.unpriceableBlockReason || ''), source:'resolver-core', provisional:state === 'provisional'},
-      levels:{entry:{value:entry,valueState:valueState(entry),source:'resolver-core',currency:'',evidenceIds:[evidence.snapshotId]},stop:{value:stop,valueState:valueState(stop),source:'resolver-core',currency:'',evidenceIds:[evidence.snapshotId]},firstTarget:{value:firstTarget,valueState:valueState(firstTarget),source:'resolver-core',currency:'',evidenceIds:[evidence.snapshotId]}},
-      rewardRisk:{resolvedRr:calculatedRr,valueState:valueState(calculatedRr),gateResolvedRr:gateRr,gateValueState:valueState(gateRr),threshold:actionable ? 2 : 1.5,passes:gateRr === null ? null : gateRr >= (actionable ? 2 : 1.5),source:'resolver-core',gateSource:'resolver-core.plan_gate',reasonCode:''},
+      levels:{entry:{value:entry,valueState:valueState(entry),source:'resolver-core',currency:entryCurrency,evidenceIds:[evidence.snapshotId]},stop:{value:stop,valueState:valueState(stop),source:'resolver-core',currency:stopCurrency,evidenceIds:[evidence.snapshotId]},firstTarget:{value:firstTarget,valueState:valueState(firstTarget),source:'resolver-core',currency:targetCurrency,evidenceIds:[evidence.snapshotId]}},
+      rewardRisk:{resolvedRr:calculatedRr,valueState:valueState(calculatedRr),gateResolvedRr:gateRr,gateValueState:valueState(gateRr),threshold:rrThreshold,passes:gatePasses,source:'resolver-core',gateSource:'resolver-core.plan_gate',reasonCode:gatePasses === false ? 'canonical_gate_rr_failed' : ''},
       visibility:{mayShowPlan:mayShow,mayShowEntry:mayShow,mayShowStop:mayShow,mayShowTarget:mayShow,mayShowRr:mayShow && calculatedRr !== null,reasonCode:mayShow ? '' : 'canonical_plan_not_visible'},
       blocker:{code:String(candidate.semantic_blocker_code || ''),category:String(candidate.primary_blocker_source || ''),fields:[]},
       provenance:{planId:`${evidence.snapshotId}:plan`,evidenceId:evidence.snapshotId,resolverVersion:RESULT_VERSION,sourceCandidates:[],selectedAuthority:'resolver-core'}
@@ -126,6 +136,17 @@
     }
     if(['valid','provisional'].includes(plan.state) && (plan.levels && (plan.levels.entry.valueState !== 'present' || plan.levels.stop.valueState !== 'present'))){
       violations.push(violation('published_plan_missing_required_levels', 'semantic', 'plan', ['plan.state','plan.levels.entry','plan.levels.stop'], 'Priceable canonical plan requires entry and stop levels.'));
+    }
+    if(plan.levels && ['valid','provisional'].includes(plan.state)){
+      const units = [plan.levels.entry.currency, plan.levels.stop.currency, plan.levels.firstTarget.currency]
+        .map(unitKey)
+        .filter(Boolean);
+      if(new Set(units).size > 1){
+        violations.push(violation('incompatible_plan_quote_units', 'plan', 'units', ['plan.levels.entry.currency','plan.levels.stop.currency','plan.levels.firstTarget.currency'], 'Entry, stop, and target must use one compatible quote unit.'));
+      }
+    }
+    if(plan.rewardRisk && plan.rewardRisk.passes === false && plan.visibility && plan.visibility.mayShowPlan === true){
+      violations.push(violation('plan_visibility_with_failed_gate_rr', 'plan', 'visibility', ['plan.rewardRisk.gateResolvedRr','plan.visibility'], 'A failed conservative RR gate cannot expose an actionable canonical plan.'));
     }
     if(plan.rewardRisk && plan.rewardRisk.resolvedRr !== null && plan.levels && Number.isFinite(plan.levels.entry.value) && Number.isFinite(plan.levels.stop.value) && Number.isFinite(plan.levels.firstTarget.value)){
       const computed = (plan.levels.firstTarget.value - plan.levels.entry.value) / (plan.levels.entry.value - plan.levels.stop.value);

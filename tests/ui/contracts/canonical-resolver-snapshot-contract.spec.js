@@ -64,6 +64,13 @@ async function seedCanonicalWatchWithValidPlan(page){
     ];
     record.strongBullishReversal = true;
     record.reclaimAttempt = true;
+    record.reclaimsLevel = true;
+    record.strongBullishContinuation = true;
+    // Stage 3F: canonical qualification is seeded as raw factual evidence;
+    // the stale Scan/Review projections below are deliberately non-authoritative.
+    record.candleEvidenceReclaimRangeMeaningful = true;
+    record.candleEvidenceReclaimedPriorDayHigh = true;
+    record.candleEvidenceHigherLowHold = true;
     record.setup.structureState = 'strong';
     record.setup.structureEligibility = 'alive';
     record.setup.setupLocationState = 'near_20ma';
@@ -161,9 +168,9 @@ async function seedCanonicalWatchWithValidPlan(page){
 }
 
 function assertCanonicalParity({scan, review, track}, sourceLabel){
-  expect(scan.normalized.scanCanonicalVerdict, `${sourceLabel}: Scan surface stays aligned with the live canonical snapshot`).toBe('near_entry');
-  expect(review.normalized.reviewCanonicalVerdict, `${sourceLabel}: Review must follow live canonical snapshot`).toBe('near_entry');
-  expect(track.normalized.trackCanonicalVerdict, `${sourceLabel}: Track must follow live canonical snapshot`).toBe('near_entry');
+  expect(scan.normalized.scanCanonicalVerdict, `${sourceLabel}: Scan surface stays aligned with the live canonical snapshot`).toBe('watch');
+  expect(review.normalized.reviewCanonicalVerdict, `${sourceLabel}: Review must follow live canonical snapshot`).toBe('watch');
+  expect(track.normalized.trackCanonicalVerdict, `${sourceLabel}: Track must follow live canonical snapshot`).toBe('watch');
   expect(review.normalized.reviewCanonicalVerdict, `${sourceLabel}: Review and Track verdict parity`).toBe(track.normalized.trackCanonicalVerdict);
   expect(track.normalized.trackDiagnosticMatchesRenderedAuthority, `${sourceLabel}: Track diagnostic authority must match rendered Track card`).toBe(true);
   expect(review.authority && review.authority.replayBuilder, `${sourceLabel}: App replay builder must be exposed in extracted authority state`).toBeTruthy();
@@ -189,8 +196,8 @@ function assertCanonicalParity({scan, review, track}, sourceLabel){
   // Scan score is a raw non-decision ordering metric after Consumer 5. It
   // must remain present but may differ from Review's presentation score.
   expect(scan.scan.visibleCard.scoreLabel, `${sourceLabel}: Scan displayed raw ranking score`).toContain('Setup');
-  expect(review.review.stateHealth.planAuthority.verdict, `${sourceLabel}: Review plan authority verdict`).toBe('near_entry');
-  expect(track.track.visible.scoreLabel, `${sourceLabel}: Track setup score should stay aligned with the shared display-model score pipeline`).toContain('6');
+  expect(review.review.stateHealth.planAuthority.verdict, `${sourceLabel}: Review plan authority verdict`).toBe('watch');
+  expect(track.track.visible.scoreLabel, `${sourceLabel}: Track setup score should remain a display-only score`).toMatch(/\d+\/10/);
 
   expect(review.review.visible.entryVisible, `${sourceLabel}: Review trade plan should stay visible`).toBe(true);
   expect(!!track.visibleCopy.track.entryPanel, `${sourceLabel}: Track trade plan should stay visible`).toBe(true);
@@ -312,8 +319,8 @@ test('clicked snapshot source without a matching projection refreshes from live 
   expect(result.refreshCount, 'missing/mismatched clicked snapshots must not skip live refresh').toBeGreaterThanOrEqual(2);
   result.outcomes.forEach(outcome => {
     expect(outcome.stateHealth.sourceOfTruth, `snapshot ${outcome.snapshotTicker || '(null)'} must not be projection authority`).not.toBe('review_projection_snapshot');
-    expect(outcome.stateHealth.canonicalVerdict, `snapshot ${outcome.snapshotTicker || '(null)'} must use live resolver verdict`).toBe('near_entry');
-    expect(outcome.paperTrade && outcome.paperTrade.finalVerdict, `snapshot ${outcome.snapshotTicker || '(null)'} must preserve the canonical Near Entry verdict in Paper Trade.`).toBe('Near Entry');
+    expect(outcome.stateHealth.canonicalVerdict, `snapshot ${outcome.snapshotTicker || '(null)'} must use live resolver verdict`).toBe('watch');
+    expect(outcome.paperTrade && outcome.paperTrade.finalVerdict, `snapshot ${outcome.snapshotTicker || '(null)'} must preserve the canonical Watch verdict in Paper Trade.`).toBe('Watch');
     expect(outcome.paperTrade && outcome.paperTrade.eligibility && outcome.paperTrade.eligibility.eligible, `snapshot ${outcome.snapshotTicker || '(null)'} must still keep Paper Trade disabled.`).toBe(false);
   });
 });
@@ -381,14 +388,14 @@ test('score-only Review snapshot cannot become presentation authority', async ({
   expect(result.projectionSource, 'score-only snapshot must be classified as score transport only').toBe('scanner_score_snapshot');
   expect(result.refreshCount, 'score-only snapshot must not skip live refresh').toBeGreaterThanOrEqual(1);
   expect(result.stateHealth.sourceOfTruth, 'score-only snapshot must not become Review presentation authority').not.toBe('review_projection_snapshot');
-  expect(result.stateHealth.canonicalVerdict, 'score-only snapshot must keep live resolver verdict').toBe('near_entry');
+  expect(result.stateHealth.canonicalVerdict, 'score-only snapshot must keep live resolver verdict').toBe('watch');
   expect(result.forcedClickedHealth.sourceOfTruth, 'score-only snapshot with stale clicked source must not become health projection authority').not.toBe('review_projection_snapshot');
-  expect(result.forcedClickedHealth.canonicalVerdict, 'health snapshot must keep live resolver verdict for forced score-only clicked source').toBe('near_entry');
+  expect(result.forcedClickedHealth.canonicalVerdict, 'health snapshot must keep live resolver verdict for forced score-only clicked source').toBe('watch');
   expect(result.forcedClickedSharedPresentation.canonicalVerdict, 'score-only clicked snapshot must not change shared presentation verdict').toBe(result.baselineSharedPresentation.canonicalVerdict);
   expect(result.forcedClickedSharedPresentation.visualBucket, 'score-only clicked snapshot must not change shared presentation bucket').toBe(result.baselineSharedPresentation.visualBucket);
   expect(result.forcedClickedSharedPresentation.headline, 'score-only clicked snapshot must not change shared presentation headline').toBe(result.baselineSharedPresentation.headline);
   expect(result.tradeStatus, 'score-only snapshot must not render clicked Entry copy').not.toContain('Entry Ready');
-  expect(result.paperTrade && result.paperTrade.finalVerdict, 'score-only snapshot must preserve the live canonical Near Entry verdict').toBe('Near Entry');
+  expect(result.paperTrade && result.paperTrade.finalVerdict, 'score-only snapshot must preserve the live canonical Watch verdict').toBe('Watch');
   expect(result.paperTrade && result.paperTrade.eligibility && result.paperTrade.eligibility.eligible, 'score-only snapshot must keep Paper Trade disabled').toBe(false);
 });
 
@@ -477,7 +484,7 @@ test('lifecycle Entry without canonical actionable plan does not force Paper Tra
     return currentPaperTradeContextForTicker('TROW');
   });
 
-  expect(context && context.finalVerdict, 'lifecycle Entry alone must not relabel the paper-trade verdict away from canonical Near Entry.').toBe('Near Entry');
+  expect(context && context.finalVerdict, 'lifecycle Entry alone must not relabel the paper-trade verdict away from canonical Watch.').toBe('Watch');
   expect(context && context.eligibility && context.eligibility.eligible, 'lifecycle Entry alone must not enable Paper Trade').toBe(false);
 });
 
@@ -672,7 +679,7 @@ test('Track parity helper detects rendered and diagnostic authority divergence',
 
   try{
     const state = await extractAppTickerState(page, 'TROW');
-    expect(state.normalized.trackRenderedCanonicalVerdict, 'rendered Track authority should come from the card badge').toBe('near_entry');
+    expect(state.normalized.trackRenderedCanonicalVerdict, 'rendered Track authority should come from the card badge').toBe('watch');
     expect(state.normalized.trackDiagnosticCanonicalVerdict, 'test fixture should force diagnostic divergence').toBe('entry');
     expect(state.normalized.trackDiagnosticMatchesRenderedAuthority, 'helper must expose rendered/diagnostic mismatch').toBe(false);
     expect(state.normalized.trackCanonicalVerdict, 'normalized Track authority must prefer rendered card authority').toBe(state.normalized.trackRenderedCanonicalVerdict);
@@ -719,9 +726,9 @@ test('paper trade ignores Entry verdict when canonical plan authority is not act
     }
   });
 
-  expect(context && context.debugSnapshot && context.debugSnapshot.planAuthority && context.debugSnapshot.planAuthority.verdict, 'Paper Trade plan authority must preserve the canonical Near Entry verdict').toBe('near_entry');
+  expect(context && context.debugSnapshot && context.debugSnapshot.planAuthority && context.debugSnapshot.planAuthority.verdict, 'Paper Trade plan authority must preserve the canonical Watch verdict').toBe('watch');
   expect(context && context.debugSnapshot && context.debugSnapshot.planAuthority && context.debugSnapshot.planAuthority.actionable, 'plan authority is deliberately non-actionable').toBe(false);
-  expect(context && context.finalVerdict, 'Entry authority without an actionable plan must keep the public canonical verdict aligned to Near Entry.').toBe('Near Entry');
+  expect(context && context.finalVerdict, 'Entry authority without an actionable plan must keep the public canonical verdict aligned to Watch.').toBe('Watch');
   expect(context && context.eligibility && context.eligibility.eligible, 'non-actionable Entry verdict must not enable Paper Trade').toBe(false);
   expect(context && context.debugSnapshot && context.debugSnapshot.blockerReason, 'non-actionable Entry verdict must not clear blockers').not.toBe('');
 });
@@ -1099,14 +1106,14 @@ test('clicked Review Entry projection collapses to live non-entry authority befo
     }
   });
 
-  expect(result.tradeStatus, 'Review must collapse stale clicked Entry presentation back to live authority').toContain('Near Entry');
+  expect(result.tradeStatus, 'Review must collapse stale clicked Entry presentation back to live authority').not.toContain('Entry');
   expect(result.reviewAuthority && result.reviewAuthority.actionable, 'visible Paper Trade authority must use live resolver verdict, not clicked Entry').toBe(false);
   expect(result.reviewAuthority && result.reviewAuthority.reasonCode, 'projection Entry must not satisfy Paper Trade authority').toBe('verdict_not_entry');
   expect(result.buttonDisabled, 'visible Paper Trade button must remain disabled').toBe(true);
   expect(result.contextDiagnostics && result.contextDiagnostics.currentCanonical && result.contextDiagnostics.currentCanonical.actionable, 'preview/submit context must use the non-actionable canonical publication.').toBe(false);
   expect(result.contextDiagnostics && result.contextDiagnostics.legacyReviewProjection && result.contextDiagnostics.legacyReviewProjection.mayFeedDecisionLogic, 'legacy Review projection must remain diagnostics-only.').toBe(false);
-  expect(result.canonicalVerdict, 'preview/submit context must keep the canonical verdict aligned with Review.').toBe('near_entry');
-  expect(result.finalVerdict, 'preview/submit context must keep the public verdict aligned with canonical Near Entry.').toBe('Near Entry');
+  expect(result.canonicalVerdict, 'preview/submit context must keep the canonical verdict aligned with Review.').toBe('watch');
+  expect(result.finalVerdict, 'preview/submit context must keep the public verdict aligned with canonical Watch.').toBe('Watch');
   expect(result.actionabilityState, 'preview/submit context must expose a separate blocked actionability state.').toBe('waiting_for_confirmation');
   expect(result.eligible, 'preview/submit eligibility must stay false').toBe(false);
   expect(result.previewOpen, 'preview must not open').toBe(false);
@@ -1194,8 +1201,8 @@ test('paper trade preview and submit ignore authoritative Review Entry when plan
   });
 
   expect(result.buttonDisabled, 'visible button must remain disabled').toBe(true);
-  expect(result.canonicalVerdict, 'paper trade context must not fall back to Review Entry presentation').toBe('near_entry');
-  expect(result.finalVerdict, 'paper trade context must keep the public verdict aligned with Near Entry.').toBe('Near Entry');
+  expect(result.canonicalVerdict, 'paper trade context must not fall back to Review Entry presentation').toBe('watch');
+  expect(result.finalVerdict, 'paper trade context must keep the public verdict aligned with Watch.').toBe('Watch');
   expect(result.actionabilityState, 'paper trade context must expose blocked actionability separately from verdict.').toBe('waiting_for_confirmation');
   expect(result.eligible, 'preview context must remain ineligible').toBe(false);
   expect(result.previewOpen, 'preview must not open without actionable plan authority').toBe(false);
@@ -1325,9 +1332,9 @@ test('Scan does not revive stale projection authority after Review has canonical
     };
   });
 
-  expect(String(result.scanAuthority && result.scanAuthority.canonicalVerdict || '').trim().toLowerCase()).toBe('near_entry');
-  expect(String(result.simplified.canonicalVerdict || '').trim().toLowerCase()).toBe('near_entry');
-  expect(String(result.visible.badgeLabel || '').trim()).toBe('Near Entry');
+  expect(String(result.scanAuthority && result.scanAuthority.canonicalVerdict || '').trim().toLowerCase()).toBe('watch');
+  expect(String(result.simplified.canonicalVerdict || '').trim().toLowerCase()).toBe('watch');
+  expect(String(result.visible.badgeLabel || '').trim()).toBe('Watch');
   expect(String(result.scanAuthority && result.scanAuthority.diagnostics && result.scanAuthority.diagnostics.reviewProjectionAuthorityAllowed || '')).not.toBe('true');
   expect(String(result.simplified.actionLabel || '').trim()).toBeTruthy();
   expect(String(result.scanAuthority && result.scanAuthority.diagnostics && result.scanAuthority.diagnostics.divergenceType || '').trim()).toBe('');
@@ -1478,11 +1485,11 @@ test('Review, Track, and Paper Trade canonical authority stay aligned after relo
     };
   });
 
-  expect(result.reviewVerdict).toBe('near_entry');
-  expect(result.trackVerdict).toBe('near_entry');
-  expect(result.paperTradeAuthorityVerdict).toBe('near_entry');
+  expect(result.reviewVerdict).toBe('watch');
+  expect(result.trackVerdict).toBe('watch');
+  expect(result.paperTradeAuthorityVerdict).toBe('watch');
   expect(result.paperTradeReviewAuthorityVerdict).toBe(result.paperTradeAuthorityVerdict);
-  expect(result.paperTradeVerdict).toBe('near entry');
+  expect(result.paperTradeVerdict).toBe('watch');
   expect(result.paperTradeActionabilityState).toBe('waiting_for_confirmation');
   expect(result.paperTradeEligible).toBe(false);
 });

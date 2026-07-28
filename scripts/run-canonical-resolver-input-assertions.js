@@ -31,35 +31,14 @@ function assertResolveGlobalVerdictContractAlignment(){
     /function resolveGlobalVerdict\(record,\s*deps\s*=\s*\{\}\)/.test(resolverSource),
     'js/resolver-core.js resolveGlobalVerdict must accept injected deps'
   );
-  [
-    'deps.resolveFinalStateContract || resolveFinalStateContract',
-    'deps.resolvePreLifecycleStateContract || resolvePreLifecycleStateContract',
-    'deps.analysisDerivedStatesFromRecord || analysisDerivedStatesFromRecord',
-    'deps.effectivePlanForRecord || effectivePlanForRecord',
-    'deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate',
-    'deps.deriveCurrentPlanState || deriveCurrentPlanState',
-    'deps.evaluatePlanRealism || evaluatePlanRealism'
-  ].forEach(fragment => {
-    assert.ok(appSource.includes(fragment), `app.js must honor injected dep: ${fragment}`);
+  ['deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate', 'deps.deriveCurrentPlanState || deriveCurrentPlanState', 'deps.evaluatePlanRealism || evaluatePlanRealism'].forEach(fragment => {
+    assert.ok(appSource.includes(fragment), `app.js must honor factual plan dependency: ${fragment}`);
   });
-  assert.ok(
-    resolverSource.includes("const preserveReviewCanonicalForSoftReadiness = deps.preserveReviewCanonicalForSoftReadiness === true;"),
-    'js/resolver-core.js must accept the Review-only soft-readiness canonical preservation override'
-  );
-  assert.ok(
-    resolverSource.includes("const canonicalSoftReadinessOverrideAllowed = !isTracked")
-      && resolverSource.includes("|| preserveReviewCanonicalForSoftReadiness")
-      && resolverSource.includes("|| preserveScanAuthorityCanonicalPath;"),
-    'js/resolver-core.js must allow review-only and preserved scan-authority canonical soft-readiness paths without conflating them'
-  );
-  assert.ok(
-    simplifiedTradeStateSource.includes("preserveReviewCanonicalForSoftReadiness:surface === 'review'"),
-    'simplified-trade-state must inject the Review-only soft-readiness preservation override'
-  );
-  assert.ok(
-    simplifiedTradeStateSource.includes("const preferPreservedCanonicalAuthorityVerdict = preferExplicitReviewCanonical\n        || preserveTrackedScanAuthorityPath;"),
-    'simplified-trade-state must preserve canonical verdict selection for unchanged scan-authority Track paths'
-  );
+  ['resolveFinalStateContract(item', 'resolvePreLifecycleStateContract(item', 'analysisDerivedStatesFromRecord(item)'].forEach(fragment => {
+    const liveResolver = appSource.slice(appSource.indexOf('function resolveGlobalVerdict(record, deps = {})'), appSource.indexOf('function resolveGlobalVisualState'));
+    assert.ok(!liveResolver.includes(fragment), `app.js resolveGlobalVerdict must not inject consumer/app-level authority: ${fragment}`);
+  });
+  assert.ok(resolverSource.includes('const preserveScanAuthorityCanonicalPath = false;') && resolverSource.includes('const applyTrackedLifecycleVerdict = false;'), 'ResolverCore must reject Scan and lifecycle authority in canonical selection.');
   assert.ok(
     appSource.includes("const derivedProjection = projection.derived_states && typeof projection.derived_states === 'object'"),
     'app.js scanner projection extraction must inspect nested analysisProjection.derived_states fields'
@@ -68,10 +47,7 @@ function assertResolveGlobalVerdictContractAlignment(){
     appSource.includes("|| projectionValue(derivedProjection, ...field.aliases)"),
     'app.js scanner projection extraction must fall back to nested derived_states values when top-level fields are absent'
   );
-  assert.ok(
-    appSource.includes("const authorityResolvedContract = typeof selectedAuthorityContractForGlobalVerdict === 'function'"),
-    'app.js resolveGlobalVerdict must source diagnostics and decision summaries from the selected authority contract'
-  );
+  assert.ok(appSource.includes("const selectedAuthoritySource = 'canonical_selector';"), 'app.js diagnostics must identify the selector as canonical authority.');
   assert.ok(
     appSource.includes("const riskOnlyFxEstimatedTradeability = tradeability === 'risk_only'"),
     'app.js soft-readiness alignment must recognize the narrowed FX-estimated risk_only case'
@@ -80,18 +56,7 @@ function assertResolveGlobalVerdictContractAlignment(){
     appSource.includes("&& (tradeability === 'tradable' || riskOnlyFxEstimatedTradeability)"),
     'app.js soft-readiness alignment must allow the narrowed FX-estimated risk_only tradeability case'
   );
-  assert.ok(
-    simplifiedTradeStateSource.includes("const canonicalPresentationVerdict = (resolvedState && (\n        (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')\n        || resolvedState.final_verdict_rendered\n        || resolvedState.final_verdict\n        || resolvedState.canonical_final_verdict\n      )) || 'watch';"),
-    'simplified-trade-state must seed the presentation contract from canonical resolved verdict fields for preserved authority paths'
-  );
-  assert.ok(
-    simplifiedTradeStateSource.includes("final_verdict:(resolvedState && (\n          (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n          || resolvedState.canonical_final_verdict\n        )) || 'watch'"),
-    'simplified-trade-state must pass canonical final_verdict into ResolverPresentation for preserved authority paths'
-  );
-  assert.ok(
-    simplifiedTradeStateSource.includes("final_verdict_rendered:(resolvedState && (\n          (preferPreservedCanonicalAuthorityVerdict ? resolvedState.canonical_final_verdict : '')\n          || resolvedState.final_verdict_rendered\n          || resolvedState.final_verdict\n          || resolvedState.canonical_final_verdict\n        )) || 'watch'"),
-    'simplified-trade-state must pass canonical final_verdict_rendered into ResolverPresentation for preserved authority paths'
-  );
+  assert.ok(simplifiedTradeStateSource.includes('function legacyResolveRecordStateObserverOnly'), 'Legacy simplified logic may remain observer-only during stabilisation.');
 }
 
 function assertSimplifiedPipelineResolverInjection(){
@@ -899,7 +864,7 @@ function run(){
 
   assert.deepStrictEqual(after, before, 'builder must not mutate input record');
   assert.strictEqual(result.ticker, 'TROW');
-  assert.strictEqual(result.diagnostics.selectedDerivedStateAuthorityCandidate.source, 'scanner_projection', 'scanner projection should be default derived-state candidate');
+  assert.strictEqual(result.diagnostics.selectedDerivedStateAuthorityCandidate.source, 'consumer_projection_diagnostic_only', 'scanner projection must be diagnostic-only');
   assert.strictEqual(result.diagnostics.selectedPlanAuthorityCandidate.source, 'manual_review', 'manual review numeric plan should be detected as plan authority candidate');
   assert.strictEqual(result.diagnostics.selectedPlanAuthorityCandidate.plan.entry, 111, 'manual review plan should not be over-expanded beyond numeric fields');
 
@@ -940,7 +905,8 @@ function run(){
   assert.ok(!ignoredStale.includes('plan.blockedReasonCode'), 'plan.blockedReasonCode should not be classified as ignored stale prose');
 
   assert.strictEqual(result.canonical.plan.numericFields.entry, 110.27, 'numeric plan fields should be captured');
-  assert.strictEqual(result.canonical.scanner.analysisProjection.structure_state, 'intact', 'scanner projection should be captured');
+  assert.strictEqual(result.canonical.scanner.analysisProjection, null, 'scanner projection must be excluded from canonical evidence');
+  assert.ok(result.diagnostics.selectedDerivedStateAuthorityCandidate.diagnosticCandidates.scan, 'scanner projection should remain available only to diagnostics');
 
   const comparison = buildCanonicalResolverInputComparison(record, {
     surface:'test',
