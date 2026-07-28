@@ -49,6 +49,41 @@
     return normalizeGlobalVerdictKey(verdict);
   }
 
+  function cloneResolutionValue(value){
+    if(value == null || typeof value !== 'object') return value;
+    if(Array.isArray(value)) return value.map(cloneResolutionValue);
+    return Object.keys(value).reduce((copy, name) => {
+      copy[name] = cloneResolutionValue(value[name]);
+      return copy;
+    }, {});
+  }
+
+  function freezeResolutionValue(value){
+    if(!value || typeof value !== 'object' || Object.isFrozen(value)) return value;
+    Object.keys(value).forEach(name => freezeResolutionValue(value[name]));
+    return Object.freeze(value);
+  }
+
+  // Stage 1: an immutable boundary between normalisation and resolution.
+  // It contains factual evidence/provenance and policy identity only; semantic
+  // evaluation, gates, promotion guards, and verdict selection remain below.
+  function buildCanonicalResolutionContext(normalisedEvidence, dependencies = {}){
+    const sourceEvidence = normalisedEvidence && typeof normalisedEvidence === 'object'
+      ? normalisedEvidence
+      : {schemaVersion:'normalised-decision-evidence-v1', snapshotId:'unavailable', source:'resolver-core-fallback'};
+    const policy = dependencies.policy && typeof dependencies.policy === 'object' ? dependencies.policy : {};
+    return freezeResolutionValue({
+      schemaVersion:'canonical-resolution-context-v1',
+      evidence:cloneResolutionValue(sourceEvidence),
+      evidenceId:String(sourceEvidence.snapshotId || 'unavailable'),
+      resolverSnapshotId:`${String(sourceEvidence.snapshotId || 'unavailable')}:resolver-core`,
+      resolverSource:String(dependencies.resolverSource || 'resolver-core'),
+      policy:cloneResolutionValue(policy),
+      provenance:cloneResolutionValue(sourceEvidence.provenance || {}),
+      surface:'resolver-core'
+    });
+  }
+
   function shouldPreserveScanAuthorityCanonicalPath(record){
     const item = record && typeof record === 'object' ? record : {};
     const authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
@@ -1707,6 +1742,14 @@
 
   function resolveGlobalVerdict(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
+    const normalisedEvidence = global.CanonicalResolverInput
+      && typeof global.CanonicalResolverInput.normaliseDecisionEvidence === 'function'
+      ? global.CanonicalResolverInput.normaliseDecisionEvidence(item, {surface:'resolver-core'})
+      : {schemaVersion:'normalised-decision-evidence-v1', snapshotId:'unavailable', source:'resolver-core-fallback'};
+    const resolutionContext = buildCanonicalResolutionContext(normalisedEvidence, {
+      resolverSource:'resolver-core',
+      policy:{minimumEntryRr:MIN_ENTRY_RR, minimumNearEntryRr:MIN_NEAR_ENTRY_RR}
+    });
     const preLifecycleResolved = deps.resolvePreLifecycleStateContract(item);
     const preserveReviewCanonicalForSoftReadiness = deps.preserveReviewCanonicalForSoftReadiness === true;
     const preserveScanAuthorityCanonicalPath = deps.preserveScanAuthorityCanonicalPath === true
@@ -2652,10 +2695,7 @@
       })[canonicalFinalVerdict] || 'watch_state',
       resolved
     };
-    const normalizedEvidence = global.CanonicalResolverInput
-      && typeof global.CanonicalResolverInput.normaliseDecisionEvidence === 'function'
-      ? global.CanonicalResolverInput.normaliseDecisionEvidence(item, {surface:'resolver-core'})
-      : {schemaVersion:'normalised-decision-evidence-v1', snapshotId:'unavailable', source:'resolver-core-fallback'};
+    const normalizedEvidence = resolutionContext.evidence;
     if(global.CanonicalDecisionResult && typeof global.CanonicalDecisionResult.publishCanonicalDecision === 'function'){
       const publication = global.CanonicalDecisionResult.publishCanonicalDecision(rawResult, normalizedEvidence, {
         enforce:deps.enforceCanonicalNorm === true
@@ -3989,6 +4029,7 @@
   global.ResolverCore = {
     normalizeGlobalVerdictKey,
     normalizeVerdict,
+    buildCanonicalResolutionContext,
     globalVerdictLabel,
     getTone,
     getBucket,
