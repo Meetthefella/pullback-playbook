@@ -4,6 +4,7 @@ const path = require('path');
 const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
+const resolverSource = fs.readFileSync(path.join(root, 'js/resolver-core.js'), 'utf8');
 const sandbox = {window:{}, console};
 sandbox.globalThis = sandbox.window;
 vm.runInNewContext(fs.readFileSync(path.join(root, 'js/resolver-core.js'), 'utf8'), sandbox, {filename:'resolver-core.js'});
@@ -37,7 +38,14 @@ const evaluationInput = {
   promotionGuards:{entryGatePass:false, nearEntryGatePass:false},
   terminalBlockers:{structure:false, support:false},
   planEvaluation:{entry:100, stop:null, target:null, visibility:false, provenance:{source:'resolver-core'}},
-  diagnostics:{stale:false}
+  diagnostics:{
+    stale:false,
+    shadowSelectionInputs:{
+      baseVerdict:'watch', resolvedContract:{}, semanticBlocker:{}, structureLayer:{structureEligibility:'alive'},
+      structureState:'intact', setupScore:4, promotionGuardBeforePriceability:{final_verdict:'watch', entry_gate_pass:false, near_entry_gate_pass:false},
+      viability:{viability:'watchlist'}, priceabilityState:'unknown', primaryBlockerSource:'resolver'
+    }
+  }
 };
 const evaluationBefore = JSON.stringify(evaluationInput);
 const evaluation = api.evaluateCanonicalSemanticsAndGates(first, evaluationInput);
@@ -46,4 +54,19 @@ assert.ok(Object.isFrozen(evaluation) && Object.isFrozen(evaluation.semanticStat
 assert.strictEqual(evaluation.semanticStates.plan.priceability, 'provisional');
 assert.strictEqual(evaluation.gates.buyerControl.reasons[0], 'Buyer control is not confirmed.');
 assert.strictEqual(Object.prototype.hasOwnProperty.call(evaluation, 'verdict'), false, 'semantic evaluation must not select a final verdict');
-console.log('Resolver context assertions passed (determinism, immutability, identity, and unknown preservation).');
+const selection = api.selectCanonicalDecision(first, evaluation);
+assert.ok(Object.isFrozen(selection) && Object.isFrozen(selection.shadowDecisionTrace), 'shadow selector result must be immutable');
+assert.strictEqual(selection.diagnostics.shadowOnly, true, 'Stage 3B selector must remain shadow-only');
+assert.strictEqual(selection.verdict, 'watch', 'selector must deterministically replay the supplied evaluation');
+assert.strictEqual(firstDecisionTraceDivergenceSafe(api, selection.shadowDecisionTrace), null, 'a trace must equal itself');
+const alteredTrace = JSON.parse(JSON.stringify(selection.shadowDecisionTrace));
+alteredTrace[3].outputVerdict = 'entry';
+const firstDivergence = api.firstDecisionTraceDivergence(selection.shadowDecisionTrace, alteredTrace);
+assert.deepStrictEqual(JSON.parse(JSON.stringify(firstDivergence)), {stepIndex:3, stepCode:'near_entry_priceability_enforcement', field:'outputVerdict', legacyValue:'watch', selectorValue:'entry'}, 'first-divergence diagnostics must identify the first changed step and field');
+assert.ok(/const shadowDecisionSelection = selectCanonicalDecision\(resolutionContext, canonicalEvaluation\);[\s\S]*?const rawResult = \{[\s\S]*?final_verdict:canonicalFinalVerdict,/m.test(resolverSource), 'live candidate construction must retain the legacy final verdict rather than selector output during Stage 3B');
+assert.ok(!/final_verdict:shadowDecisionSelection\.verdict/.test(resolverSource), 'shadow selector output must not become a candidate/publication verdict during Stage 3B');
+console.log('Resolver context assertions passed (determinism, immutability, identity, unknown preservation, and shadow selector isolation).');
+
+function firstDecisionTraceDivergenceSafe(api, trace){
+  return api.firstDecisionTraceDivergence(trace, JSON.parse(JSON.stringify(trace)));
+}
