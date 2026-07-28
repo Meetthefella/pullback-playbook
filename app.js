@@ -39139,6 +39139,32 @@ function buildDeterministicEventPacketFromChartCoach(chartCoach = {}){
 }
 
 function buildCanonicalNarrationContract(eventPacket = {}, context = {}){
+  // Consumer 9 publication path. When a validated publication is supplied,
+  // Chart Guru narrates its semantic truth and uses the packet only as factual
+  // chronology. No chart-derived field may replace these values.
+  const published = context.canonicalPublication && typeof context.canonicalPublication === 'object'
+    ? context.canonicalPublication : null;
+  if(published){
+    const failed = published.publicationStatus === 'validation_failed';
+    const canonical = published.canonicalResult && typeof published.canonicalResult === 'object' ? published.canonicalResult : null;
+    const semantics = canonical && canonical.semantics || {};
+    const verdict = failed ? String(published.safeFallback && published.safeFallback.verdict || 'watch') : String(canonical && canonical.verdict && canonical.verdict.value || 'watch');
+    const chronology = Array.isArray(eventPacket.factualChronology) ? eventPacket.factualChronology.slice() : [];
+    return {
+      version:'chart-guru-narration-contract-v2', publicationStatus:failed ? 'validation_failed' : 'valid',
+      canonicalNormVersion:failed ? String(published.validation && published.validation.normVersion || '') : String(canonical.normVersion || ''),
+      canonicalResultVersion:failed ? '' : String(canonical.schemaVersion || ''), evidenceId:failed ? '' : String(canonical.snapshot && canonical.snapshot.evidenceId || ''),
+      verdict, actionable:failed ? false : canonical.verdict.actionable === true,
+      entryEligibility:failed ? null : canonical.eligibility && canonical.eligibility.entry, nearEntryEligibility:failed ? null : canonical.eligibility && canonical.eligibility.nearEntry,
+      structure:failed ? 'unknown' : semantics.structure && semantics.structure.state, support:failed ? {semantic:'unknown'} : semantics.support || {}, pullback:failed ? 'unknown' : semantics.pullback && semantics.pullback.state,
+      buyerResponse:failed ? 'unknown' : semantics.buyer && semantics.buyer.response, buyerControl:failed ? 'unknown' : semantics.buyer && semantics.buyer.control, followThrough:failed ? 'unknown' : semantics.buyer && semantics.buyer.followThrough,
+      market:failed ? 'unknown' : semantics.market && semantics.market.state, volume:failed ? 'unknown' : semantics.market && semantics.market.volume,
+      plan:failed ? null : canonical.plan, planState:failed ? 'unavailable' : semantics.planState && semantics.planState.priceability,
+      blocker:{code:failed ? 'canonical_norm_validation_failed' : String(canonical.verdict.decisiveBlockerCode || ''),category:failed ? 'validation' : String(canonical.verdict.decisiveBlockerCategory || ''),message:failed ? 'The current setup decision could not be validated, so it remains non-actionable.' : String(canonical.verdict.decisiveBlocker || '')},
+      chronology, phase:{category:'B', sourceCanonicalFields:['semantics.support','semantics.buyer','verdict'], factualChronologySources:['factualChronology'], mayFeedDecisionLogic:false, owner:'chart_guru', rationale:'narrative chronology', reviewDate:'post-stabilisation-release'},
+      dominantEvent:{category:'B', sourceCanonicalFields:['semantics.support','semantics.buyer','verdict'], factualChronologySources:['factualChronology'], mayFeedDecisionLogic:false, owner:'chart_guru', rationale:'narrative chronology', reviewDate:'post-stabilisation-release'}
+    };
+  }
   const packet = eventPacket && typeof eventPacket === 'object' ? eventPacket : {};
   const allowed = (value, values, fallback = 'unknown') => values.includes(String(value || '').trim().toLowerCase()) ? String(value || '').trim().toLowerCase() : fallback;
   const narrationStructureState = value => ({strong:'intact',intact:'intact',developing_clean:'intact',developing:'intact',weak:'weakening',weakening:'weakening',broken:'broken'})[String(value || '').trim().toLowerCase()] || 'unknown';
@@ -39318,9 +39344,12 @@ function buildChartGuruDeterministicAuthorityPayload(card, options = {}){
     }
   });
   const eventPacket = buildDeterministicEventPacketFromChartCoach(deterministicChartCoach);
+  const chartPublication = typeof resolveGlobalVerdict === 'function'
+    ? resolveGlobalVerdict(safeCard).canonicalPublication : null;
   return {
     eventPacket,
     canonicalNarrationContract:buildCanonicalNarrationContract(eventPacket, {
+      canonicalPublication:chartPublication,
       structureState:derivedStates.structure_state,
       trendState:derivedStates.trend_state,
       volumeState:derivedStates.volume_state,
