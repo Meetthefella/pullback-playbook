@@ -55,17 +55,18 @@ assert.strictEqual(evaluation.semanticStates.plan.priceability, 'provisional');
 assert.strictEqual(evaluation.gates.buyerControl.reasons[0], 'Buyer control is not confirmed.');
 assert.strictEqual(Object.prototype.hasOwnProperty.call(evaluation, 'verdict'), false, 'semantic evaluation must not select a final verdict');
 const selection = api.selectCanonicalDecision(first, evaluation);
-assert.ok(Object.isFrozen(selection) && Object.isFrozen(selection.shadowDecisionTrace), 'shadow selector result must be immutable');
-assert.strictEqual(selection.diagnostics.shadowOnly, true, 'Stage 3B selector must remain shadow-only');
+assert.ok(Object.isFrozen(selection) && Object.isFrozen(selection.shadowDecisionTrace), 'selector result must be immutable');
+assert.strictEqual(selection.diagnostics.authority, 'canonical_selector', 'Stage 3C selector must be the canonical decision authority');
 assert.strictEqual(selection.verdict, 'watch', 'selector must deterministically replay the supplied evaluation');
 assert.strictEqual(firstDecisionTraceDivergenceSafe(api, selection.shadowDecisionTrace), null, 'a trace must equal itself');
 const alteredTrace = JSON.parse(JSON.stringify(selection.shadowDecisionTrace));
 alteredTrace[3].outputVerdict = 'entry';
 const firstDivergence = api.firstDecisionTraceDivergence(selection.shadowDecisionTrace, alteredTrace);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(firstDivergence)), {stepIndex:3, stepCode:'near_entry_priceability_enforcement', field:'outputVerdict', legacyValue:'watch', selectorValue:'entry'}, 'first-divergence diagnostics must identify the first changed step and field');
-assert.ok(/const shadowDecisionSelection = selectCanonicalDecision\(resolutionContext, canonicalEvaluation\);[\s\S]*?const rawResult = \{[\s\S]*?final_verdict:canonicalFinalVerdict,/m.test(resolverSource), 'live candidate construction must retain the legacy final verdict rather than selector output during Stage 3B');
-assert.ok(!/final_verdict:shadowDecisionSelection\.verdict/.test(resolverSource), 'shadow selector output must not become a candidate/publication verdict during Stage 3B');
-console.log('Resolver context assertions passed (determinism, immutability, identity, unknown preservation, and shadow selector isolation).');
+assert.ok(/const canonicalDecisionSelection = selectCanonicalDecision\(resolutionContext, canonicalEvaluation\);[\s\S]*?const rawResult = \{[\s\S]*?canonicalDecisionSelection,[\s\S]*?final_verdict:canonicalDecisionSelection\.verdict,/m.test(resolverSource), 'candidate verdict must be copied directly from the selector during Stage 3C');
+assert.ok(/main_blocker:canonicalDecisionSelection\.decisiveBlocker\.reason,[\s\S]*?canonical_decision_trace:canonicalDecisionSelection\.shadowDecisionTrace,[\s\S]*?primary_blocker_source:canonicalDecisionSelection\.decisiveBlocker\.category,/m.test(resolverSource), 'candidate blocker and trace must be copied directly from the selector');
+assert.ok(!/shadow_decision_selection/.test(resolverSource), 'Stage 3C must not retain a shadow selector publication alias');
+console.log('Resolver context assertions passed (determinism, immutability, identity, unknown preservation, and selector authority boundary).');
 
 function firstDecisionTraceDivergenceSafe(api, trace){
   return api.firstDecisionTraceDivergence(trace, JSON.parse(JSON.stringify(trace)));

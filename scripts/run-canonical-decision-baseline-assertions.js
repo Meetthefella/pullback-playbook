@@ -74,7 +74,7 @@ function run(){
       id:testCase.id,
       ticker:testCase.ticker,
       decisionTrace:result.legacy_decision_trace,
-      shadowDecisionSelection:result.shadow_decision_selection,
+      canonicalDecisionSelection:result.canonical_decision_selection,
       shadowDecisionParity:result.shadow_decision_parity,
       canonicalDecisionResult:result.canonicalDecisionResult,
       canonicalFacts:{
@@ -104,14 +104,14 @@ function run(){
     assert.strictEqual(result.surfaces.review, result.verdict, `${result.id}: Review baseline must reflect the resolver`);
     assert.strictEqual(result.surfaces.track, result.verdict, `${result.id}: Track baseline must reflect the resolver`);
     assert.ok(Array.isArray(result.decisionTrace), `${result.id}: legacy decision trace must be available for Stage 3 shadow parity`);
-    assert.ok(result.shadowDecisionSelection && result.shadowDecisionSelection.diagnostics && result.shadowDecisionSelection.diagnostics.shadowOnly === true, `${result.id}: selector must remain explicitly shadow-only during Stage 3B`);
+    assert.ok(result.canonicalDecisionSelection && result.canonicalDecisionSelection.diagnostics && result.canonicalDecisionSelection.diagnostics.authority === 'canonical_selector', `${result.id}: selector must be the canonical decision authority during Stage 3C`);
     assert.ok(result.shadowDecisionParity, `${result.id}: Stage 3B must report structured trace parity diagnostics`);
     assert.strictEqual(result.shadowDecisionParity.parity, true, `${result.id}: selector trace must exactly match legacy trace; first divergence: ${JSON.stringify(result.shadowDecisionParity.firstDivergence)}`);
-    assert.strictEqual(result.shadowDecisionSelection.verdict, result.verdict, `${result.id}: selector final verdict must match legacy authority`);
-    assert.strictEqual(result.shadowDecisionSelection.actionability, result.verdict === 'entry', `${result.id}: selector actionability must match legacy authority`);
-    assert.strictEqual(result.shadowDecisionSelection.eligibility.entry.qualified, result.canonicalDecisionResult.eligibility.entry.qualified, `${result.id}: selector Entry eligibility must match published legacy authority`);
-    assert.strictEqual(result.shadowDecisionSelection.eligibility.nearEntry.qualified, result.canonicalDecisionResult.eligibility.nearEntry.qualified, `${result.id}: selector Near Entry eligibility must match published legacy authority`);
-    assert.strictEqual(result.shadowDecisionSelection.shadowDecisionTrace.length, result.decisionTrace.length, `${result.id}: selector trace length must match legacy authority`);
+    assert.strictEqual(result.canonicalDecisionSelection.verdict, result.verdict, `${result.id}: published verdict must come from the selector`);
+    assert.strictEqual(result.canonicalDecisionSelection.actionability, result.canonicalDecisionResult.verdict.actionable, `${result.id}: published actionability must come from the selector`);
+    assert.strictEqual(result.canonicalDecisionSelection.eligibility.entry.qualified, result.canonicalDecisionResult.eligibility.entry.qualified, `${result.id}: published Entry eligibility must come from the selector`);
+    assert.strictEqual(result.canonicalDecisionSelection.eligibility.nearEntry.qualified, result.canonicalDecisionResult.eligibility.nearEntry.qualified, `${result.id}: published Near Entry eligibility must come from the selector`);
+    assert.strictEqual(result.canonicalDecisionSelection.shadowDecisionTrace.length, result.decisionTrace.length, `${result.id}: selector trace length must match the legacy observer`);
     const stepCodes = result.decisionTrace.map(step => step.stepCode);
     const requiredSteps = [
       'incoming_contract_verdict',
@@ -143,7 +143,7 @@ function run(){
     suite:'canonical-decision-baseline',
     passed:results.length,
     traceAssertions:'passed',
-    results:results.map(({decisionTrace, shadowDecisionSelection, shadowDecisionParity, canonicalDecisionResult, ...result}) => result)
+    results:results.map(({decisionTrace, canonicalDecisionSelection, shadowDecisionParity, canonicalDecisionResult, ...result}) => result)
   }, null, 2));
 }
 

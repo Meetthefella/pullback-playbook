@@ -23,6 +23,12 @@ const cases = [
     groups:['all', 'resolver', 'pure']
   },
   {
+    id:'resolver-authority-switch',
+    label:'Resolver authority-switch assertions',
+    script:'scripts/run-resolver-authority-switch-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
     id:'canonical-norm',
     label:'Canonical Norm assertions',
     script:'scripts/run-canonical-norm-assertions.js',

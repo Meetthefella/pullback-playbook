@@ -145,9 +145,9 @@
     return null;
   }
 
-  // Stage 3B: this is intentionally shadow-only. It replays the existing
-  // final-decision sequence from immutable context/evaluation inputs, while
-  // resolveGlobalVerdict continues to publish the legacy branch below.
+  // Stage 3C: the sole decision selector. It replays the established
+  // final-decision sequence from immutable context/evaluation inputs. The
+  // in-function legacy chain remains observer-only until Stage 3E removes it.
   function selectCanonicalDecision(context, evaluation){
     const safeContext = context && typeof context === 'object' ? context : {};
     const safeEvaluation = evaluation && typeof evaluation === 'object' ? evaluation : {};
@@ -358,7 +358,7 @@
     const nearQualified = planValid && (guardedVerdict.near_entry_gate_pass === true || contractNearEntry);
     const frozenTrace = freezeResolutionValue(trace);
     return freezeResolutionValue({
-      schemaVersion:'canonical-decision-selection-shadow-v1',
+      schemaVersion:'canonical-decision-selection-v1',
       eligibility:{entry:{state:verdict === 'entry' || guardedVerdict.entry_gate_pass === true ? 'qualified' : 'blocked', qualified:entryQualified}, nearEntry:{state:verdict === 'entry' ? 'superseded_by_entry' : (nearQualified ? 'qualified' : 'blocked'), qualified:nearQualified}},
       verdict, actionability:verdict === 'entry',
       decisiveBlocker:{code:decisiveBlockerCode, category:decisiveBlockerCategory, reason:verdict === 'entry' ? '' : reason},
@@ -366,7 +366,7 @@
       selectedPromotionPath:trace.filter(step => step.changed && ['promotion_guard_result', 'scan_authority_state_release'].includes(step.stepCode)).map(step => step.stepCode),
       selectedDemotionPath:trace.filter(step => step.changed && !['promotion_guard_result', 'scan_authority_state_release'].includes(step.stepCode)).map(step => step.stepCode),
       shadowDecisionTrace:frozenTrace,
-      diagnostics:{shadowOnly:true, lifecycleApplied:applyTrackedLifecycleVerdict, scanAuthorityNearEntryRelease}
+      diagnostics:{authority:'canonical_selector', lifecycleApplied:applyTrackedLifecycleVerdict, scanAuthorityNearEntryRelease}
     });
   }
 
@@ -2862,6 +2862,9 @@
       evidenceId:resolutionContext.evidenceId
     });
     const immutableLegacyDecisionTrace = freezeResolutionValue(legacyDecisionTrace);
+    const publishedHasPriceablePlan = !!(
+      guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_priceable_plan
+    );
     const canonicalEvaluation = evaluateCanonicalSemanticsAndGates(resolutionContext, {
       semanticStates:{
         structure:{state:structureState, eligibility:structureLayer.structureEligibility},
@@ -2911,7 +2914,7 @@
           priceabilityState,
           priceabilityInferred,
           displayedPlanStatus:String(displayedPlan && displayedPlan.status || '').trim().toLowerCase(),
-          hasPriceablePlan:!!(guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_priceable_plan),
+          hasPriceablePlan:publishedHasPriceablePlan,
           preserveScanAuthorityCanonicalPath,
           isTracked,
           latePullbackActive,
@@ -2922,27 +2925,46 @@
         }
       }
     });
-    const shadowDecisionSelection = selectCanonicalDecision(resolutionContext, canonicalEvaluation);
-    const shadowDecisionParityDivergence = firstDecisionTraceDivergence(immutableLegacyDecisionTrace, shadowDecisionSelection.shadowDecisionTrace);
+    // Stage 3C authority boundary: the selector is the only source that may
+    // enter candidate construction. Everything calculated above remains a
+    // legacy observer until Stage 3E removes the duplicated chain.
+    const canonicalDecisionSelection = selectCanonicalDecision(resolutionContext, canonicalEvaluation);
+    const shadowDecisionParityDivergence = firstDecisionTraceDivergence(immutableLegacyDecisionTrace, canonicalDecisionSelection.shadowDecisionTrace);
     const legacyPromotionPath = immutableLegacyDecisionTrace.filter(step => step.changed && ['promotion_guard_result', 'scan_authority_state_release'].includes(step.stepCode)).map(step => step.stepCode);
     const legacyDemotionPath = immutableLegacyDecisionTrace.filter(step => step.changed && !['promotion_guard_result', 'scan_authority_state_release'].includes(step.stepCode)).map(step => step.stepCode);
     const legacyDecisiveBlockerCode = fallingKnifeApplied ? 'falling_knife' : (semanticBlocker.blockerCode || '');
     const legacyDecisiveBlockerCategory = fallingKnifeApplied ? 'falling_knife' : ((resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver'))));
-    const shadowFinalDivergence = shadowDecisionSelection.verdict !== canonicalFinalVerdict
-      ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'verdict', legacyValue:canonicalFinalVerdict, selectorValue:shadowDecisionSelection.verdict})
-      : (shadowDecisionSelection.actionability !== (canonicalFinalVerdict === 'entry')
-        ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'actionability', legacyValue:canonicalFinalVerdict === 'entry', selectorValue:shadowDecisionSelection.actionability})
-        : (shadowDecisionSelection.decisiveBlocker.code !== legacyDecisiveBlockerCode
-          ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.code', legacyValue:legacyDecisiveBlockerCode, selectorValue:shadowDecisionSelection.decisiveBlocker.code})
-          : (shadowDecisionSelection.decisiveBlocker.category !== legacyDecisiveBlockerCategory
-            ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.category', legacyValue:legacyDecisiveBlockerCategory, selectorValue:shadowDecisionSelection.decisiveBlocker.category})
-            : (shadowDecisionSelection.decisiveBlocker.reason !== canonicalDecisiveBlocker
-              ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.reason', legacyValue:canonicalDecisiveBlocker, selectorValue:shadowDecisionSelection.decisiveBlocker.reason})
+    // This is the pre-switch publication formula: retain it verbatim for the
+    // observer comparison rather than deriving eligibility from a guard-local
+    // field that was never part of the published candidate.
+    const legacyPlanValid = !['unpriceable', 'invalid', 'missing'].includes(priceabilityState) && publishedHasPriceablePlan !== false;
+    const legacyEntryQualified = guardedVerdict.entry_gate_pass === true
+      && guardedVerdict.buyer_control_gate_pass === true
+      && guardedVerdict.confirmation_gate_pass === true
+      && legacyPlanValid;
+    const legacyContractNearEntry = String(resolved.structuralState || '').toLowerCase() === 'near_entry'
+      || String(resolved.tradeabilityVerdict || '').toLowerCase() === 'near entry';
+    const legacyNearEntryQualified = legacyPlanValid && (guardedVerdict.near_entry_gate_pass === true || legacyContractNearEntry);
+    const legacyEligibility = freezeResolutionValue({
+      entry:{state:canonicalFinalVerdict === 'entry' || guardedVerdict.entry_gate_pass === true ? 'qualified' : 'blocked', qualified:legacyEntryQualified},
+      nearEntry:{state:canonicalFinalVerdict === 'entry' ? 'superseded_by_entry' : (legacyNearEntryQualified ? 'qualified' : 'blocked'), qualified:legacyNearEntryQualified}
+    });
+    const shadowFinalDivergence = canonicalDecisionSelection.verdict !== canonicalFinalVerdict
+      ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'verdict', legacyValue:canonicalFinalVerdict, selectorValue:canonicalDecisionSelection.verdict})
+      : (canonicalDecisionSelection.actionability !== (canonicalFinalVerdict === 'entry')
+        ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'actionability', legacyValue:canonicalFinalVerdict === 'entry', selectorValue:canonicalDecisionSelection.actionability})
+        : (canonicalDecisionSelection.decisiveBlocker.code !== legacyDecisiveBlockerCode
+          ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.code', legacyValue:legacyDecisiveBlockerCode, selectorValue:canonicalDecisionSelection.decisiveBlocker.code})
+          : (canonicalDecisionSelection.decisiveBlocker.category !== legacyDecisiveBlockerCategory
+            ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.category', legacyValue:legacyDecisiveBlockerCategory, selectorValue:canonicalDecisionSelection.decisiveBlocker.category})
+            : (canonicalDecisionSelection.decisiveBlocker.reason !== canonicalDecisiveBlocker
+              ? freezeResolutionValue({stepIndex:immutableLegacyDecisionTrace.length, stepCode:'final_decision', field:'decisiveBlocker.reason', legacyValue:canonicalDecisiveBlocker, selectorValue:canonicalDecisionSelection.decisiveBlocker.reason})
               : null))));
     const shadowDecisionParity = freezeResolutionValue({
       parity:shadowDecisionParityDivergence === null && shadowFinalDivergence === null
-        && JSON.stringify(shadowDecisionSelection.selectedPromotionPath) === JSON.stringify(legacyPromotionPath)
-        && JSON.stringify(shadowDecisionSelection.selectedDemotionPath) === JSON.stringify(legacyDemotionPath),
+        && JSON.stringify(canonicalDecisionSelection.selectedPromotionPath) === JSON.stringify(legacyPromotionPath)
+        && JSON.stringify(canonicalDecisionSelection.selectedDemotionPath) === JSON.stringify(legacyDemotionPath)
+        && JSON.stringify(canonicalDecisionSelection.eligibility) === JSON.stringify(legacyEligibility),
       firstDivergence:shadowDecisionParityDivergence || shadowFinalDivergence,
       legacyFinal:freezeResolutionValue({
         verdict:canonicalFinalVerdict,
@@ -2951,12 +2973,14 @@
           code:legacyDecisiveBlockerCode,
           category:legacyDecisiveBlockerCategory,
           reason:canonicalDecisiveBlocker
-        }
+        },
+        eligibility:legacyEligibility
       }),
       selectorFinal:freezeResolutionValue({
-        verdict:shadowDecisionSelection.verdict,
-        actionability:shadowDecisionSelection.actionability,
-        decisiveBlocker:shadowDecisionSelection.decisiveBlocker
+        verdict:canonicalDecisionSelection.verdict,
+        actionability:canonicalDecisionSelection.actionability,
+        decisiveBlocker:canonicalDecisionSelection.decisiveBlocker,
+        eligibility:canonicalDecisionSelection.eligibility
       })
     });
     if(global && global.__PP_ASSERT_SHADOW_SELECTOR_PARITY__ === true && shadowDecisionParity.parity !== true){
@@ -2965,7 +2989,10 @@
     const rawResult = {
       base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
-      final_verdict:canonicalFinalVerdict,
+      // Candidate decision fields are copied exactly once from the immutable
+      // selector result. No legacy observer value may be assigned below.
+      canonicalDecisionSelection,
+      final_verdict:canonicalDecisionSelection.verdict,
       tone,
       toneClass:`tone-${tone}`,
       borderClass:`tone-${tone}`,
@@ -2975,10 +3002,10 @@
       bucket,
       badge,
       action,
-      lifecycle:lifecycleMap[canonicalFinalVerdict] || 'watchlist',
-      allow_plan:action.planAllowed,
+      lifecycle:lifecycleMap[canonicalDecisionSelection.verdict] || 'watchlist',
+      allow_plan:canonicalDecisionSelection.actionability,
       allow_watchlist:action.watchlistAllowed,
-      reason,
+      reason:canonicalDecisionSelection.decisiveBlocker.reason,
       subline:isExtended && ['strong','intact'].includes(structureState)
         ? 'Buyers in control, but price is stretched away from support'
         : '',
@@ -3076,21 +3103,26 @@
       input_completeness:viability.inputCompleteness || null,
       reject_blocked_by_incomplete_inputs:viability.rejectBlockedByIncompleteInputs === true,
       viability_visual_bucket:viability.visualBucket || '',
-      main_blocker:reason || trackedReason || viability.mainBlocker || '',
+      main_blocker:canonicalDecisionSelection.decisiveBlocker.reason,
       canonicalDecisionProjection:{
-        verdict:canonicalFinalVerdict,
-        canonicalVerdict:canonicalFinalVerdict,
-        decisiveBlocker:canonicalDecisiveBlocker,
-        primaryReason:canonicalDecisiveBlocker,
+        verdict:canonicalDecisionSelection.verdict,
+        canonicalVerdict:canonicalDecisionSelection.verdict,
+        decisiveBlocker:canonicalDecisionSelection.decisiveBlocker.reason,
+        primaryReason:canonicalDecisionSelection.decisiveBlocker.reason,
         nextRequiredEvent:canonicalNextRequiredEvent,
         nextAction:canonicalNextAction
       },
       legacy_decision_trace:immutableLegacyDecisionTrace,
-      shadow_decision_selection:shadowDecisionSelection,
+      // Observer-only: retained to prove the selector has not drifted before
+      // Stage 3E deletes the duplicated chain.
+      legacy_decision_selection:shadowDecisionParity.legacyFinal,
+      canonical_decision_trace:canonicalDecisionSelection.shadowDecisionTrace,
+      canonical_decision_selection:canonicalDecisionSelection,
       shadow_decision_parity:shadowDecisionParity,
-      primary_blocker_source:fallingKnifeApplied
-        ? 'falling_knife'
-        : ((resolved && resolved.primaryBlockerSource) || (structureLayer.structureEligibility === 'damaged' ? 'structure' : (isExtended ? 'setup_location' : (priceabilityState === 'unpriceable' && !priceabilityInferred ? 'priceability' : 'resolver')))),
+      primary_blocker_source:canonicalDecisionSelection.decisiveBlocker.category,
+      decision_reason_source:canonicalDecisionSelection.reasonSource,
+      selected_promotion_path:canonicalDecisionSelection.selectedPromotionPath,
+      selected_demotion_path:canonicalDecisionSelection.selectedDemotionPath,
       rejected_by_viability_gate:viability.viability === 'reject',
       low_priority_by_viability_gate:viability.viability === 'low_priority',
       structure_state:structureState || '',
@@ -3119,9 +3151,7 @@
       resolverCoreTarget:planTarget,
       resolverCoreCurrentPrice:currentPrice,
       hasClearInvalidationLevel,
-      hasPriceablePlan:!!(
-        guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.has_priceable_plan
-      ),
+      hasPriceablePlan:publishedHasPriceablePlan,
       originalBounceState:(
         guardedVerdict.near_entry_gate_checks && guardedVerdict.near_entry_gate_checks.original_bounce_state
       ) || (
@@ -3185,7 +3215,7 @@
         monitor:'monitor_state',
         near_entry:'near_entry_state',
         entry:'ready_state'
-      })[canonicalFinalVerdict] || 'watch_state',
+      })[canonicalDecisionSelection.verdict] || 'watch_state',
       resolved
     };
     const normalizedEvidence = resolutionContext.evidence;

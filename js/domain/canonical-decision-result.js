@@ -27,6 +27,12 @@
   }
 
   function eligibilityFor(candidate){
+    const selection = candidate && candidate.canonicalDecisionSelection && typeof candidate.canonicalDecisionSelection === 'object'
+      ? candidate.canonicalDecisionSelection
+      : null;
+    const selectedEligibility = selection && selection.eligibility && typeof selection.eligibility === 'object'
+      ? selection.eligibility
+      : {};
     const entryGate = candidate.entry_gate_pass === true;
     const nearEntryGate = candidate.near_entry_gate_pass === true;
     const buyerControl = candidate.buyer_control_gate_pass === true;
@@ -38,15 +44,17 @@
     const contractNearEntry = key(candidate.resolved && candidate.resolved.structuralState) === 'near_entry'
       || key(candidate.resolved && candidate.resolved.tradeabilityVerdict) === 'near_entry';
     const nearEntryQualified = planValid && (nearEntryGate || contractNearEntry);
+    const selectedEntry = selectedEligibility.entry && typeof selectedEligibility.entry === 'object' ? selectedEligibility.entry : null;
+    const selectedNearEntry = selectedEligibility.nearEntry && typeof selectedEligibility.nearEntry === 'object' ? selectedEligibility.nearEntry : null;
     return Object.freeze({
       entry:Object.freeze({
-        state:verdict === 'entry' ? 'qualified' : (entryGate ? 'qualified' : 'blocked'),
-        qualified:entryGate && buyerControl && confirmation && planValid,
+        state:selectedEntry ? String(selectedEntry.state || 'blocked') : (verdict === 'entry' ? 'qualified' : (entryGate ? 'qualified' : 'blocked')),
+        qualified:selectedEntry ? selectedEntry.qualified === true : (entryGate && buyerControl && confirmation && planValid),
         mandatoryGates:Object.freeze({entry:entryGate, buyerControl, confirmation, plan:planValid})
       }),
       nearEntry:Object.freeze({
-        state:verdict === 'entry' ? 'superseded_by_entry' : (nearEntryQualified ? 'qualified' : 'blocked'),
-        qualified:nearEntryQualified,
+        state:selectedNearEntry ? String(selectedNearEntry.state || 'blocked') : (verdict === 'entry' ? 'superseded_by_entry' : (nearEntryQualified ? 'qualified' : 'blocked')),
+        qualified:selectedNearEntry ? selectedNearEntry.qualified === true : nearEntryQualified,
         mandatoryGates:Object.freeze({nearEntry:nearEntryGate, plan:planValid, authoritativeContract:contractNearEntry}),
         qualificationSource:nearEntryGate ? 'near_entry_gate' : (contractNearEntry ? 'authoritative_contract' : 'none')
       })
