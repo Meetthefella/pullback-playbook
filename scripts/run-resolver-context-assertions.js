@@ -63,8 +63,9 @@ const alteredTrace = JSON.parse(JSON.stringify(selection.decisionTrace));
 alteredTrace[3].outputVerdict = 'entry';
 const firstDivergence = api.firstDecisionTraceDivergence(selection.decisionTrace, alteredTrace);
 assert.deepStrictEqual(JSON.parse(JSON.stringify(firstDivergence)), {stepIndex:3, stepCode:'near_entry_priceability_enforcement', field:'outputVerdict', legacyValue:'watch', selectorValue:'entry'}, 'first-divergence diagnostics must identify the first changed step and field');
-assert.ok(/const canonicalDecisionSelection = selectCanonicalDecision\(resolutionContext, canonicalEvaluation\);[\s\S]*?const rawResult = \{[\s\S]*?canonicalDecisionSelection,[\s\S]*?final_verdict:canonicalDecisionSelection\.verdict,/m.test(resolverSource), 'candidate verdict must be copied directly from the selector during Stage 3C');
-assert.ok(/main_blocker:canonicalDecisionSelection\.decisiveBlocker\.reason,[\s\S]*?canonical_decision_trace:canonicalDecisionSelection\.decisionTrace,[\s\S]*?primary_blocker_source:canonicalDecisionSelection\.decisiveBlocker\.category,/m.test(resolverSource), 'candidate blocker and trace must be copied directly from the selector');
+assert.ok(/const canonicalDecisionSelection = selectCanonicalDecision\(resolutionContext, canonicalEvaluation\);[\s\S]*?const rawResult = buildCanonicalDecisionCandidate\(\{[\s\S]*?canonicalDecisionSelection,/m.test(resolverSource), 'resolver must pass the selector result into candidate construction');
+const candidateBlock = resolverSource.slice(resolverSource.indexOf('function buildCanonicalDecisionCandidate('), resolverSource.indexOf('\n  function publishCanonicalDecisionCandidate'));
+assert.ok(/main_blocker:selection\.decisiveBlocker\.reason,[\s\S]*?canonical_decision_trace:selection\.decisionTrace,[\s\S]*?primary_blocker_source:selection\.decisiveBlocker\.category,/m.test(candidateBlock), 'candidate builder must copy blocker and trace directly from the selector');
 assert.ok(!/shadow_decision_selection/.test(resolverSource), 'resolver must not retain a shadow selector publication alias');
 console.log('Resolver context assertions passed (determinism, immutability, identity, unknown preservation, and selector authority boundary).');
 

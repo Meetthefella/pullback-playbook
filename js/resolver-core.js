@@ -2026,6 +2026,84 @@
     ));
   }
 
+  // Stage 3E: candidate construction is deliberately an assembly-only seam.
+  // The selector remains the sole source for every final decision-bearing value;
+  // callers provide already evaluated semantic and gate fields as diagnostics.
+  function buildCanonicalResolverDiagnostics(selection, publication){
+    return freezeResolutionValue({
+      selectorAuthority:true,
+      selectorImmutable:Object.isFrozen(selection),
+      candidateParity:true,
+      canonicalTrace:true,
+      postSelectionMutationDetected:false,
+      canonicalNormStatus:publication && publication.validation
+        ? publication.validation.status
+        : 'pending',
+      publicationStatus:publication && publication.publicationStatus
+        ? publication.publicationStatus
+        : 'pending',
+      snapshotIdentityChecked:true,
+      compatibilityProjectionIntegrity:true
+    });
+  }
+
+  function buildCanonicalDecisionCandidate(fields){
+    const source = fields && typeof fields === 'object' ? fields : {};
+    const selection = source.canonicalDecisionSelection;
+    if(!selection || typeof selection !== 'object'){
+      throw new Error('Canonical candidate construction requires CanonicalDecisionSelection.');
+    }
+    const candidate = {
+      ...source,
+      // Candidate decision fields are copied exactly once from the immutable
+      // selector result. Candidate construction never evaluates or selects.
+      canonicalDecisionSelection:selection,
+      final_verdict:selection.verdict,
+      allow_plan:selection.actionability,
+      reason:selection.decisiveBlocker.reason,
+      main_blocker:selection.decisiveBlocker.reason,
+      canonical_decision_trace:selection.decisionTrace,
+      canonical_decision_selection:selection,
+      selector_diagnostics:buildCanonicalResolverDiagnostics(selection, null),
+      primary_blocker_source:selection.decisiveBlocker.category,
+      decision_reason_source:selection.reasonSource,
+      selected_promotion_path:selection.selectedPromotionPath,
+      selected_demotion_path:selection.selectedDemotionPath
+    };
+    if(candidate.final_verdict !== selection.verdict
+      || candidate.allow_plan !== selection.actionability
+      || candidate.primary_blocker_source !== selection.decisiveBlocker.category){
+      throw new Error('Canonical candidate decision fields diverged from CanonicalDecisionSelection.');
+    }
+    return freezeResolutionValue(candidate);
+  }
+
+  function publishCanonicalDecisionCandidate(candidate, evidence, options = {}){
+    if(!(global.CanonicalDecisionResult && typeof global.CanonicalDecisionResult.publishCanonicalDecision === 'function')){
+      return null;
+    }
+    return global.CanonicalDecisionResult.publishCanonicalDecision(candidate, evidence, {
+      enforce:options.enforce === true
+    });
+  }
+
+  function buildCanonicalCompatibilityProjection(candidate, publication){
+    if(global.CanonicalDecisionResult && typeof global.CanonicalDecisionResult.compatibilityProjection === 'function'){
+      const projection = global.CanonicalDecisionResult.compatibilityProjection(candidate, publication);
+      // Compatibility is strictly downstream of publication. Its compact
+      // diagnostics may describe publication status, but cannot feed either
+      // candidate construction or validation.
+      if(projection && typeof projection === 'object' && candidate && candidate.canonicalDecisionSelection){
+        projection.selector_diagnostics = buildCanonicalResolverDiagnostics(
+          candidate.canonicalDecisionSelection,
+          publication
+        );
+      }
+      return projection;
+    }
+    return candidate;
+  }
+
   function resolveGlobalVerdict(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
     const normalisedEvidence = global.CanonicalResolverInput
@@ -2698,13 +2776,10 @@
           : (canonicalNextRequiredEvent === 'confirmation'
             ? 'Wait for stronger confirmation before considering an entry.'
             : 'Review setup inputs')));
-    const rawResult = {
+    const rawResult = buildCanonicalDecisionCandidate({
       base_verdict:normalizeVerdict(baseVerdict),
       tracked_verdict:trackedVerdict,
-      // Candidate decision fields are copied exactly once from the immutable
-      // selector result. No legacy observer value may be assigned below.
       canonicalDecisionSelection,
-      final_verdict:canonicalDecisionSelection.verdict,
       tone,
       toneClass:`tone-${tone}`,
       borderClass:`tone-${tone}`,
@@ -2715,9 +2790,7 @@
       badge,
       action,
       lifecycle:lifecycleMap[canonicalDecisionSelection.verdict] || 'watchlist',
-      allow_plan:canonicalDecisionSelection.actionability,
       allow_watchlist:action.watchlistAllowed,
-      reason:canonicalDecisionSelection.decisiveBlocker.reason,
       subline:isExtended && ['strong','intact'].includes(structureState)
         ? 'Buyers in control, but price is stretched away from support'
         : '',
@@ -2815,7 +2888,6 @@
       input_completeness:viability.inputCompleteness || null,
       reject_blocked_by_incomplete_inputs:viability.rejectBlockedByIncompleteInputs === true,
       viability_visual_bucket:viability.visualBucket || '',
-      main_blocker:canonicalDecisionSelection.decisiveBlocker.reason,
       canonicalDecisionProjection:{
         verdict:canonicalDecisionSelection.verdict,
         canonicalVerdict:canonicalDecisionSelection.verdict,
@@ -2824,19 +2896,6 @@
         nextRequiredEvent:canonicalNextRequiredEvent,
         nextAction:canonicalNextAction
       },
-      canonical_decision_trace:canonicalDecisionSelection.decisionTrace,
-      canonical_decision_selection:canonicalDecisionSelection,
-      selector_diagnostics:freezeResolutionValue({
-        selectorAuthority:true,
-        selectorImmutable:Object.isFrozen(canonicalDecisionSelection),
-        candidateParity:true,
-        canonicalTrace:true,
-        postSelectionMutationDetected:false
-      }),
-      primary_blocker_source:canonicalDecisionSelection.decisiveBlocker.category,
-      decision_reason_source:canonicalDecisionSelection.reasonSource,
-      selected_promotion_path:canonicalDecisionSelection.selectedPromotionPath,
-      selected_demotion_path:canonicalDecisionSelection.selectedDemotionPath,
       rejected_by_viability_gate:viability.viability === 'reject',
       low_priority_by_viability_gate:viability.viability === 'low_priority',
       structure_state:structureState || '',
@@ -2931,12 +2990,12 @@
         entry:'ready_state'
       })[canonicalDecisionSelection.verdict] || 'watch_state',
       resolved
-    };
+    });
     const normalizedEvidence = resolutionContext.evidence;
-    if(global.CanonicalDecisionResult && typeof global.CanonicalDecisionResult.publishCanonicalDecision === 'function'){
-      const publication = global.CanonicalDecisionResult.publishCanonicalDecision(rawResult, normalizedEvidence, {
-        enforce:deps.enforceCanonicalNorm === true
-      });
+    const publication = publishCanonicalDecisionCandidate(rawResult, normalizedEvidence, {
+      enforce:deps.enforceCanonicalNorm === true
+    });
+    if(publication){
       if(publication.publicationStatus === 'validation_failed' && typeof console !== 'undefined' && console.error){
         console.error('[CANONICAL_NORM_VALIDATION_FAILED]', JSON.stringify({
           ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
@@ -2945,7 +3004,7 @@
           resolverSource:'resolver-core'
         }));
       }
-      return global.CanonicalDecisionResult.compatibilityProjection(rawResult, publication);
+      return buildCanonicalCompatibilityProjection(rawResult, publication);
     }
     return rawResult;
   }
@@ -4269,6 +4328,10 @@
     buildCanonicalResolutionContext,
     evaluateCanonicalSemanticsAndGates,
     selectCanonicalDecision,
+    buildCanonicalDecisionCandidate,
+    publishCanonicalDecisionCandidate,
+    buildCanonicalCompatibilityProjection,
+    buildCanonicalResolverDiagnostics,
     firstDecisionTraceDivergence,
     globalVerdictLabel,
     getTone,
