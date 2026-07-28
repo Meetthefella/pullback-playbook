@@ -47,9 +47,12 @@ function run(){
   );
 
   assert.ok(
-    appSource.includes("function watchlistLifecycleSnapshot(record, options = {}){\r\n  const item = normalizeTickerRecordReadOnly(record);")
-      || appSource.includes("function watchlistLifecycleSnapshot(record, options = {}){\n  const item = normalizeTickerRecordReadOnly(record);"),
-    'watchlistLifecycleSnapshot must normalize through the read-only path'
+    /function watchlistLifecycleSnapshot\(record, options = \{\}\)\{[\s\S]*?return canonicalLifecycleSnapshotFromPublication\(record, options\);/.test(appSource),
+    'watchlistLifecycleSnapshot must delegate current state to the canonical publication boundary'
+  );
+  assert.ok(
+    /function canonicalLifecycleSnapshotFromPublication\(record, options = \{\}\)\{\s*const item = normalizeTickerRecordReadOnly\(record \|\| \{\}\);/.test(appSource),
+    'canonicalLifecycleSnapshotFromPublication must normalize through the read-only path'
   );
 
   assert.ok(

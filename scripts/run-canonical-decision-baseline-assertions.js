@@ -72,6 +72,7 @@ function run(){
     return {
       id:testCase.id,
       ticker:testCase.ticker,
+      decisionTrace:result.legacy_decision_trace,
       canonicalFacts:{
         structure:result.structure_state,
         bounce:result.bounce_state,
@@ -98,8 +99,40 @@ function run(){
     assert.strictEqual(result.surfaces.scan, result.verdict, `${result.id}: Scan baseline must reflect the resolver`);
     assert.strictEqual(result.surfaces.review, result.verdict, `${result.id}: Review baseline must reflect the resolver`);
     assert.strictEqual(result.surfaces.track, result.verdict, `${result.id}: Track baseline must reflect the resolver`);
+    assert.ok(Array.isArray(result.decisionTrace), `${result.id}: legacy decision trace must be available for Stage 3 shadow parity`);
+    const stepCodes = result.decisionTrace.map(step => step.stepCode);
+    const requiredSteps = [
+      'incoming_contract_verdict',
+      'initial_contract_verdict_proposal',
+      'promotion_guard_result',
+      'near_entry_priceability_enforcement',
+      'scan_authority_state_release',
+      'lifecycle_viability_adjustment',
+      'late_pullback_cap',
+      'structural_avoid_guard',
+      'entry_gate_enforcement',
+      'near_entry_gate_enforcement',
+      'final_decision'
+    ];
+    assert.strictEqual(stepCodes.join('|'), requiredSteps.join('|'), `${result.id}: legacy trace must preserve the exact current decision order`);
+    result.decisionTrace.forEach(step => {
+      assert.strictEqual(typeof step.changed, 'boolean', `${result.id}: ${step.stepCode} must report whether it changed the verdict`);
+      assert.ok(step.evidenceId, `${result.id}: ${step.stepCode} must retain its evidence identity`);
+      assert.strictEqual(step.resultVersion, 'canonical-decision-result-v1.1', `${result.id}: ${step.stepCode} must retain its result version`);
+    });
+    assert.strictEqual(result.decisionTrace[result.decisionTrace.length - 1].outputVerdict, result.verdict, `${result.id}: final trace verdict must equal published canonical verdict`);
   });
-  console.log(JSON.stringify({suite:'canonical-decision-baseline', passed:results.length, results}, null, 2));
+  const changedSteps = id => results.find(result => result.id === id).decisionTrace.filter(step => step.changed).map(step => step.stepCode);
+  assert.ok(changedSteps('hwm_confirmed_control').includes('entry_gate_enforcement'), 'HWM trace must capture its final Entry-gate demotion.');
+  assert.ok(changedSteps('kdp_confirmed_without_follow_through').includes('near_entry_gate_enforcement'), 'KDP trace must capture its final Near Entry-gate demotion.');
+  assert.ok(changedSteps('broken_structure').includes('structural_avoid_guard') === false, 'Terminal broken structure must not be softened by the structural Avoid guard.');
+  assert.strictEqual(results.find(result => result.id === 'unp_unpriceable_plan').decisionTrace.find(step => step.stepCode === 'near_entry_priceability_enforcement').outputVerdict, 'watch', 'Unpriceable plan trace must remain non-promoted.');
+  console.log(JSON.stringify({
+    suite:'canonical-decision-baseline',
+    passed:results.length,
+    traceAssertions:'passed',
+    results:results.map(({decisionTrace, ...result}) => result)
+  }, null, 2));
 }
 
 run();
