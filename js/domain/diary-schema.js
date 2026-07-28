@@ -18,6 +18,71 @@
     if(typeof countTradingDaysBetween !== 'function') throw new Error('DiarySchema requires countTradingDaysBetween.');
     if(typeof isClosedOutcome !== 'function') throw new Error('DiarySchema requires isClosedOutcome.');
 
+    function cloneArchiveValue(value, fallback = null){
+      if(value == null) return fallback;
+      try{
+        return JSON.parse(JSON.stringify(value));
+      }catch(err){
+        return fallback;
+      }
+    }
+
+    function valueFromPlan(plan, key){
+      const level = plan && plan.levels && plan.levels[key];
+      return level && level.value != null ? String(level.value) : '';
+    }
+
+    // Historical decision snapshots are archival data.  This function only
+    // clones and validates their envelope; it deliberately does not consult
+    // current records, projections, or resolver state.
+    function normalizeDecisionSnapshot(snapshot){
+      if(!snapshot || typeof snapshot !== 'object') return null;
+      const archived = cloneArchiveValue(snapshot, null);
+      if(!archived) return null;
+      archived.publicationStatus = String(archived.publicationStatus || 'valid');
+      archived.canonicalNormVersion = String(archived.canonicalNormVersion || '');
+      archived.canonicalResultVersion = String(archived.canonicalResultVersion || '');
+      archived.evidenceId = String(archived.evidenceId || '');
+      archived.timestamp = String(archived.timestamp || '');
+      archived.validation = archived.validation && typeof archived.validation === 'object'
+        ? cloneArchiveValue(archived.validation, {status:archived.publicationStatus})
+        : {status:archived.publicationStatus};
+      if(archived.publicationStatus === 'validation_failed'){
+        archived.actionable = false;
+        archived.plan = null;
+        archived.invalidCandidate = undefined;
+      }
+      return archived;
+    }
+
+    function applyDecisionSnapshotCompatibilityAliases(record){
+      const snapshot = record && record.decisionSnapshotAtTime;
+      if(!snapshot) return record;
+      const failed = snapshot.publicationStatus === 'validation_failed';
+      const plan = failed ? null : snapshot.plan;
+      const risk = plan && plan.risk || {};
+      const rewardRisk = plan && plan.rewardRisk || {};
+      const verdict = normalizeImportedStatus(snapshot.verdict || 'Watch');
+      record.verdict = verdict;
+      record.chartVerdict = verdict;
+      record.plannedEntry = failed ? '' : valueFromPlan(plan, 'entry');
+      record.plannedStop = failed ? '' : valueFromPlan(plan, 'stop');
+      record.plannedFirstTarget = failed ? '' : valueFromPlan(plan, 'firstTarget');
+      record.plannedRiskPerShare = failed || risk.riskPerShare == null ? '' : String(risk.riskPerShare);
+      record.plannedRewardPerShare = '';
+      record.plannedRR = failed || rewardRisk.resolvedRr == null ? '' : String(rewardRisk.resolvedRr);
+      record.plannedPositionSize = failed || risk.positionSize == null ? '' : String(risk.positionSize);
+      record.plannedMaxLoss = failed || risk.maximumLoss == null ? '' : String(risk.maximumLoss);
+      record.compatibilityAliases = {
+        compatibilityOnly:true,
+        mayFeedDecisionLogic:false,
+        sourceCanonicalFields:['decisionSnapshotAtTime.verdict','decisionSnapshotAtTime.plan'],
+        consumers:['legacy_diary_renderer','diary_export'],
+        reviewDate:'post-stabilisation-release'
+      };
+      return record;
+    }
+
     function createTradeRecord(values){
       return {
         id:`trade-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -164,6 +229,7 @@
 
     function normalizeTradeRecord(record){
       const normalized = createTradeRecord(record || {});
+      const decisionSnapshotAtTime = normalizeDecisionSnapshot(record && record.decisionSnapshotAtTime);
       normalized.ticker = normalizeTicker(normalized.ticker);
       normalized.date = String(normalized.date || new Date().toISOString().slice(0, 10)).slice(0, 10);
       normalized.sourceType = String(normalized.sourceType || 'manual').trim().toLowerCase() || 'manual';
@@ -227,6 +293,53 @@
       normalized.netPnL = Number.isFinite(metrics.netPnL) ? String(Number(metrics.netPnL.toFixed(2))) : '';
       normalized.resultR = Number.isFinite(metrics.resultR) ? String(Number(metrics.resultR.toFixed(2))) : '';
       normalized.heldDays = Number.isFinite(metrics.heldDays) ? String(metrics.heldDays) : '';
+      normalized.decisionSnapshotAtTime = decisionSnapshotAtTime;
+      normalized.executionRecord = {
+        actualEntry:normalized.actualEntry,
+        actualExit:normalized.actualExit,
+        actualStop:normalized.actualStop,
+        actualQuantity:normalized.actualQuantity,
+        grossPnL:normalized.grossPnL,
+        netPnL:normalized.netPnL,
+        resultR:normalized.resultR,
+        openedAt:normalized.openedAt,
+        closedAt:normalized.closedAt,
+        currency:decisionSnapshotAtTime && decisionSnapshotAtTime.plan && decisionSnapshotAtTime.plan.risk && decisionSnapshotAtTime.plan.risk.currency || ''
+      };
+      normalized.laterOutcome = {
+        outcome:normalized.outcome,
+        outcomeReason:normalized.outcomeReason,
+        heldDays:normalized.heldDays,
+        resultR:normalized.resultR,
+        reviewedAt:normalized.reviewedAt
+      };
+      normalized.userJournalNotes = {
+        notes:normalized.notes,
+        lesson:normalized.lesson,
+        setupTags:cloneArchiveValue(normalized.setupTags, []),
+        mistakeTags:cloneArchiveValue(normalized.mistakeTags, []),
+        lessonTags:cloneArchiveValue(normalized.lessonTags, [])
+      };
+      normalized.attachments = {
+        beforeImage:normalized.beforeImage,
+        afterImage:normalized.afterImage
+      };
+      normalized.retrospectiveAnalysis = Array.isArray(record && record.retrospectiveAnalysis)
+        ? cloneArchiveValue(record.retrospectiveAnalysis, []).map(item => ({...item, explicitlyRetrospective:true}))
+        : [];
+      normalized.diagnostics = record && record.diagnostics && typeof record.diagnostics === 'object'
+        ? cloneArchiveValue(record.diagnostics, {mayFeedDecisionLogic:false})
+        : {mayFeedDecisionLogic:false};
+      normalized.diagnostics.mayFeedDecisionLogic = false;
+      if(decisionSnapshotAtTime) applyDecisionSnapshotCompatibilityAliases(normalized);
+      else {
+        normalized.archiveMigration = normalized.archiveMigration || {
+          migrationVersion:'diary-archive-v1',
+          reason:'legacy_record_without_canonical_snapshot',
+          archivalOnly:true,
+          mayFeedDecisionLogic:false
+        };
+      }
       return normalized;
     }
 
@@ -372,6 +485,7 @@
       normalizeStoredTradeOutcome,
       deriveDiaryLifecycleState,
       normalizeTradeRecord,
+      normalizeDecisionSnapshot,
       createDiaryEntryFromManualInput,
       createDiaryEntryFromReviewContext,
       createDiaryEntryFromPaperTradePayload

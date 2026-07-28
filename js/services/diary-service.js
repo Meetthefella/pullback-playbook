@@ -41,6 +41,17 @@
       return listTradeRecords().map(item => item.trade);
     }
 
+    function isProtectedDecisionField(field){
+      return new Set([
+        'decisionSnapshotAtTime', 'verdict', 'chartVerdict', 'eligibility',
+        'actionability', 'semanticStates', 'semantics', 'blocker',
+        'canonicalNormVersion', 'canonicalResultVersion', 'evidenceId',
+        'publicationStatus', 'plan', 'plannedEntry', 'plannedStop',
+        'plannedFirstTarget', 'plannedRiskPerShare', 'plannedRewardPerShare',
+        'plannedRR', 'plannedPositionSize', 'plannedMaxLoss', 'plannedAt'
+      ]).has(String(field || ''));
+    }
+
     function saveTradeRecordForTicker(ticker, tradeRecord){
       const {normalizeTradeRecord} = schemaBindings();
       const symbol = normalizeTicker(ticker);
@@ -56,10 +67,15 @@
       const found = listTradeRecords().find(item => item.trade.id === recordId);
       if(!found) return null;
       const tradeRecord = normalizeTradeRecord(found.trade);
+      // The form still exposes legacy aliases for one release. They are
+      // projections of the archived publication and are never editable
+      // authority fields.
+      if(isProtectedDecisionField(field)) return tradeRecord;
+      const immutableDecisionSnapshot = tradeRecord.decisionSnapshotAtTime && typeof tradeRecord.decisionSnapshotAtTime === 'object'
+        ? JSON.parse(JSON.stringify(tradeRecord.decisionSnapshotAtTime)) : null;
       const currentRecord = upsertTickerRecord(found.record.ticker);
       currentRecord.diary.records = currentRecord.diary.records.filter(item => item.id !== recordId);
       if(field === 'ticker') tradeRecord.ticker = normalizeTicker(value);
-      else if(field === 'verdict') tradeRecord.verdict = normalizeImportedStatus(value);
       else if(['mistakeTags','lessonTags','setupTags'].includes(field)) tradeRecord[field] = parseTagList(value);
       else tradeRecord[field] = value;
       if(field === 'outcome' && isClosedOutcome(value) && !tradeRecord.closedAt) tradeRecord.closedAt = todayIsoDate();
@@ -69,6 +85,7 @@
       if(['mistakeTags','lessonTags','setupTags','lesson','notes','outcomeReason','executionQuality','setupQuality','beforeImage','afterImage','outcome'].includes(field)){
         tradeRecord.reviewedAt = todayIsoDate();
       }
+      if(immutableDecisionSnapshot) tradeRecord.decisionSnapshotAtTime = immutableDecisionSnapshot;
       mergeDiaryRecordIntoRecord(upsertTickerRecord(tradeRecord.ticker), tradeRecord);
       commitTickerState();
       return normalizeTradeRecord(tradeRecord);
@@ -116,13 +133,36 @@
       return normalizeTradeRecord(tradeRecord);
     }
 
+    function appendRetrospectiveAnalysis(recordId, analysis = {}){
+      const {normalizeTradeRecord} = schemaBindings();
+      const found = listTradeRecords().find(item => item.trade.id === recordId);
+      if(!found) return null;
+      const tradeRecord = normalizeTradeRecord(found.trade);
+      const originalSnapshot = tradeRecord.decisionSnapshotAtTime && typeof tradeRecord.decisionSnapshotAtTime === 'object'
+        ? JSON.parse(JSON.stringify(tradeRecord.decisionSnapshotAtTime)) : null;
+      tradeRecord.retrospectiveAnalysis = Array.isArray(tradeRecord.retrospectiveAnalysis) ? tradeRecord.retrospectiveAnalysis : [];
+      tradeRecord.retrospectiveAnalysis.push({
+        ...analysis,
+        retrospective:true,
+        analysedAt:new Date().toISOString(),
+        originalEvidenceId:String(originalSnapshot && originalSnapshot.evidenceId || ''),
+        originalCanonicalResultVersion:String(originalSnapshot && originalSnapshot.canonicalResultVersion || '')
+      });
+      tradeRecord.retrospectiveAnalysis = tradeRecord.retrospectiveAnalysis.slice(-24);
+      if(originalSnapshot) tradeRecord.decisionSnapshotAtTime = originalSnapshot;
+      mergeDiaryRecordIntoRecord(upsertTickerRecord(found.record.ticker), tradeRecord);
+      commitTickerState();
+      return normalizeTradeRecord(tradeRecord);
+    }
+
     return {
       listTradeRecords,
       listTrades,
       saveTradeRecordForTicker,
       updateTradeField,
       deleteTradeRecordById,
-      cancelPaperTradeRecordById
+      cancelPaperTradeRecordById,
+      appendRetrospectiveAnalysis
     };
   }
 

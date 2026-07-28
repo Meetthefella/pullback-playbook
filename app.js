@@ -18545,11 +18545,55 @@ function getTradeRecord(recordId){
   return found ? found.trade : null;
 }
 
+function buildDiaryDecisionSnapshotFromPublication(publication){
+  const safePublication = publication && typeof publication === 'object' ? publication : {};
+  const failed = safePublication.publicationStatus === 'validation_failed';
+  const plan = failed ? null : safePublication.canonicalPlan || null;
+  return {
+    publicationStatus:failed ? 'validation_failed' : 'valid',
+    canonicalNormVersion:String(safePublication.canonicalNormVersion || ''),
+    canonicalResultVersion:String(safePublication.canonicalResultVersion || ''),
+    evidenceId:String(safePublication.evidenceId || ''),
+    timestamp:new Date().toISOString(),
+    verdict:failed ? String(safePublication.safeFallback && safePublication.safeFallback.verdict || 'watch') : String(safePublication.canonicalVerdict || 'watch'),
+    eligibility:{entry:failed ? null : safePublication.entryEligibility || null, nearEntry:failed ? null : safePublication.nearEntryEligibility || null},
+    actionable:failed ? false : safePublication.actionable === true,
+    semantics:failed ? null : {structure:safePublication.structureState, support:safePublication.supportState, pullback:safePublication.pullbackState, buyerResponse:safePublication.buyerResponseState, buyerControl:safePublication.buyerControlState, followThrough:safePublication.followThroughState, market:safePublication.marketState, volume:safePublication.volumeState},
+    blocker:{code:failed ? 'canonical_norm_validation_failed' : String(safePublication.decisiveBlockerCode || ''), category:failed ? 'validation' : String(safePublication.decisiveBlockerCategory || '')},
+    plan,
+    validation:failed ? {status:'validation_failed', normVersion:String(safePublication.validation && safePublication.validation.normVersion || safePublication.canonicalNormVersion || '')} : {status:'valid', normVersion:String(safePublication.canonicalNormVersion || '')}
+  };
+}
+
 function getCanonicalTradeSnapshot(cardOrTicker){
   const ticker = typeof cardOrTicker === 'string'
     ? normalizeTicker(cardOrTicker)
     : normalizeTicker(cardOrTicker && cardOrTicker.ticker);
   const record = getTickerRecord(ticker);
+  if(record){
+    const publication = resolveSimplifiedStateForSurface(record, 'diary', {log:false, source:'diary_snapshot', reason:'immutable_diary_snapshot'});
+    const failed = publication.publicationStatus === 'validation_failed';
+    const plan = failed ? null : publication.canonicalPlan;
+    const levels = plan && plan.levels || {};
+    const risk = plan && plan.risk || {};
+    const verdict = failed ? 'Watch' : globalVerdictLabel(publication.canonicalVerdict || 'watch');
+    const decisionSnapshotAtTime = buildDiaryDecisionSnapshotFromPublication(publication);
+    const entry = failed || !levels.entry || levels.entry.value == null ? '' : String(levels.entry.value);
+    const stop = failed || !levels.stop || levels.stop.value == null ? '' : String(levels.stop.value);
+    const firstTarget = failed || !levels.firstTarget || levels.firstTarget.value == null ? '' : String(levels.firstTarget.value);
+    return {
+      ticker:record.ticker, chartVerdict:verdict, verdict, entry, stop, firstTarget, plannedEntry:entry, plannedStop:stop, plannedFirstTarget:firstTarget, plannedRR:failed ? '' : String(plan && plan.rewardRisk && plan.rewardRisk.resolvedRr || ''), plannedPositionSize:failed ? '' : String(risk.positionSize || ''), plannedMaxLoss:failed ? '' : String(risk.maximumLoss || ''),
+      decisionSnapshotAtTime,
+      executionRecord:{}, laterOutcome:{}, userJournalNotes:String(record.review && record.review.notes || ''), attachments:{}, diagnostics:{mayFeedDecisionLogic:false}
+    };
+  }
+  // A Diary entry without a published ticker snapshot is not archived. The
+  // historical compatibility code below is unreachable and retained only
+  // until the one-release adapter cleanup.
+  return null;
+  // Legacy card reconstruction remains only as a compatibility reference.
+  // Diary creation callers pass a ticker and are returned above from the
+  // canonical-publication path; they can never execute this branch.
   const card = typeof cardOrTicker === 'string' ? null : cardOrTicker;
   if(record){
     const refreshed = refreshTrackedTickerState(ticker, {
@@ -46119,6 +46163,7 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
   return {
     ticker:item.ticker,
     record:item,
+    canonicalPublication:publication,
     publicationStatus:failed ? 'validation_failed' : String(publication.publicationStatus || 'valid'),
     canonicalNormVersion:String(publication.canonicalNormVersion || ''),
     canonicalResultVersion:String(publication.canonicalResultVersion || ''),
@@ -46811,6 +46856,7 @@ async function submitPaperTradeFromReview(ticker){
   });
   const entry = createDiaryEntryFromPaperTradePayload({
     ticker:context.ticker,
+    decisionSnapshotAtTime:buildDiaryDecisionSnapshotFromPublication(context.canonicalPublication),
     sourceContext:frozenSnapshot.sourceContext || 'trade_gateway_paper_trade',
     status:'submitted',
     sourceRef:String(result.orderId || result.clientOrderId || ''),
