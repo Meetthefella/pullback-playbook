@@ -15,6 +15,8 @@
     const recordIdentity = text(options.recordIdentity || envelope.recordIdentity || ticker);
     const refreshCycleId = text(options.refreshCycleId || options.cycleId || envelope.refreshCycleId);
     const validationStatus = text(envelope.validationStatus || envelope.validation && envelope.validation.status || envelope.publicationStatus || 'validation_failed');
+    const riskSettingsId = text(options.riskSettingsId || envelope.riskSettingsId);
+    const riskSettingsVersion = text(options.riskSettingsVersion || envelope.riskSettingsVersion);
     // ResolverCore can create a result-level envelope before the app knows
     // the record and refresh-cycle identity. At the publication boundary an
     // explicit identity must mint a new ID rather than retaining that
@@ -22,8 +24,8 @@
     const hasAuthoritativeIdentity = ['ticker','recordIdentity','refreshCycleId','cycleId','evidenceId','canonicalResultVersion']
       .some(field => text(options[field]));
     const publicationId = text(options.publicationId || (hasAuthoritativeIdentity ? '' : envelope.publicationId))
-      || [ticker || 'unknown', recordIdentity || 'unknown', refreshCycleId || 'unpublished', evidenceId || 'unavailable', canonicalResultVersion].join(':');
-    return {publicationId, evidenceId, canonicalResultVersion, recordIdentity, refreshCycleId, validationStatus, ticker};
+      || [ticker || 'unknown', recordIdentity || 'unknown', refreshCycleId || 'unpublished', evidenceId || 'unavailable', canonicalResultVersion, riskSettingsId || 'risk-settings-unavailable'].join(':');
+    return {publicationId, evidenceId, canonicalResultVersion, recordIdentity, refreshCycleId, validationStatus, ticker, riskSettingsId, riskSettingsVersion};
   }
 
   function identifyPublication(publication, options = {}){
@@ -144,7 +146,13 @@
       state, priceability:{status:priceability, reasonCode:String(candidate.unpriceableBlockReason || ''), source:'resolver-core', provisional:state === 'provisional'},
       levels:{entry:{value:entry,valueState:valueState(entry),source:'resolver-core',currency:entryCurrency,evidenceIds:[evidence.snapshotId]},stop:{value:stop,valueState:valueState(stop),source:'resolver-core',currency:stopCurrency,evidenceIds:[evidence.snapshotId]},firstTarget:{value:firstTarget,valueState:valueState(firstTarget),source:'resolver-core',currency:targetCurrency,evidenceIds:[evidence.snapshotId]}},
       rewardRisk:{resolvedRr:calculatedRr,valueState:valueState(calculatedRr),gateResolvedRr:gateRr,gateValueState:valueState(gateRr),riskPerShare,valueStateRiskPerShare:valueState(riskPerShare),threshold:rrThreshold,passes:gatePasses,source:'resolver-core',gateSource:'resolver-core.plan_gate',reasonCode:gatePasses === false ? 'canonical_gate_rr_failed' : ''},
-      risk:{riskPerShare,maximumLoss,positionSize,source:'resolver-core',valueState:{riskPerShare:valueState(riskPerShare),maximumLoss:valueState(maximumLoss),positionSize:valueState(positionSize)}},
+      risk:{
+        riskPerShare,maximumLoss,positionSize,source:'resolver-core',
+        settings:candidate.executionRiskSettings && typeof candidate.executionRiskSettings === 'object' ? clone(candidate.executionRiskSettings) : null,
+        riskSettingsId:String(candidate.riskSettingsId || ''),
+        riskSettingsVersion:String(candidate.riskSettingsVersion || ''),
+        valueState:{riskPerShare:valueState(riskPerShare),maximumLoss:valueState(maximumLoss),positionSize:valueState(positionSize)}
+      },
       visibility:{mayShowPlan:mayShow,mayShowEntry:mayShow,mayShowStop:mayShow,mayShowTarget:mayShow,mayShowRr:mayShow && calculatedRr !== null,reasonCode:mayShow ? '' : 'canonical_plan_not_visible'},
       blocker:{code:String(candidate.semantic_blocker_code || ''),category:String(candidate.primary_blocker_source || ''),fields:[]},
       provenance:{planId:`${evidence.snapshotId}:plan`,evidenceId:evidence.snapshotId,resolverVersion:RESULT_VERSION,sourceCandidates:[],selectedAuthority:'resolver-core'}

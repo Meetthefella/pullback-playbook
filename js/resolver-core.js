@@ -2162,6 +2162,15 @@
 
   function resolveGlobalVerdict(record, deps = {}){
     const item = record && typeof record === 'object' ? record : {};
+    const executionRiskSettings = deps.executionRiskSettings && typeof deps.executionRiskSettings === 'object'
+      ? deps.executionRiskSettings
+      : {
+        version:'execution-risk-settings-v1',
+        maximumLoss:numericValueOrNull(deps.state && (deps.state.userRiskPerTrade ?? deps.state.maxRisk)),
+        accountSize:numericValueOrNull(deps.state && deps.state.accountSize),
+        riskPercent:numericValueOrNull(deps.state && deps.state.riskPercent),
+        wholeSharesOnly:!(deps.state && deps.state.wholeSharesOnly === false)
+      };
     const normalisedEvidence = global.CanonicalResolverInput
       && typeof global.CanonicalResolverInput.normaliseDecisionEvidence === 'function'
       ? global.CanonicalResolverInput.normaliseDecisionEvidence(item, {surface:'resolver-core'})
@@ -2237,9 +2246,7 @@
     const rawPlanEntry = numericValueOrNull(rawDisplayedPlan && rawDisplayedPlan.entry);
     const rawPlanStop = numericValueOrNull(rawDisplayedPlan && rawDisplayedPlan.stop);
     const rawPlanTarget = numericValueOrNull(rawDisplayedPlan && rawDisplayedPlan.target);
-    const configuredMaximumLoss = numericValueOrNull(
-      deps.state && (deps.state.userRiskPerTrade ?? deps.state.maxRisk)
-    );
+    const configuredMaximumLoss = numericValueOrNull(executionRiskSettings.maximumLoss);
     const resolvedPlanRiskPerShare = Number.isFinite(planEntry) && Number.isFinite(planStop) && planEntry > planStop
       ? planEntry - planStop
       : null;
@@ -2976,6 +2983,9 @@
       resolvedPlanRiskPerShare,
       resolvedPlanMaximumLoss:configuredMaximumLoss,
       resolvedPlanPositionSize,
+      executionRiskSettings,
+      riskSettingsId:String(executionRiskSettings.id || ''),
+      riskSettingsVersion:String(executionRiskSettings.version || ''),
       resolvedPlanCurrentPrice:currentPrice,
       planCurrency:String((item.marketData && item.marketData.currency) || (item.plan && item.plan.currency) || '').trim().toUpperCase(),
       planUnits:{

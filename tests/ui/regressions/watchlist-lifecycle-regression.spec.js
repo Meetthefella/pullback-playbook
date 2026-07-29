@@ -1371,6 +1371,100 @@ test('Submitted paper trade does not replace in-progress invalid planner edits',
   expect(editedPlannerState.rr, 'An unsaved draft must not mutate the published plan.').toContain('3.00R');
 });
 
+test('[genuine regression] risk-setting changes synchronously block stale canonical Paper Trade sizing until republication', async ({page}) => {
+  await bootLifecycleApp(page);
+  await stubPaperTradeGateway(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  await openReviewDirect(page, JOURNEY_TICKER);
+  const result = await page.evaluate(async ticker => {
+    const record = getTickerRecord(ticker);
+    const before = currentPaperTradeContextForTicker(ticker);
+    const preview = buildPaperTradeConfirmedSnapshot(before);
+    setPaperTradeUiState(ticker, {state:'preview_open', previewOpen:true, snapshot:preview, message:''});
+
+    // This queues normal republication, but the authority guard must take
+    // effect before that queued work can run.
+    applyUserRiskPerTrade(20, {source:'risk_race_regression'});
+    const lowered = currentPaperTradeContextForTicker(ticker);
+    await submitPaperTradeFromReview(ticker);
+    const submitState = paperTradeUiStateForTicker(ticker);
+    const diaryAfterBlockedSubmit = (state.tradeDiary || []).filter(entry => String(entry && entry.ticker || '').toUpperCase() === ticker).length;
+
+    // An authoritative refresh is the only route back to execution authority.
+    const republished = publishCanonicalPublicationForRecord(record);
+    const after = currentPaperTradeContextForTicker(ticker);
+
+    // A higher risk limit is still a settings mismatch: a smaller old size is
+    // not silently accepted as newly authoritative.
+    applyUserRiskPerTrade(40, {source:'risk_race_increase'});
+    const increased = currentPaperTradeContextForTicker(ticker);
+    state.accountSize = 8000;
+    synchronouslyInvalidateExecutionSizing('risk_race_account');
+    const accountChanged = currentPaperTradeContextForTicker(ticker);
+    state.wholeSharesOnly = false;
+    synchronouslyInvalidateExecutionSizing('risk_race_whole_shares');
+    const wholeSharesChanged = currentPaperTradeContextForTicker(ticker);
+    return {
+      before:{publicationId:before.publicationId, riskId:before.publishedRiskSettingsId, maxLoss:before.displayedPlan.riskFit.max_loss, size:before.displayedPlan.riskFit.position_size, eligible:before.eligibility.eligible},
+      lowered:{publicationId:lowered.publicationId, riskId:lowered.publishedRiskSettingsId, currentRiskId:lowered.currentRiskSettingsId, executionSizingValid:lowered.executionSizingValid, eligible:lowered.eligibility.eligible, maxLoss:lowered.displayedPlan.riskFit.max_loss, size:lowered.displayedPlan.riskFit.position_size, reason:lowered.sizingUnavailableReason},
+      submitState, diaryAfterBlockedSubmit,
+      republished:{publicationId:republished.publicationId, riskId:republished.publishedRiskSettingsId, maxLoss:after.displayedPlan.riskFit.max_loss, size:after.displayedPlan.riskFit.position_size, eligible:after.eligibility.eligible, executionSizingValid:after.executionSizingValid},
+      increased:{executionSizingValid:increased.executionSizingValid, eligible:increased.eligibility.eligible},
+      accountChanged:{executionSizingValid:accountChanged.executionSizingValid, eligible:accountChanged.eligibility.eligible},
+      wholeSharesChanged:{executionSizingValid:wholeSharesChanged.executionSizingValid, eligible:wholeSharesChanged.eligibility.eligible}
+    };
+  }, JOURNEY_TICKER);
+  expect(result.before).toMatchObject({eligible:true, maxLoss:40, size:13});
+  expect(result.lowered).toMatchObject({executionSizingValid:false, eligible:false, maxLoss:null, size:null});
+  expect(result.lowered.currentRiskId).not.toBe(result.lowered.riskId);
+  expect(result.lowered.reason).toContain('Risk settings changed. Refresh the setup');
+  expect(result.submitState.message).toContain('Risk settings changed. Refresh the setup');
+  expect(result.diaryAfterBlockedSubmit).toBe(0);
+  expect(result.republished).toMatchObject({maxLoss:20, size:6, eligible:true, executionSizingValid:true});
+  expect(result.republished.publicationId).not.toBe(result.before.publicationId);
+  expect(result.republished.riskId).not.toBe(result.before.riskId);
+  expect(result.increased).toMatchObject({executionSizingValid:false, eligible:false});
+  expect(result.accountChanged).toMatchObject({executionSizingValid:false, eligible:false});
+  expect(result.wholeSharesChanged).toMatchObject({executionSizingValid:false, eligible:false});
+});
+
+test('[genuine regression] reload keeps a valid decision readable but blocks persisted sizing with a mismatched risk identity', async ({page}) => {
+  await bootLifecycleApp(page);
+  await seedLifecycleScenario(page, JOURNEY_TICKER);
+  const beforeReload = await page.evaluate(ticker => {
+    const record = getTickerRecord(ticker);
+    const before = currentPaperTradeContextForTicker(ticker);
+    applyUserRiskPerTrade(20, {source:'reload_risk_identity_mismatch'});
+    saveState();
+    const changed = currentPaperTradeContextForTicker(ticker);
+    return {
+      publicationId:before.publicationId,
+      beforeRiskId:before.publishedRiskSettingsId,
+      changed:{status:resolveSimplifiedStateForSurface(record, 'review', {log:false}).publicationStatus, executionSizingValid:changed.executionSizingValid, eligible:changed.eligibility.eligible}
+    };
+  }, JOURNEY_TICKER);
+  expect(beforeReload.changed).toEqual({status:'valid', executionSizingValid:false, eligible:false});
+  await reloadLifecycleApp(page);
+  const afterReload = await page.evaluate(ticker => {
+    const record = getTickerRecord(ticker);
+    const stateForReview = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+    const context = currentPaperTradeContextForTicker(ticker);
+    return {
+      publicationId:stateForReview.publicationId,
+      decisionStatus:stateForReview.publicationStatus,
+      executionSizingValid:context.executionSizingValid,
+      eligible:context.eligibility.eligible,
+      reason:context.sizingUnavailableReason,
+      publishedRiskId:context.publishedRiskSettingsId,
+      currentRiskId:context.currentRiskSettingsId
+    };
+  }, JOURNEY_TICKER);
+  expect(afterReload.publicationId).toBe(beforeReload.publicationId);
+  expect(afterReload).toMatchObject({decisionStatus:'valid', executionSizingValid:false, eligible:false});
+  expect(afterReload.currentRiskId).not.toBe(afterReload.publishedRiskId);
+  expect(afterReload.reason).toContain('Risk settings changed. Refresh the setup');
+});
+
 test('Post-scan factual edit becomes unavailable until the next authoritative publication', async ({page}) => {
   await bootLifecycleApp(page);
   await stubPaperTradeGateway(page);

@@ -7,8 +7,8 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const reviewSessionKey = 'pullbackPlaybookReviewSessionV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const CANONICAL_PUBLICATION_PERSISTENCE_SCHEMA_VERSION = 'canonical-publication-envelope-v1';
-const APP_VERSION = 'v4.5.10';
+const CANONICAL_PUBLICATION_PERSISTENCE_SCHEMA_VERSION = 'canonical-publication-envelope-v2';
+const APP_VERSION = 'v4.5.11';
 const APP_BUILD_TIMESTAMP = '2026-07-23T10:58:00Z';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
 const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
@@ -16,7 +16,7 @@ const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
 const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.5.10',
+    version:'4.5.11',
     buildTimestamp:APP_BUILD_TIMESTAMP,
     assetId:`pullback-playbook-${APP_VERSION}-${APP_BUILD_TIMESTAMP}`,
     chartGuruDeterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
@@ -272,6 +272,82 @@ function riskSettingsFingerprintFromState(){
     maxLossOverride:normalizeRiskCalcNumber(state.maxLossOverride, 4),
     wholeSharesOnly:state.wholeSharesOnly !== false ? 1 : 0
   });
+}
+
+const EXECUTION_RISK_SETTINGS_VERSION = 'execution-risk-settings-v1';
+
+function executionRiskSettingsId(settings = {}){
+  const source = settings && typeof settings === 'object' ? settings : {};
+  return [
+    EXECUTION_RISK_SETTINGS_VERSION,
+    normalizeRiskCalcNumber(source.accountSize, 4),
+    normalizeRiskCalcNumber(source.riskPercent, 4),
+    normalizeRiskCalcNumber(source.maximumLoss, 4),
+    normalizeRiskCalcNumber(source.maxLossOverride, 4),
+    source.wholeSharesOnly === false ? 0 : 1,
+    String(source.currency || 'GBP').trim().toUpperCase(),
+    String(source.positionRounding || 'whole_shares_floor').trim().toLowerCase()
+  ].join('|');
+}
+
+function currentExecutionRiskSettings(){
+  const settings = {
+    version:EXECUTION_RISK_SETTINGS_VERSION,
+    accountSize:normalizeRiskCalcNumber(state.accountSize, 4),
+    riskPercent:normalizeRiskCalcNumber(normalizeRiskPercentInput(state.riskPercent, 1), 4),
+    maximumLoss:normalizeRiskCalcNumber(currentMaxLoss(), 4),
+    maxLossOverride:normalizeRiskCalcNumber(state.maxLossOverride, 4),
+    wholeSharesOnly:state.wholeSharesOnly !== false,
+    currency:'GBP',
+    positionRounding:'whole_shares_floor'
+  };
+  return Object.freeze({...settings, id:executionRiskSettingsId(settings)});
+}
+
+function executionSizingStateForPublication(publication){
+  const envelope = publication && typeof publication === 'object' ? publication : {};
+  const canonicalRisk = envelope.canonicalResult && envelope.canonicalResult.plan && envelope.canonicalResult.plan.risk;
+  const published = envelope.executionRiskSettings && typeof envelope.executionRiskSettings === 'object'
+    ? envelope.executionRiskSettings
+    : (canonicalRisk && canonicalRisk.settings && typeof canonicalRisk.settings === 'object' ? canonicalRisk.settings : null);
+  const current = currentExecutionRiskSettings();
+  const publishedId = String(envelope.riskSettingsId || canonicalRisk && canonicalRisk.riskSettingsId || published && published.id || '').trim();
+  const currentId = String(current.id || '').trim();
+  const riskSettingsMatch = !!published && !!publishedId && publishedId === currentId;
+  const publishedMaximumLoss = numericOrNull(canonicalRisk && canonicalRisk.maximumLoss);
+  const publishedPositionSize = numericOrNull(canonicalRisk && canonicalRisk.positionSize);
+  const currentMaximumLoss = numericOrNull(current.maximumLoss);
+  const maximumLossWithinCurrentLimit = Number.isFinite(publishedMaximumLoss)
+    && Number.isFinite(currentMaximumLoss)
+    && publishedMaximumLoss <= currentMaximumLoss;
+  const positionSizeValid = Number.isFinite(publishedPositionSize) && publishedPositionSize >= 1;
+  const executionSizingValid = riskSettingsMatch && maximumLossWithinCurrentLimit && positionSizeValid;
+  const unavailableReason = !published
+    ? 'Published setup has no execution risk identity. Refresh the setup before paper trading.'
+    : (!riskSettingsMatch
+      ? 'Risk settings changed. Refresh the setup before paper trading.'
+      : (!maximumLossWithinCurrentLimit
+        ? 'Published maximum loss exceeds the current risk limit. Refresh the setup before paper trading.'
+        : (!positionSizeValid ? 'Published position size is unavailable. Refresh the setup before paper trading.' : '')));
+  return {
+    currentRiskSettingsId:currentId,
+    publishedRiskSettingsId:publishedId,
+    riskSettingsMatch,
+    executionSizingValid,
+    sizingUnavailableReason:unavailableReason,
+    publishedMaximumLoss,
+    currentMaximumLoss,
+    publishedPositionSize,
+    riskChangedAt:String(uiState.executionRiskChangedAt || ''),
+    republicationQueued:!!(riskSettingsRecalcTimer || riskSettingsRecalcRunning || riskSettingsRecalcQueued || (uiState.riskRecalcStatusRuntime && uiState.riskRecalcStatusRuntime.pending === true))
+  };
+}
+
+function synchronouslyInvalidateExecutionSizing(source = 'risk_settings_change'){
+  uiState.executionRiskChangedAt = new Date().toISOString();
+  uiState.executionRiskChangeSource = String(source || 'risk_settings_change');
+  const activeTicker = typeof activeReviewTicker === 'function' ? activeReviewTicker() : '';
+  if(activeTicker && typeof renderReviewWorkspace === 'function') renderReviewWorkspace({source:'execution_risk_changed'});
 }
 
 function riskCalcSnapshotForRecord(record){
@@ -3406,7 +3482,9 @@ function buildPersistableTickerRecordsMap(recordsMap = {}, options = {}){
             canonicalPublication:publication,
             canonicalResolverProjection:projection,
             canonicalPublicationPersistence:{
-              schemaVersion:'canonical-publication-envelope-v1',
+              // Kept literal because the persistence-only extraction harness
+              // intentionally loads this serializer without app constants.
+              schemaVersion:'canonical-publication-envelope-v2',
               publicationPersisted:!!publication,
               persistedPublicationId:String(publication && publication.publicationId || ''),
               persistedEvidenceId:String(publication && publication.evidenceId || ''),
@@ -13536,6 +13614,10 @@ function handleRiskSettingsChange(source = 'risk_settings_change'){
     });
     return;
   }
+  // This happens before persistence, debounce, or any recalculation. The
+  // action boundary rechecks the same identity, so an old immutable size can
+  // never be submitted during the queued refresh interval.
+  synchronouslyInvalidateExecutionSizing(source);
   markHiddenTabsDirtyForRiskRefresh(source);
   scheduleRiskContextRefresh({
     source,
@@ -13561,8 +13643,10 @@ function applyUserRiskPerTrade(value, options = {}){
   if($('riskPercent')) $('riskPercent').value = String(state.riskPercent || '');
   renderStats();
   renderRiskQuickPanel();
+  const changed = Math.abs(previous - nextRisk) >= 0.01 || options.force === true;
+  if(!changed) return;
+  synchronouslyInvalidateExecutionSizing(String(options.source || 'risk_quick'));
   if(options.skipRefresh === true) return;
-  if(Math.abs(previous - nextRisk) < 0.01 && options.force !== true) return;
   persistRiskSettingsQuick();
   markHiddenTabsDirtyForRiskRefresh(String(options.source || 'risk_quick'));
   queueRiskContextRefresh(String(options.source || 'risk_quick'));
@@ -23214,8 +23298,19 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
       baseScore:rawSetupScoreForRecord(item),
       log:false
     });
+    const executionSizing = publication
+      ? executionSizingStateForPublication(publication)
+      : {
+        currentRiskSettingsId:String(currentExecutionRiskSettings().id || ''),
+        publishedRiskSettingsId:'', riskSettingsMatch:false, executionSizingValid:false,
+        sizingUnavailableReason:'No valid canonical publication is available yet.',
+        riskChangedAt:String(uiState.executionRiskChangedAt || ''), republicationQueued:false
+      };
     return {
       ...mapped,
+      canonicalPublication:publication || null,
+      decisionPublicationValid:mapped.publicationStatus === 'valid',
+      ...executionSizing,
       presentation:{
         surface:String(surface || 'review').trim().toLowerCase() || 'review',
         deviationCategory:'A',
@@ -46279,7 +46374,9 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
   const levelsPresent = [entry, stop, target].every(value => Number.isFinite(Number(value)));
   const entryQualified = publication.entryEligibility && publication.entryEligibility.qualified === true;
   const validPlan = String(publication.planStatus || publication.planState || '').trim().toLowerCase() === 'valid';
+  const executionSizing = executionSizingStateForPublication(publication.canonicalPublication || publication);
   const eligible = !failed
+    && executionSizing.executionSizingValid === true
     && publication.actionable === true
     && entryQualified
     && validPlan
@@ -46289,9 +46386,10 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     && Number.isFinite(Number(risk.maximumLoss)) && Number(risk.maximumLoss) > 0;
   const reason = failed
     ? 'Canonical decision validation failed.'
-    : (!unitsConsistent ? 'Canonical plan currency/unit mismatch.'
+    : (!executionSizing.executionSizingValid ? executionSizing.sizingUnavailableReason
+      : (!unitsConsistent ? 'Canonical plan currency/unit mismatch.'
       : (!levelsPresent ? 'Canonical plan is missing required levels.'
-        : (String(publication.decisiveBlocker || publication.mainBlocker || 'Setup is not eligible for paper trading.'))));
+        : (String(publication.decisiveBlocker || publication.mainBlocker || 'Setup is not eligible for paper trading.')))));
   const displayedPlan = {
     status:failed ? 'unavailable' : String(publication.planStatus || publication.planState || 'unknown'),
     entry:failed ? null : entry,
@@ -46299,8 +46397,8 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     target:failed ? null : target,
     firstTarget:failed ? null : target,
     tradeability:eligible ? 'tradable' : 'blocked',
-    rewardRisk:{rrRatio:failed ? null : rr, riskPerShare:failed ? null : risk.riskPerShare},
-    riskFit:{position_size:failed ? null : risk.positionSize, max_loss:failed ? null : risk.maximumLoss, risk_status:eligible ? 'fits_risk' : 'blocked'},
+    rewardRisk:{rrRatio:failed || !executionSizing.executionSizingValid ? null : rr, riskPerShare:failed || !executionSizing.executionSizingValid ? null : risk.riskPerShare},
+    riskFit:{position_size:failed || !executionSizing.executionSizingValid ? null : risk.positionSize, max_loss:failed || !executionSizing.executionSizingValid ? null : risk.maximumLoss, risk_status:eligible ? 'fits_risk' : 'blocked'},
     capitalFit:{capital_fit:eligible ? 'fits_capital' : 'unknown'},
     quoteCurrency:currencies[0] || '',
     provenance:plan && plan.provenance || null
@@ -46319,6 +46417,7 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
   };
   const blockingGates = [
     publication.publicationStatus === 'valid',
+    executionSizing.executionSizingValid === true,
     publication.actionable === true,
     entryQualified,
     validPlan,
@@ -46327,7 +46426,7 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     Number.isFinite(Number(risk.riskPerShare)) && Number(risk.riskPerShare) > 0,
     Number.isFinite(Number(risk.positionSize)) && Number(risk.positionSize) >= 1,
     Number.isFinite(Number(risk.maximumLoss)) && Number(risk.maximumLoss) > 0
-  ].map((passed, index) => ({key:['publication_valid','actionable','entry_qualified','plan_valid','levels_present','units_consistent','risk_per_share','position_size','maximum_loss'][index], passed}));
+  ].map((passed, index) => ({key:['publication_valid','execution_sizing_valid','actionable','entry_qualified','plan_valid','levels_present','units_consistent','risk_per_share','position_size','maximum_loss'][index], passed}));
   const actionabilityState = eligible ? 'ready_to_submit' : (failed ? 'validation_failed' : (verdict === 'entry' ? 'entry_blocked' : 'waiting_for_confirmation'));
   const legacyProjection = item.review && item.review.savedProjectionSnapshot && typeof item.review.savedProjectionSnapshot === 'object'
     ? item.review.savedProjectionSnapshot : null;
@@ -46350,6 +46449,8 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     record:item,
     canonicalPublication:publication,
     ...publicationIdentity,
+    ...executionSizing,
+    submissionBlockedReason:eligible ? '' : reason,
     publicationStatus:failed ? 'validation_failed' : String(publication.publicationStatus || 'valid'),
     canonicalNormVersion:String(publication.canonicalNormVersion || ''),
     canonicalResultVersion:String(publication.canonicalResultVersion || ''),
@@ -46359,7 +46460,7 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     actionable:failed ? false : publication.actionable === true,
     resolvedStatus:failed ? 'unavailable' : verdict,
     entryEligibility:failed ? null : publication.entryEligibility,
-    paperTradeEligibility:eligibility,
+    paperTradeEligibility:{...eligibility, executionSizingValid:executionSizing.executionSizingValid, sizingUnavailableReason:executionSizing.sizingUnavailableReason},
     planVisibility:failed ? false : publication.planVisible === true,
     triggerSatisfied:failed ? false : publication.entryGatePass === true,
     planValid:validPlan,
@@ -46375,7 +46476,7 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     canonicalPaperTradeVerdict:verdict,
     diagnostics,
     planVerdictContract:{canonicalVerdict:verdict, evidenceId:String(publication.evidenceId || ''), canonicalResultVersion:String(publication.canonicalResultVersion || ''), compatibilityOnly:true},
-    debugSnapshot:{publicationStatus:failed ? 'validation_failed' : 'valid', canonicalVerdict:verdict, finalVerdict:globalVerdictLabel(verdict), authoritativeReviewVerdict:verdict, canonicalPaperTradeVerdict:verdict, paperTradeSurfaceVerdict:globalVerdictLabel(verdict), paperTradeEligibilityState:actionabilityState, planStatus:displayedPlan.status, entry:displayedPlan.entry, stop:displayedPlan.stop, target:displayedPlan.target, positionSize:displayedPlan.riskFit.position_size, maxLoss:displayedPlan.riskFit.max_loss, rrRatio:displayedPlan.rewardRisk.rrRatio, evidenceId:String(publication.evidenceId || ''), canonicalResultVersion:String(publication.canonicalResultVersion || ''), unitsConsistent, planAuthority:{verdict, actionable:eligible, source:'canonical_publication'}, diagnostics, invalidCandidateDiagnosticOnly:failed}
+    debugSnapshot:{publicationStatus:failed ? 'validation_failed' : 'valid', canonicalVerdict:verdict, finalVerdict:globalVerdictLabel(verdict), authoritativeReviewVerdict:verdict, canonicalPaperTradeVerdict:verdict, paperTradeSurfaceVerdict:globalVerdictLabel(verdict), paperTradeEligibilityState:actionabilityState, planStatus:displayedPlan.status, entry:displayedPlan.entry, stop:displayedPlan.stop, target:displayedPlan.target, positionSize:displayedPlan.riskFit.position_size, maxLoss:displayedPlan.riskFit.max_loss, rrRatio:displayedPlan.rewardRisk.rrRatio, evidenceId:String(publication.evidenceId || ''), canonicalResultVersion:String(publication.canonicalResultVersion || ''), unitsConsistent, ...executionSizing, submissionBlockedReason:eligible ? '' : reason, planAuthority:{verdict, actionable:eligible, source:'canonical_publication'}, diagnostics, invalidCandidateDiagnosticOnly:failed}
   };
 }
 
@@ -46811,6 +46912,10 @@ function buildPaperTradeConfirmedSnapshot(context = {}){
     publicationStatus:String(context.publicationStatus || 'valid'),
     canonicalResultVersion:String(context.canonicalResultVersion || ''),
     evidenceId:String(context.evidenceId || ''),
+    publicationId:String(context.publicationId || ''),
+    refreshCycleId:String(context.refreshCycleId || ''),
+    recordIdentity:String(context.recordIdentity || ''),
+    riskSettingsId:String(context.publishedRiskSettingsId || ''),
     canonicalPlanProvenance:context.displayedPlan && context.displayedPlan.provenance || null,
     marketStatus:String(previewModel.marketStatus || ''),
     sourceContext:context.eligibility && context.eligibility.debugForced === true ? 'debug_paper_trade' : 'trading212_paper_trade',
@@ -46938,6 +47043,11 @@ async function submitPaperTradeFromReview(ticker){
     && frozenSnapshot.publicationStatus === 'valid'
     && String(frozenSnapshot.canonicalResultVersion || '') === String(context.canonicalResultVersion || '')
     && String(frozenSnapshot.evidenceId || '') === String(context.evidenceId || '')
+    && String(frozenSnapshot.publicationId || '') === String(context.publicationId || '')
+    && String(frozenSnapshot.refreshCycleId || '') === String(context.refreshCycleId || '')
+    && String(frozenSnapshot.recordIdentity || '') === String(context.recordIdentity || '')
+    && String(frozenSnapshot.riskSettingsId || '') === String(context.publishedRiskSettingsId || '')
+    && context.executionSizingValid === true
   );
   if(!context.eligibility.eligible || !context.paperTradeEnabled || !snapshotMatchesPublication){
     const reason = context.eligibility.reasons[0] || 'Setup is not eligible for paper trading.';
@@ -53302,7 +53412,7 @@ on('advancedUniverseMode', 'change', event => {
   applyAdvancedUniverseModeSelection(event && event.target ? event.target.value : '');
 });
 
-['accountSize','riskPercent','maxLossOverride'].forEach(id => on(id, 'change', () => {
+['accountSize','riskPercent','maxLossOverride','wholeSharesOnly'].forEach(id => on(id, 'change', () => {
   handleRiskSettingsChange('risk_settings_change');
 }));
 on('marketStatus', 'change', () => {
@@ -54795,7 +54905,9 @@ function canonicalPublicationProjectionForRecord(record){
     publicationId:publication.publicationId,
     evidenceId:publication.evidenceId,
     refreshCycleId:publication.refreshCycleId,
-    canonicalResultVersion:publication.canonicalResultVersion
+    canonicalResultVersion:publication.canonicalResultVersion,
+    decisionPublicationValid:true,
+    ...executionSizingStateForPublication(publication)
   };
 }
 
@@ -54804,11 +54916,17 @@ function canonicalPublicationProjectionForRecord(record){
 function publishCanonicalPublicationForRecord(record){
   const item = record && typeof record === 'object' ? record : null;
   if(!item) return null;
-  const resolved = resolveGlobalVerdict(item, {forceResolve:true});
+  const executionRiskSettings = currentExecutionRiskSettings();
+  const resolved = resolveGlobalVerdict(item, {forceResolve:true, executionRiskSettings});
   const rawPublication = resolved && resolved.canonicalPublication;
   if(!rawPublication || !window.CanonicalDecisionResult || typeof window.CanonicalDecisionResult.identifyPublication !== 'function') return null;
   const identity = canonicalPublicationIdentityForRecord(item);
-  const publication = window.CanonicalDecisionResult.identifyPublication(rawPublication, identity);
+  const publication = window.CanonicalDecisionResult.identifyPublication({
+    ...rawPublication,
+    executionRiskSettings,
+    riskSettingsId:executionRiskSettings.id,
+    riskSettingsVersion:executionRiskSettings.version
+  }, {...identity, riskSettingsId:executionRiskSettings.id, riskSettingsVersion:executionRiskSettings.version});
   item.authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
   item.authority.canonicalPublication = publication;
   const snapshot = {...resolved};
@@ -54820,6 +54938,9 @@ function publishCanonicalPublicationForRecord(record){
   snapshot.canonicalResultVersion = publication.canonicalResultVersion;
   snapshot.recordIdentity = publication.recordIdentity;
   snapshot.validationStatus = publication.validationStatus;
+  snapshot.riskSettingsId = publication.riskSettingsId;
+  snapshot.riskSettingsVersion = publication.riskSettingsVersion;
+  Object.assign(snapshot, executionSizingStateForPublication(publication));
   item.authority.canonicalPublicationPersistence = {
     schemaVersion:CANONICAL_PUBLICATION_PERSISTENCE_SCHEMA_VERSION,
     publicationPersisted:true,
@@ -54867,6 +54988,15 @@ function resolveGlobalVerdict(record, deps = {}){
     buildCumulativePenaltyTrace:deps.buildCumulativePenaltyTrace || cumulativePenaltyTraceForRecord,
     isHostileMarketStatus:deps.isHostileMarketStatus || isHostileMarketStatus,
     state:deps.state || state,
+    executionRiskSettings:deps.executionRiskSettings || (typeof currentExecutionRiskSettings === 'function'
+      ? currentExecutionRiskSettings()
+      : {
+        version:'execution-risk-settings-v1',
+        maximumLoss:numericOrNull((deps.state || state).userRiskPerTrade ?? (deps.state || state).maxRisk),
+        accountSize:numericOrNull((deps.state || state).accountSize),
+        riskPercent:numericOrNull((deps.state || state).riskPercent),
+        wholeSharesOnly:(deps.state || state).wholeSharesOnly !== false
+      }),
     scannerScoreGradientClass:deps.scannerScoreGradientClass || scannerScoreGradientClass
   };
   const verdict = resolveGlobalVerdictImpl(record, resolverDeps);
