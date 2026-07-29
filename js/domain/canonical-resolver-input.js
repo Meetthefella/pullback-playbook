@@ -77,6 +77,66 @@
     return String(value || '').trim() !== '';
   }
 
+  // Scanner analysis is an ingestion-time factual packet, not a presentation
+  // decision.  Copy only its structured observations into the canonical
+  // boundary: never its score, verdict, prose, bucket, or display fields.
+  // This lets the resolver use fresh scan facts without making Scan itself an
+  // authority over the canonical decision.
+  const FACTUAL_STATE_FIELDS = Object.freeze({
+    structureState:['structureState', 'structure_state'],
+    trendState:['trendState', 'trend_state'],
+    pullbackZone:['pullbackZone', 'pullback_zone'],
+    setupLocationState:['setupLocationState', 'setup_location_state'],
+    priceabilityState:['priceabilityState', 'priceability_state'],
+    stabilisationState:['stabilisationState', 'stabilisation_state'],
+    bounceState:['bounceState', 'bounce_state'],
+    volumeState:['volumeState', 'volume_state'],
+    supportTestState:['supportTestState', 'support_test_state'],
+    buyerControlState:['buyerControlState', 'buyer_control_state'],
+    confirmationState:['confirmationState', 'confirmation_state'],
+    candleEvidenceUpClosesAfterLow:['candleEvidenceUpClosesAfterLow', 'candle_evidence_up_closes_after_low'],
+    candleEvidenceReclaimedPriorDayHigh:['candleEvidenceReclaimedPriorDayHigh', 'candle_evidence_reclaimed_prior_day_high'],
+    candleEvidenceDownsideMomentumSlowing:['candleEvidenceDownsideMomentumSlowing', 'candle_evidence_downside_momentum_slowing'],
+    candleEvidenceTighterRanges:['candleEvidenceTighterRanges', 'candle_evidence_tighter_ranges'],
+    candleEvidenceSmallerBodies:['candleEvidenceSmallerBodies', 'candle_evidence_smaller_bodies'],
+    candleEvidenceHigherLowHold:['candleEvidenceHigherLowHold', 'candle_evidence_higher_low_hold'],
+    candleEvidenceReclaimRangeMeaningful:['candleEvidenceReclaimRangeMeaningful', 'candle_evidence_reclaim_range_meaningful']
+  });
+
+  function firstDefinedFact(sources, aliases){
+    for(const source of sources){
+      const safeSource = safeObject(source);
+      for(const alias of aliases){
+        if(safeSource[alias] !== undefined && safeSource[alias] !== null && safeSource[alias] !== ''){
+          return safeSource[alias];
+        }
+      }
+    }
+    return null;
+  }
+
+  function canonicalFactualStatePacket(record){
+    const item = safeObject(record);
+    const scan = safeObject(item.scan);
+    const scannerProjection = safeObject(scan.analysisProjection);
+    const scannerDerived = safeObject(scannerProjection.derived_states);
+    const explicitRawStates = safeObject(item.derivedStates);
+    const setup = safeObject(item.setup);
+    const sources = [explicitRawStates, scannerProjection, scannerDerived, setup];
+    const states = {};
+    Object.entries(FACTUAL_STATE_FIELDS).forEach(([field, aliases]) => {
+      const value = firstDefinedFact(sources, aliases);
+      if(value !== null) states[field] = value;
+    });
+    const scannerFactsPresent = Object.keys(scannerProjection).length > 0;
+    return {
+      source:Object.keys(explicitRawStates).length
+        ? 'raw_evidence_packet'
+        : (scannerFactsPresent ? 'scanner_factual_analysis' : (Object.keys(setup).length ? 'raw_record_setup' : 'none')),
+      states
+    };
+  }
+
   function collectPresentationLabels(record){
     const item = safeObject(record);
     const watchlist = safeObject(item.watchlist);
@@ -212,19 +272,17 @@
     const item = safeObject(record);
     const scan = safeObject(item.scan);
     const review = safeObject(item.review);
+    const factualPacket = canonicalFactualStatePacket(item);
     const analysisProjection = scan.analysisProjection && typeof scan.analysisProjection === 'object' ? stableClone(scan.analysisProjection) : null;
     const normalizedAnalysis = safeObject(review.analysisState).normalized && typeof safeObject(review.analysisState).normalized === 'object'
       ? stableClone(safeObject(review.analysisState).normalized)
       : (review.normalizedAnalysis && typeof review.normalizedAnalysis === 'object' ? stableClone(review.normalizedAnalysis) : null);
-    // Scan and Review projections describe a previous consumer view.  They
-    // are retained below as audit material, never selected as canonical
-    // semantic evidence.  Canonical semantics must start with raw facts.
-    if(analysisProjection || normalizedAnalysis){
+    if(Object.keys(factualPacket.states).length){
       return {
-        source:'consumer_projection_diagnostic_only',
-        states:null,
+        source:factualPacket.source,
+        states:stableClone(factualPacket.states),
         reasons:[
-          analysisProjection ? 'scanner_analysis_projection_diagnostic_only' : '',
+          factualPacket.source === 'scanner_factual_analysis' ? 'scanner_structured_facts_selected' : '',
           normalizedAnalysis ? 'review_normalized_analysis_diagnostic_only' : ''
         ].filter(Boolean),
         diagnosticCandidates:{
@@ -322,9 +380,9 @@
           asOf:String(marketData.asOf || marketData.timestamp || '').trim()
         },
         scanner: {
-          // Consumer projections are intentionally excluded from canonical
-          // evidence. Keep a copy in diagnostics only for migration telemetry.
-          analysisProjection:null,
+          // The raw, whitelisted factual packet is canonical evidence. The
+          // Scanner verdict and all presentation fields remain excluded.
+          factualStates:stableClone(selectedDerivedStateAuthority.states || {}),
           checks:scan.flags && typeof scan.flags === 'object' ? stableClone(scan.flags.checks || null) : null,
           resolvedVerdict:String(scan.resolvedVerdict || scan.verdict || '').trim(),
           estimatedRR:numericOrNull(scan.estimatedRR)
@@ -506,6 +564,7 @@
       surface:canonicalInput.surface,
       ticker:canonicalInput.ticker,
       values,
+      factualStates:stableClone(scanner.factualStates || {}),
       provenance:{
         planAuthority:canonicalInput.diagnostics.selectedPlanAuthorityCandidate,
         derivedStateAuthority:canonicalInput.diagnostics.selectedDerivedStateAuthorityCandidate,

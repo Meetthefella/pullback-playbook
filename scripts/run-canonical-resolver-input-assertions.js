@@ -864,7 +864,10 @@ function run(){
 
   assert.deepStrictEqual(after, before, 'builder must not mutate input record');
   assert.strictEqual(result.ticker, 'TROW');
-  assert.strictEqual(result.diagnostics.selectedDerivedStateAuthorityCandidate.source, 'consumer_projection_diagnostic_only', 'scanner projection must be diagnostic-only');
+  assert.strictEqual(result.diagnostics.selectedDerivedStateAuthorityCandidate.source, 'scanner_factual_analysis', 'structured scanner facts must enter the canonical evidence boundary');
+  assert.strictEqual(result.diagnostics.selectedDerivedStateAuthorityCandidate.states.structureState, 'intact', 'scanner factual structure state must be preserved for canonical selection');
+  assert.strictEqual(result.canonical.scanner.factualStates.structureState, 'intact', 'canonical scanner evidence must include only the selected factual state packet');
+  assert.strictEqual(result.canonical.scanner.resolvedVerdict, 'Near Entry', 'scanner verdict remains audit evidence and must not be used as the decision selector');
   assert.strictEqual(result.diagnostics.selectedPlanAuthorityCandidate.source, 'manual_review', 'manual review numeric plan should be detected as plan authority candidate');
   assert.strictEqual(result.diagnostics.selectedPlanAuthorityCandidate.plan.entry, 111, 'manual review plan should not be over-expanded beyond numeric fields');
 
@@ -905,8 +908,9 @@ function run(){
   assert.ok(!ignoredStale.includes('plan.blockedReasonCode'), 'plan.blockedReasonCode should not be classified as ignored stale prose');
 
   assert.strictEqual(result.canonical.plan.numericFields.entry, 110.27, 'numeric plan fields should be captured');
-  assert.strictEqual(result.canonical.scanner.analysisProjection, null, 'scanner projection must be excluded from canonical evidence');
-  assert.ok(result.diagnostics.selectedDerivedStateAuthorityCandidate.diagnosticCandidates.scan, 'scanner projection should remain available only to diagnostics');
+  assert.strictEqual(result.canonical.scanner.analysisProjection, undefined, 'scanner presentation projection must not be retained as canonical evidence');
+  assert.strictEqual(result.canonical.scanner.factualStates.bounceState, 'attempt', 'whitelisted scanner facts must be retained at the canonical boundary');
+  assert.ok(result.diagnostics.selectedDerivedStateAuthorityCandidate.diagnosticCandidates.scan, 'source scanner packet should remain available for diagnostics');
 
   const comparison = buildCanonicalResolverInputComparison(record, {
     surface:'test',

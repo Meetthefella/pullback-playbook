@@ -91,8 +91,9 @@ function run(){
     };
   });
 
-  assert.strictEqual(results.length, 6, 'baseline must cover the five named tickers plus broken structure');
+  assert.strictEqual(results.length, 7, 'baseline must cover the five named tickers plus direct and scanner-factual broken structures');
   assert.strictEqual(results.find(result => result.id === 'broken_structure').verdict, 'avoid', 'broken structure must remain Avoid');
+  assert.strictEqual(results.find(result => result.id === 'scanner_factual_breakdown').verdict, 'avoid', 'scanner factual breakdown must become canonical Avoid without using scanner verdict authority');
   assert.strictEqual(results.find(result => result.id === 'hwm_confirmed_control').verdict, 'watch', 'HWM-like Entry proposal must not bypass failed Entry prerequisites');
   assert.strictEqual(results.find(result => result.id === 'amzn_emerging_buyer_control').gates.entry, false, 'emerging buyer control must block Entry');
   assert.strictEqual(results.find(result => result.id === 'unp_unpriceable_plan').paperTradeEligible, false, 'unpriceable plan must block paper trading');
@@ -136,6 +137,7 @@ function run(){
   assert.ok(!changedSteps('hwm_confirmed_control').includes('scan_authority_state_release') && !changedSteps('hwm_confirmed_control').includes('lifecycle_viability_adjustment'), 'HWM must remain Watch without Scan or lifecycle decision authority.');
   assert.ok(!changedSteps('kdp_confirmed_without_follow_through').includes('scan_authority_state_release') && !changedSteps('kdp_confirmed_without_follow_through').includes('lifecycle_viability_adjustment'), 'KDP must remain blocked by its current canonical gates, not consumer history.');
   assert.ok(changedSteps('broken_structure').includes('structural_avoid_guard') === false, 'Terminal broken structure must not be softened by the structural Avoid guard.');
+  assert.ok(changedSteps('scanner_factual_breakdown').includes('structural_avoid_guard') === false, 'Scanner factual terminal structure failure must not be softened by the structural Avoid guard.');
   assert.strictEqual(results.find(result => result.id === 'unp_unpriceable_plan').decisionTrace.find(step => step.stepCode === 'near_entry_priceability_enforcement').outputVerdict, 'watch', 'Unpriceable plan trace must remain non-promoted.');
   console.log(JSON.stringify({
     suite:'canonical-decision-baseline',

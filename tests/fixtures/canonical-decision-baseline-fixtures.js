@@ -5,9 +5,9 @@ const validPlan = (entry, stop, target) => ({
   capitalFit:{capital_fit:'ideal'}, affordability:'affordable'
 });
 
-const fixture = (id, ticker, derivedStates, plan, contract, marketData, chartGuru) => ({
+const fixture = (id, ticker, derivedStates, plan, contract, marketData, chartGuru, recordFacts = {}) => ({
   id, ticker,
-  record:{ticker, derivedStates, plan:{entry:plan.entry, stop:plan.stop, firstTarget:plan.target}, marketData, resolvedContract:contract},
+  record:{ticker, derivedStates, plan:{entry:plan.entry, stop:plan.stop, firstTarget:plan.target}, marketData, resolvedContract:contract, ...recordFacts},
   displayedPlan:plan,
   contract,
   chartGuru
@@ -20,4 +20,15 @@ module.exports = [
   fixture('cat_accepted_50ma_support', 'CAT', {structureState:'intact', trendState:'strong', pullbackZone:'near_50ma', stabilisationState:'clear', bounceState:'attempt', volumeState:'supportive', setupLocationState:'at_support', priceabilityState:'provisional'}, validPlan(330, 320, 352), {finalVerdict:'Watch', structuralState:'developing', actionStateKey:'wait_for_confirmation', planStatusKey:'valid', tradeabilityVerdict:'Watch', blockerReason:'Support is accepted; wait for buyer control.', reasonSummary:'50MA support accepted.', baseVerdict:'watch'}, {price:328, ma20:336, ma50:326, ma200:290}, {phase:'at_support', supportInteraction:'holding', supportCurrentlyActive:true, buyerResponsePresent:false, buyerControlState:'emerging'}),
   fixture('unp_unpriceable_plan', 'UNP', {structureState:'intact', trendState:'strong', pullbackZone:'near_20ma', stabilisationState:'clear', bounceState:'confirmed', volumeState:'supportive', setupLocationState:'at_support', priceabilityState:'unpriceable'}, {...validPlan(240, 220, 250), status:'invalid', tradeability:'invalid', riskFit:{risk_status:'too_wide', position_size:0}}, {finalVerdict:'Watch', structuralState:'developing', actionStateKey:'recalculate_plan', planStatusKey:'invalid', tradeabilityVerdict:'Watch', blockerReason:'A valid entry, stop, and first target are required.', reasonSummary:'Plan is not priceable.', baseVerdict:'watch'}, {price:238, ma20:236, ma50:225, ma200:210}, {phase:'responding_from_support', supportInteraction:'holding', supportCurrentlyActive:true, buyerResponsePresent:true, buyerControlState:'confirmed'}),
   fixture('broken_structure', 'BROKEN', {structureState:'broken', trendState:'broken', pullbackZone:'extended', stabilisationState:'none', bounceState:'none', volumeState:'weak', setupLocationState:'off_level', priceabilityState:'unpriceable'}, {...validPlan(80, 75, 90), status:'invalid', tradeability:'invalid'}, {finalVerdict:'Avoid', structuralState:'avoid', actionStateKey:'blocked', planStatusKey:'invalid', tradeabilityVerdict:'Avoid', blockerReason:'Structure is broken.', reasonSummary:'Structure is broken.', baseVerdict:'avoid'}, {price:74, ma20:80, ma50:85, ma200:90}, {phase:'support_failed', supportInteraction:'failed', supportCurrentlyActive:false, buyerResponsePresent:false, buyerControlState:'none'})
+  ,fixture('scanner_factual_breakdown', 'TSLA', {}, {...validPlan(379.98, 307.44, 442.10), status:'invalid', tradeability:'invalid', riskFit:{risk_status:'too_wide', position_size:0}}, {finalVerdict:'Avoid', structuralState:'avoid', actionStateKey:'blocked', planStatusKey:'invalid', tradeabilityVerdict:'Avoid', blockerReason:'Structure is broken.', reasonSummary:'Structure is broken.', baseVerdict:'avoid'}, {price:307.44, ma20:379.979, ma50:397.12, ma200:413.43}, {phase:'support_failed', supportInteraction:'failed', supportCurrentlyActive:false, buyerResponsePresent:false, buyerControlState:'none'}, {
+    scan:{
+      resolvedVerdict:'Entry',
+      score:1,
+      analysisProjection:{
+        structure_state:'broken', trend_state:'broken', pullback_zone:'extended', setup_location_state:'extended',
+        stabilisation_state:'none', bounce_state:'none', priceability_state:'unpriceable', volume_state:'constructive',
+        support_test_state:'failed', buyer_control_state:'none'
+      }
+    }
+  })
 ];

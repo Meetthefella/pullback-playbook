@@ -182,7 +182,7 @@
     }
     if(structurallyBroken){
       proposedVerdict = 'dead';
-      reason = resolved.blockerReason || 'Structure is broken.';
+      reason = input.terminalInvalidationReason || resolved.blockerReason || 'Structure is broken.';
     }else if(weakStructure && invalidPlan){
       proposedVerdict = 'monitor';
       reason = `${structureReasonLabel(input.structureState)}. Setup stays on monitor while tradeability is unresolved.`;
@@ -310,6 +310,10 @@
     if(!avoidAllowedByStructureConsistencyGuard && (finalVerdict === 'avoid' || finalVerdict === 'dead')){
       finalVerdict = 'monitor';
       reason = 'Setup is weak and not tradeable yet, but not structurally broken.';
+    }else if(structurallyBroken && input.terminalInvalidationReason){
+      // Terminal evidence has higher precedence than a plan/gate explanation.
+      // The plan may also be invalid, but it is not why the setup is Avoid.
+      reason = input.terminalInvalidationReason;
     }
     appendCanonicalDecisionTrace(trace, {
       stepCode:'structural_avoid_guard', inputVerdict:trackedVerdict, outputVerdict:finalVerdict,
@@ -2108,14 +2112,17 @@
   // Stage 3F factual boundary.  This is deliberately not a verdict contract:
   // it only exposes raw setup observations that existed before any consumer
   // rendered Scan, Review, Track, or lifecycle state.
-  function canonicalFactualStatesFromRecord(record){
+  function canonicalFactualStatesFromRecord(record, normalisedEvidence = null){
     const item = record && typeof record === 'object' ? record : {};
     const setup = item.setup && typeof item.setup === 'object' ? item.setup : {};
+    const canonicalEvidenceStates = normalisedEvidence && normalisedEvidence.factualStates && typeof normalisedEvidence.factualStates === 'object'
+      ? normalisedEvidence.factualStates
+      : {};
     // `derivedStates` is the explicit raw-evidence packet used by deterministic
     // resolver fixtures and ingestion. It is not a Scan/Review projection.
     const evidenceStates = item.derivedStates && typeof item.derivedStates === 'object' ? item.derivedStates : {};
     const value = (camel, fallback = '') => String(
-      evidenceStates[camel] ?? setup[camel] ?? setup[camel.replace(/[A-Z]/g, character => `_${character.toLowerCase()}`)] ?? item[camel] ?? fallback
+      canonicalEvidenceStates[camel] ?? evidenceStates[camel] ?? setup[camel] ?? setup[camel.replace(/[A-Z]/g, character => `_${character.toLowerCase()}`)] ?? item[camel] ?? fallback
     ).trim().toLowerCase();
     return freezeResolutionValue({
       structureState:value('structureState'),
@@ -2126,14 +2133,17 @@
       stabilisationState:value('stabilisationState'),
       bounceState:value('bounceState'),
       volumeState:value('volumeState'),
-      candleEvidenceUpClosesAfterLow:numericValueOrNull(evidenceStates.candleEvidenceUpClosesAfterLow ?? item.candleEvidenceUpClosesAfterLow),
-      candleEvidenceReclaimedPriorDayHigh:(evidenceStates.candleEvidenceReclaimedPriorDayHigh ?? item.candleEvidenceReclaimedPriorDayHigh) === true,
-      candleEvidenceDownsideMomentumSlowing:(evidenceStates.candleEvidenceDownsideMomentumSlowing ?? item.candleEvidenceDownsideMomentumSlowing) === true,
-      candleEvidenceTighterRanges:(evidenceStates.candleEvidenceTighterRanges ?? item.candleEvidenceTighterRanges) === true,
-      candleEvidenceSmallerBodies:(evidenceStates.candleEvidenceSmallerBodies ?? item.candleEvidenceSmallerBodies) === true,
-      candleEvidenceHigherLowHold:(evidenceStates.candleEvidenceHigherLowHold ?? item.candleEvidenceHigherLowHold) === true,
-      candleEvidenceReclaimRangeMeaningful:(evidenceStates.candleEvidenceReclaimRangeMeaningful ?? item.candleEvidenceReclaimRangeMeaningful) === true,
-      provenance:Object.keys(evidenceStates).length ? 'raw_evidence_packet' : 'raw_record.setup'
+      supportTestState:value('supportTestState'),
+      buyerControlState:value('buyerControlState'),
+      confirmationState:value('confirmationState'),
+      candleEvidenceUpClosesAfterLow:numericValueOrNull(canonicalEvidenceStates.candleEvidenceUpClosesAfterLow ?? evidenceStates.candleEvidenceUpClosesAfterLow ?? item.candleEvidenceUpClosesAfterLow),
+      candleEvidenceReclaimedPriorDayHigh:(canonicalEvidenceStates.candleEvidenceReclaimedPriorDayHigh ?? evidenceStates.candleEvidenceReclaimedPriorDayHigh ?? item.candleEvidenceReclaimedPriorDayHigh) === true,
+      candleEvidenceDownsideMomentumSlowing:(canonicalEvidenceStates.candleEvidenceDownsideMomentumSlowing ?? evidenceStates.candleEvidenceDownsideMomentumSlowing ?? item.candleEvidenceDownsideMomentumSlowing) === true,
+      candleEvidenceTighterRanges:(canonicalEvidenceStates.candleEvidenceTighterRanges ?? evidenceStates.candleEvidenceTighterRanges ?? item.candleEvidenceTighterRanges) === true,
+      candleEvidenceSmallerBodies:(canonicalEvidenceStates.candleEvidenceSmallerBodies ?? evidenceStates.candleEvidenceSmallerBodies ?? item.candleEvidenceSmallerBodies) === true,
+      candleEvidenceHigherLowHold:(canonicalEvidenceStates.candleEvidenceHigherLowHold ?? evidenceStates.candleEvidenceHigherLowHold ?? item.candleEvidenceHigherLowHold) === true,
+      candleEvidenceReclaimRangeMeaningful:(canonicalEvidenceStates.candleEvidenceReclaimRangeMeaningful ?? evidenceStates.candleEvidenceReclaimRangeMeaningful ?? item.candleEvidenceReclaimRangeMeaningful) === true,
+      provenance:Object.keys(canonicalEvidenceStates).length ? 'canonical_normalised_factual_packet' : (Object.keys(evidenceStates).length ? 'raw_evidence_packet' : 'raw_record.setup')
     });
   }
 
@@ -2160,7 +2170,7 @@
       resolverSource:'resolver-core',
       policy:{minimumEntryRr:MIN_ENTRY_RR, minimumNearEntryRr:MIN_NEAR_ENTRY_RR}
     });
-    const derivedStates = canonicalFactualStatesFromRecord(item);
+    const derivedStates = canonicalFactualStatesFromRecord(item, normalisedEvidence);
     const effectivePlan = item.effectivePlan && typeof item.effectivePlan === 'object'
       ? item.effectivePlan
       : {
@@ -2327,14 +2337,23 @@
           ? 'Trend is broken.'
           : 'Price breached stop structure.'))
       : '';
+    const canonicalSupportFailed = derivedStates.supportTestState === 'failed';
+    // A canonical broken trend, failed support test, or stop breach is a
+    // terminal invalidation. Recovery narration may describe what happens
+    // next, but it cannot soften the current decision back to Watch.
     const structurallyBroken = !!(
-      !nonTerminalRecoveryBlocker
-      && (
-        structureState === 'broken'
-        || trendState === 'broken'
-        || brokenBelowStop
-      )
+      structureState === 'broken'
+      || trendState === 'broken'
+      || canonicalSupportFailed
+      || brokenBelowStop
     );
+    const terminalInvalidationReason = structureState === 'broken'
+      ? 'Structure is broken.'
+      : (trendState === 'broken'
+        ? 'Trend structure is broken.'
+        : (canonicalSupportFailed
+          ? 'Support has failed.'
+          : (brokenBelowStop ? 'Price breached stop structure.' : '')));
     const rawStructureLayer = resolveStructureEligibility({
       structureState,
       trendState,
@@ -2423,6 +2442,8 @@
       bounce_state:bounceState,
       pullback_zone:pullbackZone,
       setup_location_state:setupLocationState,
+      support_test_state:derivedStates.supportTestState,
+      buyer_control_state:derivedStates.buyerControlState,
       market_regime:marketSeverity,
       market_severity:marketSeverity,
       volume_state:volumeState,
@@ -2483,7 +2504,8 @@
       avoid_trigger_source:item && item.avoid_trigger_source,
       dead_trigger_source:structurallyBroken ? 'structure_broken' : '',
       structural_state:structurallyBroken ? 'dead' : String(resolved.structuralState || ''),
-      structurally_broken:structurallyBroken
+      structurally_broken:structurallyBroken,
+      support_failed:canonicalSupportFailed
     });
     const promotionGuardBeforePriceability = freezeResolutionValue(cloneResolutionValue(guardedVerdict));
     // A provisional bounce/plan may be narrated, but it is not a qualified
@@ -2521,7 +2543,9 @@
       ...(guardedVerdict && typeof guardedVerdict === 'object' ? guardedVerdict : {}),
       current_price:currentPrice,
       ma20,
-      ma50
+      ma50,
+      support_test_state:derivedStates.supportTestState,
+      buyer_control_state:derivedStates.buyerControlState
     });
     const below50WithoutReclaim = priceBelow50MA && !(item && (item.reclaimAttempt === true || item.reclaimsLevel === true));
     const hasClearInvalidationLevel = nearEntryGateChecks.has_clear_invalidation_level === true
@@ -2614,6 +2638,7 @@
           bounceState,
           setupScore,
           structurallyBroken,
+          terminalInvalidationReason,
           nonTerminalRecoveryBlocker,
           weakStructure,
           invalidPlan,

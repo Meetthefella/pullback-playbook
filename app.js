@@ -7,7 +7,7 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const reviewSessionKey = 'pullbackPlaybookReviewSessionV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.5.5';
+const APP_VERSION = 'v4.5.6';
 const APP_BUILD_TIMESTAMP = '2026-07-23T10:58:00Z';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
 const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
@@ -15,7 +15,7 @@ const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
 const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.5.5',
+    version:'4.5.6',
     buildTimestamp:APP_BUILD_TIMESTAMP,
     assetId:`pullback-playbook-${APP_VERSION}-${APP_BUILD_TIMESTAMP}`,
     chartGuruDeterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
@@ -1522,6 +1522,7 @@ const {
 } = window.ScannerDebug;
 const {
   renderScanCardSecondaryUi: renderScanCardSecondaryUiImpl,
+  classNameWithProjectedTone: classNameWithProjectedToneImpl,
   getScannerSubmenuContent: getScannerSubmenuContentImpl,
   renderCompactResultCardFromView: renderCompactResultCardFromViewImpl,
   scanCardSummaryForView: scanCardSummaryForViewImpl,
@@ -19854,12 +19855,11 @@ function renderCompactResultCardFromView(view){
     source:'scan_render',
     mutationSource:'scan_render'
   });
-  const authoritativeScan = typeof authoritativeScanSurfaceSnapshot === 'function'
-    ? authoritativeScanSurfaceSnapshot(item)
-    : null;
+  // Scan presentation is a pure projection of the freshly published
+  // simplified state. Cached Scan snapshots are diagnostic/history only and
+  // must never replace its canonical status, bucket, or tone.
   const canonicalVerdict = normalizeGlobalVerdictKey(
-    authoritativeScan && authoritativeScan.canonicalVerdict
-    || simplifiedState.canonicalVerdict
+    simplifiedState.canonicalVerdict
     || 'watch'
   );
   const scanPresentation = view && view.scanPresentation
@@ -19875,26 +19875,24 @@ function renderCompactResultCardFromView(view){
   );
   const effectiveScanPresentation = (
     (scanPresentationCanonical && scanPresentationCanonical !== canonicalVerdict)
-    || (!presentationBucketAligned && ['entry','near_entry'].includes(canonicalVerdict))
+    || !presentationBucketAligned
   )
     ? {
       ...scanPresentation,
       canonicalVerdict,
+      resolvedStatus:canonicalVerdict,
       visualBucket:String(
-        authoritativeScan && authoritativeScan.visualBucket
-        || simplifiedState.visualBucket
+        simplifiedState.visualBucket
         || scanPresentation.visualBucket
         || 'monitor'
       ).trim().toLowerCase() || 'monitor',
       presentationBucket:String(
-        authoritativeScan && authoritativeScan.visualBucket
-        || simplifiedState.visualBucket
+        simplifiedState.visualBucket
         || scanPresentation.presentationBucket
         || 'monitor'
       ).trim().toLowerCase() || 'monitor',
       tone:normalizeVisualBucketForPairing(
-        authoritativeScan && authoritativeScan.visualBucket
-        || simplifiedState.visualBucket
+        simplifiedState.visualBucket
         || scanPresentation.presentationBucket
         || scanPresentation.visualBucket
         || 'monitor',
@@ -19902,8 +19900,7 @@ function renderCompactResultCardFromView(view){
       ),
       badgeLabel:String(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch').trim(),
       summary:String(
-        authoritativeScan && authoritativeScan.summary
-        || simplifiedState.mainBlocker
+        simplifiedState.mainBlocker
         || simplifiedState.actionLabel
         || scanPresentation.summary
         || ''
@@ -19916,7 +19913,7 @@ function renderCompactResultCardFromView(view){
     || ''
   ).trim().toLowerCase();
   const publicScanPresentationBucket = normalizeVisualBucketForPairing(
-    authoritativeScan && authoritativeScan.visualBucket
+    simplifiedState.visualBucket
     || effectiveScanPresentation.presentationBucket
     || effectiveScanPresentation.visualBucket
     || simplifiedState.visualBucket
@@ -45852,25 +45849,17 @@ function renderScannerResults(){
       source:'scan_grouping',
       mutationSource:'scan_grouping'
     });
-    const authoritativeScan = typeof authoritativeScanSurfaceSnapshot === 'function'
-      ? authoritativeScanSurfaceSnapshot(view.item)
-      : null;
     const scanPresentation = scanPresentationForView({
       ...view,
       simplifiedState
     });
+    const canonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
     const publicScanBucket = normalizeVisualBucketForPairing(
-      authoritativeScan && authoritativeScan.visualBucket
+      simplifiedState.visualBucket
       || scanPresentation.presentationBucket
       || scanPresentation.visualBucket
-      || simplifiedState.visualBucket
       || 'monitor',
-      normalizeGlobalVerdictKey(
-        authoritativeScan && authoritativeScan.canonicalVerdict
-        || simplifiedState.canonicalVerdict
-        || scanPresentation.canonicalVerdict
-        || 'watch'
-      )
+      canonicalVerdict
     );
     const publicScanSection = publicScanBucket === 'entry'
       ? 'tradeable_entry'
@@ -45884,6 +45873,8 @@ function renderScannerResults(){
       simplifiedState,
       scanPresentation:{
         ...scanPresentation,
+        canonicalVerdict,
+        resolvedStatus:canonicalVerdict,
         visualBucket:publicScanBucket,
         presentationBucket:publicScanBucket,
         tone:publicScanBucket,
@@ -45914,11 +45905,9 @@ function renderScannerResults(){
         card.innerHTML = renderCompactResultCardFromView(view);
         const node = card.firstElementChild;
         if(!node) return;
-        const canonicalScanState = typeof authoritativeScanSurfaceSnapshot === 'function'
-          ? authoritativeScanSurfaceSnapshot(view.item)
-          : (view && view.simplifiedState && typeof view.simplifiedState === 'object'
-            ? view.simplifiedState
-            : null);
+        const canonicalScanState = view && view.simplifiedState && typeof view.simplifiedState === 'object'
+          ? view.simplifiedState
+          : null;
         if(canonicalScanState){
           const canonicalVerdict = normalizeGlobalVerdictKey(canonicalScanState.canonicalVerdict || 'watch');
           const canonicalBucket = normalizeVisualBucketForPairing(canonicalScanState.visualBucket || 'monitor', canonicalVerdict);
@@ -45928,6 +45917,13 @@ function renderScannerResults(){
             badgeNode.textContent = String(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch').trim();
             badgeNode.className = `badge state-pill ${simplifiedVisualBadgeClass(canonicalBucket)}`;
           }
+          const projectionDiagnostics = {};
+          node.className = classNameWithProjectedToneImpl(node.className, {
+            resolvedStatus:canonicalVerdict,
+            canonicalVerdict,
+            tone:canonicalTone
+          }, projectionDiagnostics);
+          node.setAttribute('data-projection-class-debug', JSON.stringify(projectionDiagnostics));
           node.setAttribute('data-visual-tone', canonicalTone);
           node.setAttribute('data-visual-state', presentationVisualStateForVerdict(canonicalVerdict));
         }

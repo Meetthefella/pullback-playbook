@@ -9,7 +9,9 @@ assert(match, 'app.js must declare APP_VERSION.');
 const version = match[1];
 assert(!index.includes('?v=4.5.3'), 'index.html must not retain previous v4.5.3 browser asset URLs for this release.');
 const releaseModules = [
+  './js/domain/canonical-resolver-input.js',
   './js/domain/canonical-setup-projection.js',
+  './js/resolver-core.js',
   './js/domain/simplified-trade-state.js',
   './js/scanner-card-shell.js',
   './app.js'
