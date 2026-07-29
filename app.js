@@ -7,7 +7,7 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const reviewSessionKey = 'pullbackPlaybookReviewSessionV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.5.4';
+const APP_VERSION = 'v4.5.5';
 const APP_BUILD_TIMESTAMP = '2026-07-23T10:58:00Z';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
 const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
@@ -15,7 +15,7 @@ const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
 const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.5.4',
+    version:'4.5.5',
     buildTimestamp:APP_BUILD_TIMESTAMP,
     assetId:`pullback-playbook-${APP_VERSION}-${APP_BUILD_TIMESTAMP}`,
     chartGuruDeterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
@@ -21432,30 +21432,10 @@ function setupScoreTraceForRecord(record){
   };
 }
 
-const canonicalSetupProjectionInFlight = new WeakSet();
-
-function canonicalSetupProjectionForRecord(record){
-  const item = record && typeof record === 'object' ? record : null;
-  if(!item || !window.CanonicalSetupProjection || typeof window.CanonicalSetupProjection.project !== 'function') return null;
-  if(canonicalSetupProjectionInFlight.has(item)) return null;
-  canonicalSetupProjectionInFlight.add(item);
-  try{
-    const canonical = resolveGlobalVerdict(item, {setupScoreForRecord:rawSetupScoreForRecord});
-    const publication = canonical && canonical.canonicalPublication;
-    return publication ? window.CanonicalSetupProjection.project(publication, {baseScore:rawSetupScoreForRecord(item)}) : null;
-  }catch(_error){
-    return null;
-  }finally{
-    canonicalSetupProjectionInFlight.delete(item);
-  }
-}
-
 function setupScoreForRecord(record){
-  const projection = canonicalSetupProjectionForRecord(record);
-  if(projection && Number.isFinite(Number(projection.setupScore))) return Number(projection.setupScore);
-  if(projection && projection.scoreAvailable === false) return null;
-  // One-release compatibility alias: only used before a canonical publication
-  // exists or during a guarded resolver re-entry; diagnostics expose it.
+  // This is deliberately an O(1) stored-score accessor. Scanner ranking calls
+  // it repeatedly; canonical resolution happens once at the surface publication
+  // boundary, where CanonicalSetupProjection constrains the displayed score.
   return setupScoreTraceForRecord(record).score;
 }
 

@@ -8,6 +8,9 @@ vm.runInContext(fs.readFileSync('js/domain/canonical-setup-projection.js', 'utf8
 vm.runInContext(fs.readFileSync('js/scanner-card-shell.js', 'utf8'), context, {filename:'scanner-card-shell.js'});
 const {project} = context.window.CanonicalSetupProjection;
 const {classNameWithProjectedTone} = context.window.ScannerCardShell;
+const appSource = fs.readFileSync('app.js', 'utf8');
+const setupScoreSource = appSource.slice(appSource.indexOf('function setupScoreForRecord('), appSource.indexOf('\nfunction setupScoreDisplayForRecord('));
+assert(!setupScoreSource.includes('resolveGlobalVerdict'), 'setupScoreForRecord must stay O(1) and must not resolve the canonical pipeline during scanner ranking.');
 
 function publication(overrides = {}){
   const base = {publicationStatus:'valid', canonicalResult:{
