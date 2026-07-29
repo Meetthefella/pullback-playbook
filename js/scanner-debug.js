@@ -366,7 +366,16 @@
 
   function renderScannerDecisionTraceContent(view, deps = {}){
     const resolution = view && view.scannerResolution ? view.scannerResolution : null;
-    if(!resolution) return '<div class="tiny">No trace available.</div>';
+    if(!resolution){
+      const publication = view && view.simplifiedState && typeof view.simplifiedState === 'object'
+        ? view.simplifiedState
+        : {};
+      const publicationId = String(publication.publicationId || 'unavailable');
+      const evidenceId = String(publication.evidenceId || 'unavailable');
+      const cycleId = String(publication.refreshCycleId || 'unavailable');
+      const escape = typeof deps.escapeHtml === 'function' ? deps.escapeHtml : value => String(value);
+      return `<div class="scan-decision-trace-actions no-card-click"><button type="button" class="helperbutton" data-act="copy-decision-trace">Copy trace</button><span class="tiny" data-copy-decision-trace-status></span></div><div data-scan-decision-trace-content data-publication-id="${escape(publicationId)}" data-evidence-id="${escape(evidenceId)}" data-refresh-cycle-id="${escape(cycleId)}"><div class="tiny">No resolver trace was retained for this publication.</div><div class="tiny">Publication ${escape(publicationId)} | Evidence ${escape(evidenceId)} | Cycle ${escape(cycleId)}</div></div>`;
+    }
     const lines = [];
     (resolution.trace || []).forEach(line => lines.push(String(line)));
     if(Array.isArray(resolution.reason_codes) && resolution.reason_codes.length){

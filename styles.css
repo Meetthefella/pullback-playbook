@@ -1700,6 +1700,12 @@ body.debug-advanced .advanced-debug-only{
   padding-right:12px;
   padding-bottom:10px;
 }
+.card--unavailable{
+  --tone-color:#94A3B8;
+  --card-accent:#64748B;
+  --card-glow:rgba(100, 116, 139, 0.12);
+}
+.badge--unavailable{background:rgba(100,116,139,.22);border-color:rgba(148,163,184,.52);color:#CBD5E1;}
 .review-ai-preview--chart-coach{
   display:grid;
   gap:10px;

@@ -7,7 +7,8 @@ const settingsKey = 'pullbackPlaybookSettingsV1';
 const recordsLiteKey = 'pullbackPlaybookRecordsLiteV1';
 const reviewSessionKey = 'pullbackPlaybookReviewSessionV1';
 const startupTraceKey = 'pullbackPlaybookStartupTraceV1';
-const APP_VERSION = 'v4.5.6';
+const CANONICAL_PUBLICATION_PERSISTENCE_SCHEMA_VERSION = 'canonical-publication-envelope-v1';
+const APP_VERSION = 'v4.5.10';
 const APP_BUILD_TIMESTAMP = '2026-07-23T10:58:00Z';
 const CHART_GURU_RENDER_VERSION = 'chart-guru-v3';
 const CHART_GURU_DETERMINISTIC_CONTRACT_VERSION = 'chart-guru-contract-v3';
@@ -15,7 +16,7 @@ const CHART_GURU_INTERPRETATION_PROMPT_VERSION = 'chart-guru-interpretation-v2';
 const CHART_GURU_FINAL_PROMPT_VERSION = 'chart-guru-final-v2';
 if(typeof window !== 'undefined'){
   window.PP_BUILD = {
-    version:'4.5.6',
+    version:'4.5.10',
     buildTimestamp:APP_BUILD_TIMESTAMP,
     assetId:`pullback-playbook-${APP_VERSION}-${APP_BUILD_TIMESTAMP}`,
     chartGuruDeterministicContractVersion:CHART_GURU_DETERMINISTIC_CONTRACT_VERSION,
@@ -3250,6 +3251,7 @@ function persistableWatchlistState(value = {}){
 function persistableMetaState(value = {}){
   const meta = value && typeof value === 'object' ? value : {};
   return {
+    createdAt:String(meta.createdAt || ''),
     companyName:String(meta.companyName || ''),
     exchange:String(meta.exchange || ''),
     tradingViewSymbol:String(meta.tradingViewSymbol || ''),
@@ -3368,6 +3370,15 @@ function buildPersistableTickerRecordsMap(recordsMap = {}, options = {}){
         setup:{
           rawScore:item.setup.rawScore,
           score:item.setup.score,
+          structureState:item.setup.structureState,
+          structureEligibility:item.setup.structureEligibility,
+          setupLocationState:item.setup.setupLocationState,
+          pullbackZone:item.setup.pullbackZone,
+          priceabilityState:item.setup.priceabilityState,
+          stabilisationState:item.setup.stabilisationState,
+          bounceState:item.setup.bounceState,
+          volumeState:item.setup.volumeState,
+          trendState:item.setup.trendState,
           convictionTier:item.setup.convictionTier,
           practicalSizeFlag:item.setup.practicalSizeFlag,
           verdict:item.setup.verdict,
@@ -3377,7 +3388,33 @@ function buildPersistableTickerRecordsMap(recordsMap = {}, options = {}){
         watchlist:persistableWatchlistState(item.watchlist),
         lifecycle:item.lifecycle && typeof item.lifecycle === 'object' ? cloneData(item.lifecycle, {}) : {},
         diary:item.diary && typeof item.diary === 'object' ? cloneData({records:item.diary.records || []}, {}) : {},
-        meta:persistableMetaState(item.meta)
+        meta:persistableMetaState(item.meta),
+        authority:(() => {
+          const authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
+          const publication = authority.canonicalPublication && typeof authority.canonicalPublication === 'object'
+            ? cloneData(authority.canonicalPublication, null)
+            : null;
+          const projection = authority.canonicalResolverProjection && typeof authority.canonicalResolverProjection === 'object'
+            ? cloneData(authority.canonicalResolverProjection, null)
+            : null;
+          const recordIdentity = `${String(item.ticker || '').trim().toUpperCase()}:${String(item.meta && item.meta.createdAt || '')}`;
+          return {
+            version:Number.isFinite(Number(authority.version)) ? Number(authority.version) : 0,
+            source:String(authority.source || ''),
+            updatedAt:String(authority.updatedAt || ''),
+            reason:String(authority.reason || ''),
+            canonicalPublication:publication,
+            canonicalResolverProjection:projection,
+            canonicalPublicationPersistence:{
+              schemaVersion:'canonical-publication-envelope-v1',
+              publicationPersisted:!!publication,
+              persistedPublicationId:String(publication && publication.publicationId || ''),
+              persistedEvidenceId:String(publication && publication.evidenceId || ''),
+              persistedCycleId:String(publication && publication.refreshCycleId || ''),
+              recordIdentity
+            }
+          };
+        })()
       };
       if(includeLiteFields !== true){
         delete persistedRecord.review.analysisState;
@@ -9538,8 +9575,9 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
   record.scan.pullbackStatus = String(card.pullbackStatus || record.scan.pullbackStatus || '');
   record.scan.pullbackType = String(card.pullbackType || record.scan.pullbackType || '');
   record.scan.analysisProjection = cloneData(card.analysis || record.scan.analysisProjection, null);
-  record.scan.lastScannedAt = String(card.scannerUpdatedAt || record.scan.lastScannedAt || '');
-  record.scan.updatedAt = String(card.scannerUpdatedAt || card.updatedAt || record.scan.updatedAt || '');
+  const authoritativeScanCycleId = String(card.scannerUpdatedAt || card.updatedAt || new Date().toISOString());
+  record.scan.lastScannedAt = String(card.scannerUpdatedAt || record.scan.lastScannedAt || authoritativeScanCycleId);
+  record.scan.updatedAt = authoritativeScanCycleId;
   const resolvedScannerVerdict = normalizeAnalysisVerdict(
     card.chartVerdict
     || card.status
@@ -9649,6 +9687,11 @@ function mergeLegacyCardIntoRecord(record, legacyCard, options = {}){
       source:'card',
       lastPlannedAt:card.updatedAt || new Date().toISOString()
     });
+  }
+  if(options.fromScanner){
+    // One resolver call and one immutable publication for this ticker/cycle.
+    // Subsequent Scan, Review, Track, lifecycle and reload reads reuse it.
+    publishCanonicalPublicationForRecord(record);
   }
 }
 
@@ -15951,12 +15994,17 @@ function trackCardRenderSignatureSnapshot(record){
     reason:'trackCardRenderSignatureSnapshot',
     passCache
   });
+  const publicationScore = String(simplifiedState && simplifiedState.publicationStatus || '').toLowerCase() === 'valid'
+    && simplifiedState.scoreAvailable === true
+    && Number.isFinite(Number(simplifiedState.setupScore))
+    ? Math.max(0, Math.min(10, Math.round(Number(simplifiedState.setupScore))))
+    : null;
   const visualState = resolveVisualState(item, 'watchlist', {
     resolvedContract,
     derivedStates,
     displayedPlan,
     pendingResolution:false,
-    setupScore:setupScoreForRecord(item)
+    setupScore:publicationScore
   });
   const watchlistVisualState = reconcileWatchlistPresentation({
     record:item,
@@ -15995,7 +16043,11 @@ function trackCardRenderSignatureSnapshot(record){
     viabilityBranchLabel:String(globalVerdict && globalVerdict.viabilityBranchLabel || ''),
     viabilityBranchReason:String(globalVerdict && globalVerdict.viabilityBranchReason || ''),
     viabilityInputs:globalVerdict && globalVerdict.viabilityInputs || null,
-    score:String(setupScoreForRecord(item) ?? ''),
+    score:publicationScore === null ? '' : String(publicationScore),
+    scoreAvailable:publicationScore !== null,
+    publicationId:String(simplifiedState && simplifiedState.publicationId || ''),
+    evidenceId:String(simplifiedState && simplifiedState.evidenceId || ''),
+    refreshCycleId:String(simplifiedState && simplifiedState.refreshCycleId || ''),
     decisionSummary,
     actionGuidance,
     structure:String(derivedStates.structureState || ''),
@@ -16208,15 +16260,6 @@ function renderWatchlistCardElement(record, options = {}){
   const debug = record && record.watchlist && record.watchlist.debug && typeof record.watchlist.debug === 'object'
     ? record.watchlist.debug
     : {};
-  const renderStartDisplaySetupScore = (() => {
-    const raw = typeof setupScoreForRecord === 'function'
-      ? setupScoreForRecord(record)
-      : (record && record.setup && record.setup.score);
-    if(typeof numericOrNull === 'function') return numericOrNull(raw);
-    if(raw === null || raw === undefined || String(raw).trim() === '') return null;
-    const numeric = Number(raw);
-    return Number.isFinite(numeric) ? numeric : null;
-  })();
   const view = options.precomputedView && typeof options.precomputedView === 'object'
     ? options.precomputedView
     : null;
@@ -16247,6 +16290,11 @@ function renderWatchlistCardElement(record, options = {}){
     reason:'renderWatchlistCardElement',
     passCache
   });
+  const publicationScore = String(simplifiedState && simplifiedState.publicationStatus || '').toLowerCase() === 'valid'
+    && simplifiedState.scoreAvailable === true
+    && Number.isFinite(Number(simplifiedState.setupScore))
+    ? Math.max(0, Math.min(10, Math.round(Number(simplifiedState.setupScore))))
+    : null;
   const simplifiedDebug = simplifiedState && simplifiedState.debug && typeof simplifiedState.debug === 'object'
     ? simplifiedState.debug
     : {};
@@ -16550,33 +16598,15 @@ function renderWatchlistCardElement(record, options = {}){
   if(scoreTransportByTicker && activeScoreTransport){
     scoreTransportByTicker.delete(normalizeTicker(record.ticker || ''));
   }
-  const openScoreTransport = null;
-  const toNumericScore = value => {
-    if(typeof numericOrNull === 'function') return numericOrNull(value);
-    if(value === null || value === undefined || String(value).trim() === '') return null;
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : null;
-  };
-  const transportedSetupScore = toNumericScore(
-    (activeScoreTransport && activeScoreTransport.setupScore)
-    ?? (openScoreTransport && openScoreTransport.setupScore)
-  );
-  const sharedDisplaySetupScore = toNumericScore(sharedPresentation && sharedPresentation.setupScore);
-  const recordDisplaySetupScore = Number.isFinite(renderStartDisplaySetupScore)
-    ? renderStartDisplaySetupScore
-    : toNumericScore(typeof setupScoreForRecord === 'function' ? setupScoreForRecord(record) : (record && record.setup && record.setup.score));
-  const canonicalWatchlistScoreDisplay = Number.isFinite(recordDisplaySetupScore)
-    ? `Setup ${Math.max(0, Math.min(10, Math.round(recordDisplaySetupScore)))}/10`
-    : (Number.isFinite(transportedSetupScore)
-    ? `Setup ${Math.max(0, Math.min(10, Math.round(transportedSetupScore)))}/10`
-    : (Number.isFinite(sharedDisplaySetupScore)
-    ? `Setup ${Math.max(0, Math.min(10, Math.round(sharedDisplaySetupScore)))}/10`
-    : (view && view.setupScoreDisplay
-    ? String(view.setupScoreDisplay)
-    : setupScoreDisplayForRecord(record))));
+  // Current Track score authority is the matching immutable publication only.
+  // Transports and stored setup/scan/review scores are migration metadata.
+  const recordDisplaySetupScore = publicationScore;
+  const canonicalWatchlistScoreDisplay = publicationScore === null
+    ? 'Setup unavailable'
+    : `Setup ${publicationScore}/10`;
   const watchlistScoreText = liveRefreshPending
     ? 'Refreshing...'
-    : (expired ? 'Expired' : canonicalWatchlistScoreDisplay.replace('Setup ', ''));
+    : (expired ? 'Expired' : (publicationScore === null ? 'Setup unavailable' : canonicalWatchlistScoreDisplay.replace('Setup ', '')));
   const watchlistScoreClass = liveRefreshPending ? 's-neutral' : 'visual-score';
   const hideWatchlistScore = shouldHideWatchlistScore(watchlistState, prioritySortValue);
   const watchlistScoreMarkup = hideWatchlistScore
@@ -16603,15 +16633,11 @@ function renderWatchlistCardElement(record, options = {}){
   const renderedBucket = visualBucket;
   const clickedCardProjectionSnapshot = {
     ticker:entry.ticker,
-    setupScore:Number.isFinite(recordDisplaySetupScore)
-      ? Math.max(0, Math.min(10, Math.round(recordDisplaySetupScore)))
-      : (Number.isFinite(transportedSetupScore)
-      ? Math.max(0, Math.min(10, Math.round(transportedSetupScore)))
-      : (Number.isFinite(sharedDisplaySetupScore)
-      ? Math.max(0, Math.min(10, Math.round(sharedDisplaySetupScore)))
-      : (Number.isFinite(Number(view && view.setupScore))
-      ? Number(view.setupScore)
-      : setupScoreForRecord(record)))),
+    setupScore:publicationScore,
+    scoreAvailable:publicationScore !== null,
+    publicationId:String(simplifiedState && simplifiedState.publicationId || ''),
+    evidenceId:String(simplifiedState && simplifiedState.evidenceId || ''),
+    refreshCycleId:String(simplifiedState && simplifiedState.refreshCycleId || ''),
     finalVerdict:canonicalVerdict,
     canonicalVerdict,
     renderedVerdict:canonicalVerdict,
@@ -19359,13 +19385,12 @@ function resolveGlobalVisualState(record, context = 'scanner', options = {}){
 }
 
 function resolveVisualState(record, context = 'scanner', options = {}){
-  const canonicalSource = resolveGlobalVerdict(record && typeof record === 'object' ? record : {});
-  const publication = canonicalSource && canonicalSource.canonicalPublication;
+  const publication = canonicalPublicationForRecord(record && typeof record === 'object' ? record : {});
   return resolveVisualStateImpl(record, context, {
     ...(options && typeof options === 'object' ? options : {}),
     publication
   }, {
-    resolveGlobalVerdict:() => canonicalSource
+    resolveGlobalVerdict:() => ({canonicalPublication:publication})
   });
 }
 
@@ -19411,22 +19436,24 @@ function renderCompactResultCard(record){
 
 function simplifiedVisualBadgeClass(visualBucket){
   return ({
+    unavailable:'badge--unavailable',
     entry:'badge--entry ready',
     near_entry:'badge--near-entry near',
     monitor:'badge--monitor watch',
     diminishing:'badge--diminishing',
     avoid:'badge--avoid avoid'
-  })[normalizeVisualBucketForPairing(visualBucket || 'monitor')] || 'badge--monitor watch';
+  })[String(visualBucket || '').trim().toLowerCase() === 'unavailable' ? 'unavailable' : normalizeVisualBucketForPairing(visualBucket || 'monitor')] || 'badge--monitor watch';
 }
 
 function simplifiedVisualCardClass(visualBucket){
   return ({
+    unavailable:'card--unavailable',
     entry:'card--entry',
     near_entry:'card--near-entry',
     monitor:'card--monitor',
     diminishing:'card--diminishing',
     avoid:'card--avoid'
-  })[normalizeVisualBucketForPairing(visualBucket || 'monitor')] || 'card--monitor';
+  })[String(visualBucket || '').trim().toLowerCase() === 'unavailable' ? 'unavailable' : normalizeVisualBucketForPairing(visualBucket || 'monitor')] || 'card--monitor';
 }
 
 /* LEGACY COLOUR LOGIC DISABLED
@@ -19855,6 +19882,9 @@ function renderCompactResultCardFromView(view){
     source:'scan_render',
     mutationSource:'scan_render'
   });
+  if(simplifiedState.publicationStatus !== 'valid'){
+    return `<div class="resultcompact result-card result-feed-card scan-card visual-state-card visual-state-unavailable visual-tone-unavailable card--unavailable" data-visual-tone="unavailable" data-visual-state="unavailable" data-ticker="${escapeHtml(item.ticker || '')}" data-source-verdict=""><div class="scan-card__header"><div class="scan-card__header-row"><div class="scan-card__ticker ticker">${escapeHtml(item.ticker || '')}</div></div><div class="scan-card__status badge-score-row result-feed-card__status"><span class="badge state-pill badge--unavailable">Not assessed</span></div></div><div class="scan-card__body"><div class="scan-card__decision resultreason decision-summary">Not assessed yet. Run an authoritative refresh to publish a decision.</div></div></div>`;
+  }
   // Scan presentation is a pure projection of the freshly published
   // simplified state. Cached Scan snapshots are diagnostic/history only and
   // must never replace its canonical status, bucket, or tone.
@@ -23175,8 +23205,8 @@ function legacyResolveSimplifiedStateForSurfaceObserverOnly(record, surface = 'r
 // is appended here.
 function resolveSimplifiedStateForSurface(record, surface = 'review', options = {}){
   const item = record && typeof record === 'object' ? record : {};
-  const publicationSource = resolveGlobalVerdict(item);
-  const publication = publicationSource && publicationSource.canonicalPublication;
+  // Render paths consume a scan publication; they never invoke the resolver.
+  const publication = canonicalPublicationForRecord(item);
   if(window.SimplifiedTradeState && typeof window.SimplifiedTradeState.resolveRecordState === 'function'){
     const mapped = window.SimplifiedTradeState.resolveRecordState(item, {
       publication,
@@ -32088,10 +32118,10 @@ function buildTrackLongPressContract(options = {}){
     : (currentTrackPresentation && currentTrackPresentation.longPressModel && typeof currentTrackPresentation.longPressModel === 'object'
       ? currentTrackPresentation.longPressModel
       : null);
-  const globalVerdict = options && typeof options.globalVerdict === 'object' ? options.globalVerdict : {};
-  const derivedStates = options && typeof options.derivedStates === 'object' ? options.derivedStates : {};
-  const displayedPlan = options && typeof options.displayedPlan === 'object' ? options.displayedPlan : {};
-  const resolvedContract = options && typeof options.resolvedContract === 'object' ? options.resolvedContract : {};
+  const globalVerdict = options && options.globalVerdict && typeof options.globalVerdict === 'object' ? options.globalVerdict : {};
+  const derivedStates = options && options.derivedStates && typeof options.derivedStates === 'object' ? options.derivedStates : {};
+  const displayedPlan = options && options.displayedPlan && typeof options.displayedPlan === 'object' ? options.displayedPlan : {};
+  const resolvedContract = options && options.resolvedContract && typeof options.resolvedContract === 'object' ? options.resolvedContract : {};
   const currentPresentationVerdict = currentTrackPresentation
     ? normalizeGlobalVerdictKey(currentTrackPresentation.canonicalVerdict || currentTrackPresentation.finalVerdict || '')
     : '';
@@ -45853,21 +45883,26 @@ function renderScannerResults(){
       ...view,
       simplifiedState
     });
-    const canonicalVerdict = normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict || 'watch');
-    const publicScanBucket = normalizeVisualBucketForPairing(
-      simplifiedState.visualBucket
-      || scanPresentation.presentationBucket
-      || scanPresentation.visualBucket
-      || 'monitor',
-      canonicalVerdict
-    );
-    const publicScanSection = publicScanBucket === 'entry'
+    const publicationAvailable = String(simplifiedState && simplifiedState.publicationStatus || '').toLowerCase() === 'valid';
+    const canonicalVerdict = publicationAvailable ? normalizeGlobalVerdictKey(simplifiedState.canonicalVerdict) : 'unavailable';
+    const publicScanBucket = publicationAvailable
+      ? normalizeVisualBucketForPairing(
+        simplifiedState.visualBucket
+        || scanPresentation.presentationBucket
+        || scanPresentation.visualBucket
+        || 'monitor',
+        canonicalVerdict
+      )
+      : 'unavailable';
+    const publicScanSection = publicScanBucket === 'unavailable'
+      ? 'unavailable'
+      : (publicScanBucket === 'entry'
       ? 'tradeable_entry'
       : (publicScanBucket === 'near_entry'
         ? 'near_entry'
         : (publicScanBucket === 'avoid'
           ? 'avoid'
-          : (publicScanBucket === 'diminishing' ? 'monitor_diminishing' : 'monitor_watch')));
+          : (publicScanBucket === 'diminishing' ? 'monitor_diminishing' : 'monitor_watch'))));
     return {
       ...view,
       simplifiedState,
@@ -45878,7 +45913,15 @@ function renderScannerResults(){
         visualBucket:publicScanBucket,
         presentationBucket:publicScanBucket,
         tone:publicScanBucket,
-        scanSection:publicScanSection
+        scanSection:publicScanSection,
+        badgeLabel:publicationAvailable ? scanPresentation.badgeLabel : 'Not assessed',
+        setupScoreDisplay:publicationAvailable ? scanPresentation.setupScoreDisplay : '',
+        scoreAvailable:publicationAvailable && simplifiedState.scoreAvailable === true,
+        eligibility:publicationAvailable ? simplifiedState.eligibility : null,
+        planVisible:publicationAvailable && !!simplifiedState.canonicalPlan,
+        publicationId:String(simplifiedState.publicationId || ''),
+        evidenceId:String(simplifiedState.evidenceId || ''),
+        refreshCycleId:String(simplifiedState.refreshCycleId || '')
       }
     };
   });
@@ -45909,12 +45952,15 @@ function renderScannerResults(){
           ? view.simplifiedState
           : null;
         if(canonicalScanState){
-          const canonicalVerdict = normalizeGlobalVerdictKey(canonicalScanState.canonicalVerdict || 'watch');
-          const canonicalBucket = normalizeVisualBucketForPairing(canonicalScanState.visualBucket || 'monitor', canonicalVerdict);
-          const canonicalTone = String(canonicalBucket || 'monitor').trim().toLowerCase() || 'monitor';
+          const publicationAvailable = String(canonicalScanState.publicationStatus || '').toLowerCase() === 'valid';
+          const canonicalVerdict = publicationAvailable ? normalizeGlobalVerdictKey(canonicalScanState.canonicalVerdict) : 'unavailable';
+          const canonicalBucket = publicationAvailable
+            ? normalizeVisualBucketForPairing(canonicalScanState.visualBucket || 'monitor', canonicalVerdict)
+            : 'unavailable';
+          const canonicalTone = canonicalBucket;
           const badgeNode = node.querySelector('.badge.state-pill');
           if(badgeNode){
-            badgeNode.textContent = String(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch').trim();
+            badgeNode.textContent = canonicalVerdict === 'unavailable' ? 'Not assessed' : String(verdictPresentationLabelForKey(canonicalVerdict) || 'Watch').trim();
             badgeNode.className = `badge state-pill ${simplifiedVisualBadgeClass(canonicalBucket)}`;
           }
           const projectionDiagnostics = {};
@@ -45925,7 +45971,14 @@ function renderScannerResults(){
           }, projectionDiagnostics);
           node.setAttribute('data-projection-class-debug', JSON.stringify(projectionDiagnostics));
           node.setAttribute('data-visual-tone', canonicalTone);
-          node.setAttribute('data-visual-state', presentationVisualStateForVerdict(canonicalVerdict));
+          node.setAttribute('data-visual-state', canonicalVerdict === 'unavailable' ? 'unavailable' : presentationVisualStateForVerdict(canonicalVerdict));
+          node.setAttribute('data-publication-id', String(canonicalScanState.publicationId || ''));
+          node.setAttribute('data-evidence-id', String(canonicalScanState.evidenceId || ''));
+          node.setAttribute('data-refresh-cycle-id', String(canonicalScanState.refreshCycleId || ''));
+          node.setAttribute('data-publication-status', String(canonicalScanState.publicationStatus || 'validation_failed'));
+          if(!publicationAvailable){
+            node.querySelectorAll('.score, .visual-score, [data-role="eligibility"], [data-role="plan"]').forEach(element => element.remove());
+          }
         }
         const ticker = view.ticker;
         const sourceVerdict = node.getAttribute('data-source-verdict') || '';
@@ -46258,6 +46311,23 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     preview:eligible ? {entry:Number(entry), stop:Number(stop), target:Number(target), positionSize:Math.floor(Number(risk.positionSize)), maxLoss:Number(risk.maximumLoss), rrRatio:Number.isFinite(Number(rr)) ? Number(rr) : null} : null
   };
   const verdict = normalizeGlobalVerdictKey(publication.canonicalVerdict || 'watch');
+  const publicationIdentity = {
+    publicationId:String(publication.publicationId || ''),
+    evidenceId:String(publication.evidenceId || ''),
+    refreshCycleId:String(publication.refreshCycleId || ''),
+    recordIdentity:String(publication.recordIdentity || '')
+  };
+  const blockingGates = [
+    publication.publicationStatus === 'valid',
+    publication.actionable === true,
+    entryQualified,
+    validPlan,
+    levelsPresent,
+    unitsConsistent,
+    Number.isFinite(Number(risk.riskPerShare)) && Number(risk.riskPerShare) > 0,
+    Number.isFinite(Number(risk.positionSize)) && Number(risk.positionSize) >= 1,
+    Number.isFinite(Number(risk.maximumLoss)) && Number(risk.maximumLoss) > 0
+  ].map((passed, index) => ({key:['publication_valid','actionable','entry_qualified','plan_valid','levels_present','units_consistent','risk_per_share','position_size','maximum_loss'][index], passed}));
   const actionabilityState = eligible ? 'ready_to_submit' : (failed ? 'validation_failed' : (verdict === 'entry' ? 'entry_blocked' : 'waiting_for_confirmation'));
   const legacyProjection = item.review && item.review.savedProjectionSnapshot && typeof item.review.savedProjectionSnapshot === 'object'
     ? item.review.savedProjectionSnapshot : null;
@@ -46279,6 +46349,7 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     ticker:item.ticker,
     record:item,
     canonicalPublication:publication,
+    ...publicationIdentity,
     publicationStatus:failed ? 'validation_failed' : String(publication.publicationStatus || 'valid'),
     canonicalNormVersion:String(publication.canonicalNormVersion || ''),
     canonicalResultVersion:String(publication.canonicalResultVersion || ''),
@@ -46286,6 +46357,15 @@ function canonicalPaperTradeContextFromPublication(record, publication = {}){
     canonicalVerdict:verdict,
     finalVerdict:globalVerdictLabel(verdict),
     actionable:failed ? false : publication.actionable === true,
+    resolvedStatus:failed ? 'unavailable' : verdict,
+    entryEligibility:failed ? null : publication.entryEligibility,
+    paperTradeEligibility:eligibility,
+    planVisibility:failed ? false : publication.planVisible === true,
+    triggerSatisfied:failed ? false : publication.entryGatePass === true,
+    planValid:validPlan,
+    blockingGates,
+    scoreAvailable:failed ? false : publication.scoreAvailable === true,
+    setupScore:failed || publication.scoreAvailable !== true ? null : publication.setupScore,
     displayedPlan,
     eligibility,
     paperTradeEnabled:eligible,
@@ -49353,10 +49433,14 @@ function renderReviewWorkspace(options = {}){
   });
   const displayedReviewChecks = resolvedReviewChecksForDisplay(reviewChecks, reviewChecklistContext);
   const reviewSetupQuality = scoreAndStatusFromChecks(displayedReviewChecks, reviewChecklistContext);
-  const reviewScoreRecord = canonicalLiveRecord || record;
-  const setupScore = setupScoreForRecord(reviewScoreRecord);
-  const setupScoreDisplay = `Setup ${setupScore}/10`;
-  const setupQualityLabel = setupQualityLabelForScore(setupScore);
+  const publicationSetupScore = String(reviewEffectiveSimplifiedState && reviewEffectiveSimplifiedState.publicationStatus || '').toLowerCase() === 'valid'
+    && reviewEffectiveSimplifiedState.scoreAvailable === true
+    && Number.isFinite(Number(reviewEffectiveSimplifiedState.setupScore))
+    ? Math.max(0, Math.min(10, Math.round(Number(reviewEffectiveSimplifiedState.setupScore))))
+    : null;
+  const setupScore = publicationSetupScore;
+  const setupScoreDisplay = setupScore === null ? 'Setup unavailable' : `Setup ${setupScore}/10`;
+  const setupQualityLabel = setupScore === null ? 'Not assessed' : setupQualityLabelForScore(setupScore);
   const setupQualitySummary = reviewSetupQualitySummary(displayedReviewChecks, reviewSetupQuality, reviewChecklistContext);
   const setupQualityEvidence = 'Weighted by resolver state, current structure, bounce, plan validity, and priceability. Raw checklist evidence is kept internally only.';
   const convictionTier = convictionTierLabel(record.setup.convictionTier || '');
@@ -54627,8 +54711,133 @@ function resolvePreLifecycleStateContract(record, options = {}){
   };
 }
 
+function canonicalPublicationIdentityForRecord(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const ticker = String(item.ticker || item.symbol || '').trim().toUpperCase();
+  return {
+    ticker,
+    recordIdentity:`${ticker}:${String(item.meta && item.meta.createdAt || '')}`,
+    refreshCycleId:String(item.scan && (item.scan.updatedAt || item.scan.lastScannedAt) || '')
+  };
+}
+
+function persistableCanonicalPublicationAuthority(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
+  const publication = authority.canonicalPublication && typeof authority.canonicalPublication === 'object'
+    ? cloneData(authority.canonicalPublication, null)
+    : null;
+  const projection = authority.canonicalResolverProjection && typeof authority.canonicalResolverProjection === 'object'
+    ? cloneData(authority.canonicalResolverProjection, null)
+    : null;
+  const identity = canonicalPublicationIdentityForRecord(item);
+  return {
+    version:Number.isFinite(Number(authority.version)) ? Number(authority.version) : 0,
+    source:String(authority.source || ''),
+    updatedAt:String(authority.updatedAt || ''),
+    reason:String(authority.reason || ''),
+    canonicalPublication:publication,
+    canonicalResolverProjection:projection,
+    canonicalPublicationPersistence:{
+      schemaVersion:CANONICAL_PUBLICATION_PERSISTENCE_SCHEMA_VERSION,
+      publicationPersisted:!!publication,
+      persistedPublicationId:String(publication && publication.publicationId || ''),
+      persistedEvidenceId:String(publication && publication.evidenceId || ''),
+      persistedCycleId:String(publication && publication.refreshCycleId || ''),
+      recordIdentity:String(identity.recordIdentity || '')
+    }
+  };
+}
+
+function canonicalPublicationForRecord(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const publication = item.authority && item.authority.canonicalPublication;
+  const identity = canonicalPublicationIdentityForRecord(item);
+  const persistence = item.authority && item.authority.canonicalPublicationPersistence;
+  if(!publication || !window.CanonicalDecisionResult || typeof window.CanonicalDecisionResult.publicationMatches !== 'function') return null;
+  if(persistence && (
+    persistence.schemaVersion !== CANONICAL_PUBLICATION_PERSISTENCE_SCHEMA_VERSION
+    || persistence.publicationPersisted !== true
+    || String(persistence.persistedPublicationId || '') !== String(publication.publicationId || '')
+    || String(persistence.persistedEvidenceId || '') !== String(publication.evidenceId || '')
+    || String(persistence.persistedCycleId || '') !== String(publication.refreshCycleId || '')
+    || String(persistence.recordIdentity || '') !== String(identity.recordIdentity || '')
+  )) return null;
+  // A local fact edit invalidates the publication immediately. This is a
+  // pure evidence comparison, not a resolver invocation: rendering remains
+  // unavailable until the next authoritative scan/refresh republishes.
+  const currentEvidence = window.CanonicalResolverInput
+    && typeof window.CanonicalResolverInput.normaliseDecisionEvidence === 'function'
+    ? window.CanonicalResolverInput.normaliseDecisionEvidence(item, {surface:'resolver-core'})
+    : null;
+  const publishedEvidence = publication.canonicalResult && publication.canonicalResult.evidence;
+  if(currentEvidence && publishedEvidence && (
+    JSON.stringify(currentEvidence.values || {}) !== JSON.stringify(publishedEvidence.values || {})
+    || JSON.stringify(currentEvidence.factualStates || {}) !== JSON.stringify(publishedEvidence.factualStates || {})
+  )) return null;
+  return window.CanonicalDecisionResult.publicationMatches(publication, identity) ? publication : null;
+}
+
+function canonicalPublicationProjectionForRecord(record){
+  const item = record && typeof record === 'object' ? record : {};
+  const publication = canonicalPublicationForRecord(item);
+  const snapshot = item.authority && item.authority.canonicalResolverProjection;
+  if(!publication || !snapshot || typeof snapshot !== 'object') return null;
+  if(['publicationId','evidenceId','refreshCycleId','canonicalResultVersion'].some(field => {
+    const value = String(snapshot[field] || '');
+    return value && value !== String(publication[field] || '');
+  })) return null;
+  return {
+    ...snapshot,
+    canonicalPublication:publication,
+    canonicalDecisionResult:publication.canonicalResult,
+    publicationStatus:publication.publicationStatus,
+    publicationId:publication.publicationId,
+    evidenceId:publication.evidenceId,
+    refreshCycleId:publication.refreshCycleId,
+    canonicalResultVersion:publication.canonicalResultVersion
+  };
+}
+
+// The sole current-state publication boundary. Call this immediately after a
+// scan/refresh has written its facts; render paths only read the result.
+function publishCanonicalPublicationForRecord(record){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item) return null;
+  const resolved = resolveGlobalVerdict(item, {forceResolve:true});
+  const rawPublication = resolved && resolved.canonicalPublication;
+  if(!rawPublication || !window.CanonicalDecisionResult || typeof window.CanonicalDecisionResult.identifyPublication !== 'function') return null;
+  const identity = canonicalPublicationIdentityForRecord(item);
+  const publication = window.CanonicalDecisionResult.identifyPublication(rawPublication, identity);
+  item.authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
+  item.authority.canonicalPublication = publication;
+  const snapshot = {...resolved};
+  delete snapshot.canonicalPublication;
+  delete snapshot.canonicalDecisionResult;
+  snapshot.publicationId = publication.publicationId;
+  snapshot.evidenceId = publication.evidenceId;
+  snapshot.refreshCycleId = publication.refreshCycleId;
+  snapshot.canonicalResultVersion = publication.canonicalResultVersion;
+  snapshot.recordIdentity = publication.recordIdentity;
+  snapshot.validationStatus = publication.validationStatus;
+  item.authority.canonicalPublicationPersistence = {
+    schemaVersion:CANONICAL_PUBLICATION_PERSISTENCE_SCHEMA_VERSION,
+    publicationPersisted:true,
+    persistedPublicationId:publication.publicationId,
+    persistedEvidenceId:publication.evidenceId,
+    persistedCycleId:publication.refreshCycleId,
+    recordIdentity:publication.recordIdentity
+  };
+  item.authority.canonicalResolverProjection = snapshot;
+  return canonicalPublicationProjectionForRecord(item);
+}
+
 function resolveGlobalVerdict(record, deps = {}){
   const item = record && typeof record === 'object' ? record : {};
+  if(deps.forceResolve !== true && typeof canonicalPublicationProjectionForRecord === 'function'){
+    const published = canonicalPublicationProjectionForRecord(item);
+    if(published) return published;
+  }
   const effectivePlanResolver = deps.effectivePlanForRecord || effectivePlanForRecord;
   const deriveDisplayedPlan = deps.deriveCurrentPlanState || deriveCurrentPlanState;
   const applyPlanGate = deps.applySetupConfirmationPlanGate || applySetupConfirmationPlanGate;

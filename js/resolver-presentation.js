@@ -19,6 +19,7 @@
   }
 
   function visualStateKey(finalVerdict, deps = {}){
+    if(String(finalVerdict || '').trim().toLowerCase() === 'unavailable') return 'unavailable';
     const normalized = coerceCanonicalVerdict(finalVerdict, deps);
     if(normalized === 'entry') return 'entry';
     if(normalized === 'near_entry') return 'near_entry';
@@ -27,6 +28,7 @@
   }
 
   function visualToneForState(state){
+    if(state === 'unavailable') return 'unavailable';
     if(state === 'entry') return 'entry';
     if(state === 'near_entry') return 'near_entry';
     if(state === 'avoid') return 'avoid';
@@ -34,6 +36,7 @@
   }
 
   function visualPaletteForState(state){
+    if(state === 'unavailable') return {top:'#64748B', border:'rgba(100, 116, 139, 0.52)'};
     if(state === 'entry') return {top:'#16A34A', border:'rgba(22, 163, 74, 0.44)'};
     if(state === 'near_entry') return {top:'#0284C7', border:'rgba(2, 132, 199, 0.44)'};
     if(state === 'avoid') return {top:'#D50032', border:'rgba(213, 0, 50, 0.48)'};
@@ -48,6 +51,7 @@
   }
 
   function cardClassForState(state){
+    if(state === 'unavailable') return 'card--unavailable';
     if(state === 'entry') return 'card--entry';
     if(state === 'near_entry') return 'card--near-entry';
     if(state === 'avoid') return 'card--avoid';
@@ -732,29 +736,32 @@
       ? envelope.safeFallback
       : {};
     const verdict = failed
-      ? coerceCanonicalVerdict(fallback.verdict || 'watch')
+      ? 'unavailable'
       : coerceCanonicalVerdict(canonical && canonical.verdict && canonical.verdict.value || 'watch');
     const plan = canonical && canonical.plan || {};
     const semantics = canonical && canonical.semantics || {};
     const blocker = failed
-      ? 'Canonical decision validation failed.'
+      ? 'Not assessed yet. Run an authoritative refresh to publish a decision.'
       : String(canonical && canonical.verdict && canonical.verdict.decisiveBlocker || '');
     const visualBucket = verdict === 'watch' ? 'monitor' : verdict;
     const tone = visualBucket;
     const copy = presentationCopyForCanonical(verdict, blocker, failed ? 'validation_failed' : 'valid');
     const state = visualStateKey(verdict);
-    const badgeText = verdict === 'near_entry' ? 'Near Entry' : (verdict === 'entry' ? 'Entry' : (verdict === 'avoid' ? 'Avoid' : 'Watch'));
+    const badgeText = verdict === 'unavailable' ? 'Not assessed' : (verdict === 'near_entry' ? 'Near Entry' : (verdict === 'entry' ? 'Entry' : (verdict === 'avoid' ? 'Avoid' : 'Watch')));
     const icon = verdict === 'entry' ? '✓' : (verdict === 'near_entry' ? '◐' : (verdict === 'avoid' ? '!' : '◌'));
     return {
       publicationStatus:failed ? 'validation_failed' : 'valid',
       canonicalNormVersion:failed ? String(envelope.validation && envelope.validation.normVersion || '') : String(canonical.normVersion || ''),
       canonicalResultVersion:failed ? '' : String(canonical.schemaVersion || ''),
       evidenceId:failed ? '' : String(canonical.snapshot && canonical.snapshot.evidenceId || ''),
+      publicationId:String(envelope.publicationId || ''),
+      refreshCycleId:String(envelope.refreshCycleId || ''),
+      recordIdentity:String(envelope.recordIdentity || ''),
       state,
-      finalVerdict:verdict,
-      final_verdict:verdict,
-      renderedVerdict:verdict,
-      canonicalVerdict:verdict,
+      finalVerdict:failed ? '' : verdict,
+      final_verdict:failed ? '' : verdict,
+      renderedVerdict:failed ? '' : verdict,
+      canonicalVerdict:failed ? '' : verdict,
       actionable:failed ? false : canonical.verdict.actionable === true,
       entryEligibility:failed ? null : canonical.eligibility && canonical.eligibility.entry,
       nearEntryEligibility:failed ? null : canonical.eligibility && canonical.eligibility.nearEntry,
@@ -783,8 +790,8 @@
       reason:blocker || copy.summary,
       allowPlan:failed ? false : plan.visibility && plan.visibility.mayShowPlan === true,
       allow_plan:failed ? false : plan.visibility && plan.visibility.mayShowPlan === true,
-      className:`visual-state-card visual-state-${state} visual-tone-${tone} ${cardClassForBucket(visualBucket)}`,
-      toneClass:`visual-state-${state} visual-tone-${tone} ${cardClassForBucket(visualBucket)}`,
+      className:`visual-state-card visual-state-${state} visual-tone-${tone} ${failed ? 'card--unavailable' : cardClassForBucket(visualBucket)}`,
+      toneClass:`visual-state-${state} visual-tone-${tone} ${failed ? 'card--unavailable' : cardClassForBucket(visualBucket)}`,
       styleAttr:visualStyleForState(tone === 'diminishing' ? 'watch' : tone, 0),
       presentation:{
         category:'A', compatibilityOnly:true, mayFeedDecisionLogic:false,

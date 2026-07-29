@@ -5,6 +5,7 @@
     if(bucket === 'entry') return 'ready';
     if(bucket === 'near_entry') return 'near';
     if(bucket === 'avoid') return 'avoid';
+    if(bucket === 'unavailable') return 'badge--unavailable';
     return String(fallbackClassName || 'watch').trim() || 'watch';
   }
 
@@ -14,14 +15,14 @@
     const status = String(safe.resolvedStatus || safe.canonicalVerdict || '').trim().toLowerCase();
     if(!tone || !status) return String(className || '');
     const originalTokens = String(className || '').split(/\s+/).filter(Boolean);
-    const previousAccentClass = originalTokens.find(token => /^card--(watch|monitor|near-entry|near_entry|entry|avoid)$/i.test(token)) || '';
-    const previousVisualTone = originalTokens.find(token => /^visual-tone-(watch|monitor|near_entry|entry|avoid)$/i.test(token)) || '';
-    const previousVisualState = originalTokens.find(token => /^visual-state-(watch|monitor|near_entry|entry|avoid)$/i.test(token)) || '';
+    const previousAccentClass = originalTokens.find(token => /^card--(watch|monitor|near-entry|near_entry|entry|avoid|unavailable)$/i.test(token)) || '';
+    const previousVisualTone = originalTokens.find(token => /^visual-tone-(watch|monitor|near_entry|entry|avoid|unavailable)$/i.test(token)) || '';
+    const previousVisualState = originalTokens.find(token => /^visual-state-(watch|monitor|near_entry|entry|avoid|unavailable)$/i.test(token)) || '';
     const accentTone = tone === 'near_entry' ? 'near-entry' : tone;
     const projectedAccentClass = `card--${accentTone}`;
     const projectedVisualTone = `visual-tone-${tone}`;
     const projectedVisualState = `visual-state-${status}`;
-    const tokens = originalTokens.filter(token => !/^(?:visual-(?:tone|state)-(watch|monitor|near_entry|entry|avoid)|card--(?:watch|monitor|near-entry|near_entry|entry|avoid))$/i.test(token));
+    const tokens = originalTokens.filter(token => !/^(?:visual-(?:tone|state)-(watch|monitor|near_entry|entry|avoid|unavailable)|card--(?:watch|monitor|near-entry|near_entry|entry|avoid|unavailable))$/i.test(token));
     tokens.push(projectedVisualTone, projectedVisualState, projectedAccentClass);
     const finalClassName = [...new Set(tokens)].join(' ');
     if(diagnostics && typeof diagnostics === 'object'){
@@ -92,8 +93,9 @@
       className:classNameWithProjectedTone(visualState.className || visualState.toneClass, scanPresentation, projectionClassDiagnostics)
     } : visualState;
     if(scanPresentation && view && typeof view === 'object') view.projectionClassDiagnostics = projectionClassDiagnostics;
-    const sourceVerdict = globalVerdictLabel(renderedVisualState.finalVerdict || renderedVisualState.final_verdict);
-    const scoreLabel = view.setupScoreDisplay;
+    const unavailable = String(scanPresentation && scanPresentation.resolvedStatus || '').trim().toLowerCase() === 'unavailable';
+    const sourceVerdict = unavailable ? '' : globalVerdictLabel(renderedVisualState.finalVerdict || renderedVisualState.final_verdict);
+    const scoreLabel = unavailable ? '' : view.setupScoreDisplay;
     const resolvedBadge = scanPresentation && String(scanPresentation.badgeLabel || '').trim()
       ? {
         text:String(scanPresentation.badgeLabel || '').trim(),
@@ -104,7 +106,7 @@
     const summary = renderedVisualState.decision_summary || scanCardPrimaryActionLabel(view);
     const secondaryUiMarkup = renderScanCardSecondaryUi(view);
     const menuState = currentScanCardMenuState(item.ticker);
-    return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(renderedVisualState.className || renderedVisualState.toneClass || '')}" style="${escapeHtml(renderedVisualState.styleAttr || '')}" data-visual-tone="${escapeHtml(renderedVisualState.visual_tone || '')}" data-visual-state="${escapeHtml(renderedVisualState.state || '')}" data-projection-class-debug="${escapeHtml(JSON.stringify(projectionClassDiagnostics))}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(resolvedBadge.className || statusChip.className)}">${escapeHtml(resolvedBadge.text || resolvedBadge.label || statusChip.label)}</span><span class="score visual-score">${escapeHtml(scoreLabel)}</span></div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div></div><div class="resultsummary"><div class="resultreason decision-summary">${escapeHtml(summary)}</div></div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
+    return `<div class="resultcompact result-card result-feed-card scan-card ${escapeHtml(renderedVisualState.className || renderedVisualState.toneClass || '')}" style="${escapeHtml(renderedVisualState.styleAttr || '')}" data-visual-tone="${escapeHtml(renderedVisualState.visual_tone || '')}" data-visual-state="${escapeHtml(renderedVisualState.state || '')}" data-projection-class-debug="${escapeHtml(JSON.stringify(projectionClassDiagnostics))}" data-ticker="${escapeHtml(item.ticker)}" data-source-verdict="${escapeHtml(sourceVerdict)}"><div class="resultcompacthead"><div class="resultidentity"><div class="ticker">${escapeHtml(item.ticker)}</div><div class="badge-score-row result-feed-card__status"><span class="badge state-pill ${escapeHtml(resolvedBadge.className || statusChip.className)}">${escapeHtml(resolvedBadge.text || resolvedBadge.label || statusChip.label)}</span>${scoreLabel ? `<span class="score visual-score">${escapeHtml(scoreLabel)}</span>` : ''}</div>${companyLine ? `<div class="tiny resultsupport">${escapeHtml(companyLine)}</div>` : ''}</div></div><div class="resultsummary"><div class="resultreason decision-summary">${escapeHtml(summary)}</div></div><button class="card-overflow-button no-card-click" type="button" data-act="overflow-toggle" aria-label="Open card actions" aria-expanded="${menuState.menuOpen ? 'true' : 'false'}"><span class="dot"></span><span class="dot"></span><span class="dot"></span></button>${secondaryUiMarkup}</div>`;
   }
 
   function scanCardSummaryForView(view, deps){
@@ -140,11 +142,14 @@
 
   function scanCardPrimaryActionLabel(view, deps){
     const {
-      resolveGlobalVerdict,
       getActions
     } = deps;
     const item = view && view.item ? view.item : view;
-    return getActions(resolveGlobalVerdict(item).final_verdict).label;
+    const simplified = view && view.simplifiedState && typeof view.simplifiedState === 'object' ? view.simplifiedState : null;
+    if(simplified && String(simplified.publicationStatus || '').toLowerCase() !== 'valid') return 'Not assessed yet.';
+    return simplified && String(simplified.actionLabel || '').trim()
+      ? String(simplified.actionLabel).trim()
+      : getActions('watch').label;
   }
 
   window.ScannerCardShell = {

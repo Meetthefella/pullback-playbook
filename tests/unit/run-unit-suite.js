@@ -65,6 +65,12 @@ const cases = [
     groups:['all', 'resolver', 'contracts']
   },
   {
+    id:'canonical-publication-identity',
+    label:'Canonical publication identity assertions',
+    script:'scripts/run-canonical-publication-identity-assertions.js',
+    groups:['all', 'resolver', 'contracts', 'persistence']
+  },
+  {
     id:'resolver-presentation-publication',
     label:'ResolverPresentation publication assertions',
     script:'scripts/run-resolver-presentation-publication-assertions.js',

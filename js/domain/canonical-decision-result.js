@@ -2,6 +2,51 @@
   const NORM_VERSION = 'canonical-norm-v1.1';
   const RESULT_VERSION = 'canonical-decision-result-v1.1';
 
+  // A publication is deliberately more specific than a result. A result says
+  // what the resolver concluded; a publication says which authoritative scan
+  // cycle made that conclusion available to the rest of the app.
+  function text(value){ return String(value == null ? '' : value).trim(); }
+  function publicationMetadata(publication, options = {}){
+    const envelope = publication && typeof publication === 'object' ? publication : {};
+    const canonical = envelope.canonicalResult && typeof envelope.canonicalResult === 'object' ? envelope.canonicalResult : null;
+    const ticker = text(options.ticker || envelope.ticker).toUpperCase();
+    const evidenceId = text(options.evidenceId || envelope.evidenceId || canonical && canonical.snapshot && canonical.snapshot.evidenceId);
+    const canonicalResultVersion = text(options.canonicalResultVersion || envelope.canonicalResultVersion || canonical && canonical.schemaVersion || RESULT_VERSION);
+    const recordIdentity = text(options.recordIdentity || envelope.recordIdentity || ticker);
+    const refreshCycleId = text(options.refreshCycleId || options.cycleId || envelope.refreshCycleId);
+    const validationStatus = text(envelope.validationStatus || envelope.validation && envelope.validation.status || envelope.publicationStatus || 'validation_failed');
+    // ResolverCore can create a result-level envelope before the app knows
+    // the record and refresh-cycle identity. At the publication boundary an
+    // explicit identity must mint a new ID rather than retaining that
+    // pre-publication `unknown:*` placeholder.
+    const hasAuthoritativeIdentity = ['ticker','recordIdentity','refreshCycleId','cycleId','evidenceId','canonicalResultVersion']
+      .some(field => text(options[field]));
+    const publicationId = text(options.publicationId || (hasAuthoritativeIdentity ? '' : envelope.publicationId))
+      || [ticker || 'unknown', recordIdentity || 'unknown', refreshCycleId || 'unpublished', evidenceId || 'unavailable', canonicalResultVersion].join(':');
+    return {publicationId, evidenceId, canonicalResultVersion, recordIdentity, refreshCycleId, validationStatus, ticker};
+  }
+
+  function identifyPublication(publication, options = {}){
+    const envelope = publication && typeof publication === 'object' ? publication : {};
+    const metadata = publicationMetadata(envelope, options);
+    return deepFreeze({...envelope, ...metadata});
+  }
+
+  function publicationMatches(publication, expected = {}){
+    const metadata = publicationMetadata(publication);
+    const envelope = publication && typeof publication === 'object' ? publication : {};
+    if(envelope.publicationStatus !== 'valid' || metadata.validationStatus !== 'valid') return false;
+    const canonical = envelope.canonicalResult && typeof envelope.canonicalResult === 'object' ? envelope.canonicalResult : null;
+    if(!canonical
+      || metadata.evidenceId !== text(canonical.snapshot && canonical.snapshot.evidenceId)
+      || metadata.canonicalResultVersion !== text(canonical.schemaVersion)
+      || metadata.canonicalResultVersion !== RESULT_VERSION) return false;
+    return ['ticker', 'evidenceId', 'canonicalResultVersion', 'recordIdentity', 'refreshCycleId'].every(field => {
+      const wanted = text(expected[field]);
+      return !wanted || metadata[field] === wanted;
+    });
+  }
+
   function key(value, fallback = ''){
     const normalized = String(value == null ? '' : value).trim().toLowerCase().replace(/[\s-]+/g, '_');
     return normalized || fallback;
@@ -75,6 +120,12 @@
     const calculatedRr = entry !== null && stop !== null && firstTarget !== null && entry > stop
       ? (firstTarget - entry) / (entry - stop)
       : null;
+    // These execution facts are captured at publication time. Consumers such
+    // as Paper Trade must not reconstruct them from a mutable ticker record.
+    const riskPerShare = numberOrNull(candidate.resolvedPlanRiskPerShare)
+      ?? (entry !== null && stop !== null && entry > stop ? entry - stop : null);
+    const maximumLoss = numberOrNull(candidate.resolvedPlanMaximumLoss);
+    const positionSize = numberOrNull(candidate.resolvedPlanPositionSize);
     const gateRr = numberOrNull(candidate.resolvedRR);
     const priceability = key(candidate.priceability_state, 'unknown');
     const state = ['priceable','provisional'].includes(priceability) ? (priceability === 'provisional' ? 'provisional' : 'valid') : (priceability === 'unpriceable' ? 'unpriceable' : 'unavailable');
@@ -92,7 +143,8 @@
     return {
       state, priceability:{status:priceability, reasonCode:String(candidate.unpriceableBlockReason || ''), source:'resolver-core', provisional:state === 'provisional'},
       levels:{entry:{value:entry,valueState:valueState(entry),source:'resolver-core',currency:entryCurrency,evidenceIds:[evidence.snapshotId]},stop:{value:stop,valueState:valueState(stop),source:'resolver-core',currency:stopCurrency,evidenceIds:[evidence.snapshotId]},firstTarget:{value:firstTarget,valueState:valueState(firstTarget),source:'resolver-core',currency:targetCurrency,evidenceIds:[evidence.snapshotId]}},
-      rewardRisk:{resolvedRr:calculatedRr,valueState:valueState(calculatedRr),gateResolvedRr:gateRr,gateValueState:valueState(gateRr),threshold:rrThreshold,passes:gatePasses,source:'resolver-core',gateSource:'resolver-core.plan_gate',reasonCode:gatePasses === false ? 'canonical_gate_rr_failed' : ''},
+      rewardRisk:{resolvedRr:calculatedRr,valueState:valueState(calculatedRr),gateResolvedRr:gateRr,gateValueState:valueState(gateRr),riskPerShare,valueStateRiskPerShare:valueState(riskPerShare),threshold:rrThreshold,passes:gatePasses,source:'resolver-core',gateSource:'resolver-core.plan_gate',reasonCode:gatePasses === false ? 'canonical_gate_rr_failed' : ''},
+      risk:{riskPerShare,maximumLoss,positionSize,source:'resolver-core',valueState:{riskPerShare:valueState(riskPerShare),maximumLoss:valueState(maximumLoss),positionSize:valueState(positionSize)}},
       visibility:{mayShowPlan:mayShow,mayShowEntry:mayShow,mayShowStop:mayShow,mayShowTarget:mayShow,mayShowRr:mayShow && calculatedRr !== null,reasonCode:mayShow ? '' : 'canonical_plan_not_visible'},
       blocker:{code:String(candidate.semantic_blocker_code || ''),category:String(candidate.primary_blocker_source || ''),fields:[]},
       provenance:{planId:`${evidence.snapshotId}:plan`,evidenceId:evidence.snapshotId,resolverVersion:RESULT_VERSION,sourceCandidates:[],selectedAuthority:'resolver-core'}
@@ -205,7 +257,7 @@
     const canonicalResult = createCanonicalDecisionResult(candidate, evidence);
     const validation = canonicalResult.validation;
     if(validation.status === 'valid'){
-      return deepFreeze({publicationStatus:'valid', canonicalResult, safeFallback:null, invalidCandidate:null, validation});
+      return identifyPublication({publicationStatus:'valid', canonicalResult, safeFallback:null, invalidCandidate:null, validation}, options);
     }
     if(options.enforce === true){
       const error = new Error(`Canonical Norm violation: ${validation.violations.map(item => item.code).join(', ')}`);
@@ -214,7 +266,7 @@
       error.candidate = canonicalResult;
       throw error;
     }
-    return deepFreeze({publicationStatus:'validation_failed', canonicalResult:null, safeFallback:safeFallback(candidate, validation), invalidCandidate:canonicalResult, validation});
+    return identifyPublication({publicationStatus:'validation_failed', canonicalResult:null, safeFallback:safeFallback(candidate, validation), invalidCandidate:canonicalResult, validation}, options);
   }
 
   function compatibilityProjection(candidate, publication){
@@ -246,5 +298,5 @@
     return raw;
   }
 
-  global.CanonicalDecisionResult = {NORM_VERSION, RESULT_VERSION, validateCanonicalNorm, createCanonicalDecisionResult, publishCanonicalDecision, compatibilityProjection};
+  global.CanonicalDecisionResult = {NORM_VERSION, RESULT_VERSION, validateCanonicalNorm, createCanonicalDecisionResult, publishCanonicalDecision, compatibilityProjection, identifyPublication, publicationMetadata, publicationMatches};
 })(typeof window !== 'undefined' ? window : globalThis);

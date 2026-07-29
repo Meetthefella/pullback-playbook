@@ -767,6 +767,10 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
       scan:{
         simplifiedState:scanSimplified ? {
           canonicalVerdict:String(scanSimplified.canonicalVerdict || ''),
+          publicationId:String(scanSimplified.publicationId || ''),
+          evidenceId:String(scanSimplified.evidenceId || ''),
+          refreshCycleId:String(scanSimplified.refreshCycleId || ''),
+          publicationStatus:String(scanSimplified.publicationStatus || ''),
           visualBucket:String(scanSimplified.visualBucket || ''),
           tone:String(scanSimplified.tone || ''),
           setupScore:Number.isFinite(Number(scanSimplified.setupScore)) ? Number(scanSimplified.setupScore) : null,
@@ -777,6 +781,10 @@ async function extractAppTickerState(page, ticker, consoleEvents = []){
         } : null,
         renderPathSimplifiedState:scanRenderPathSimplified ? {
           canonicalVerdict:String(scanRenderPathSimplified.canonicalVerdict || ''),
+          publicationId:String(scanRenderPathSimplified.publicationId || ''),
+          evidenceId:String(scanRenderPathSimplified.evidenceId || ''),
+          refreshCycleId:String(scanRenderPathSimplified.refreshCycleId || ''),
+          publicationStatus:String(scanRenderPathSimplified.publicationStatus || ''),
           visualBucket:String(scanRenderPathSimplified.visualBucket || ''),
           tone:String(scanRenderPathSimplified.tone || ''),
           setupScore:Number.isFinite(Number(scanRenderPathSimplified.setupScore)) ? Number(scanRenderPathSimplified.setupScore) : null,

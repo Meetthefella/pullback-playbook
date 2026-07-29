@@ -152,6 +152,10 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
           ? Number(replay.canonicalContract.derivedStates.setupScore)
           : (replay && Number.isFinite(Number(replay.setupScore)) ? Number(replay.setupScore) : null),
         scanSimplifiedState: scanSimplified ? {
+          publicationId:normalize(scanSimplified.publicationId),
+          evidenceId:normalize(scanSimplified.evidenceId),
+          refreshCycleId:normalize(scanSimplified.refreshCycleId),
+          publicationStatus:normalize(scanSimplified.publicationStatus),
           canonicalVerdict: normalize(scanSimplified.canonicalVerdict).toLowerCase(),
           visualBucket: normalize(scanSimplified.visualBucket).toLowerCase(),
           setupScore: Number.isFinite(Number(scanSimplified.setupScore)) ? Number(scanSimplified.setupScore) : null,
@@ -260,18 +264,18 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
                   ? tickerResult.globalVerdict.canonicalVisualBucket
                   : 'monitor'))))
       );
-    const expectedSetupScore = Number.isFinite(tickerResult.replayOutput && tickerResult.replayOutput.setupScore)
-      ? Number(tickerResult.replayOutput.setupScore)
-      : (Number.isFinite(Number(tickerResult.rawScanResult && tickerResult.rawScanResult.score))
-        ? Number(tickerResult.rawScanResult && tickerResult.rawScanResult.score)
-        : (Number.isFinite(tickerResult.globalVerdict && tickerResult.globalVerdict.setupScore)
-          ? Number(tickerResult.globalVerdict.setupScore)
-          : null));
+    const expectedSetupScore = Number.isFinite(Number(tickerResult.scanSimplifiedState && tickerResult.scanSimplifiedState.setupScore))
+      ? Number(tickerResult.scanSimplifiedState.setupScore)
+      : null;
 
     expect(tickerResult.providerDataTimestamp, `${label} must have provider data timestamp.\n${JSON.stringify(tickerResult, null, 2)}`).toBeTruthy();
     expect(tickerResult.localTickerRecord && tickerResult.localTickerRecord.marketDataPrice, `${label} must have resolved live market data.\n${JSON.stringify(tickerResult, null, 2)}`).toBeTruthy();
     expect(tickerResult.rawScanResult && tickerResult.rawScanResult.lastError, `${label} must not preserve market-data fallback errors.\n${JSON.stringify(tickerResult, null, 2)}`).toBe('');
     expect(tickerResult.scanSimplifiedState, `${label} must expose scan simplified state.\n${JSON.stringify(tickerResult, null, 2)}`).toBeTruthy();
+    expect(tickerResult.scanSimplifiedState.publicationStatus).toBe('valid');
+    expect(tickerResult.scanSimplifiedState.publicationId).toBeTruthy();
+    expect(tickerResult.scanSimplifiedState.evidenceId).toBeTruthy();
+    expect(tickerResult.scanSimplifiedState.refreshCycleId).toBeTruthy();
     expect(tickerResult.scanPresentation, `${label} must expose scan presentation state.\n${JSON.stringify(tickerResult, null, 2)}`).toBeTruthy();
     expect(tickerResult.visibleCard, `${label} must render a visible scan card.\n${JSON.stringify(tickerResult, null, 2)}`).toBeTruthy();
 
@@ -304,10 +308,6 @@ test('real tickers AMZN and NVDA keep scan cards aligned with live market-data r
       expect(
         tickerResult.projectedScanCard && tickerResult.projectedScanCard.setupScore,
         `${label} scan card projection score must match replay.\n${JSON.stringify(tickerResult, null, 2)}`
-      ).toBe(expectedSetupScore);
-      expect(
-        tickerResult.authoritativeScanSnapshot && tickerResult.authoritativeScanSnapshot.score,
-        `${label} authoritative scan snapshot score must match replay.\n${JSON.stringify(tickerResult, null, 2)}`
       ).toBe(expectedSetupScore);
       expect(
         tickerResult.visibleCard && tickerResult.visibleCard.setupScoreDisplay,

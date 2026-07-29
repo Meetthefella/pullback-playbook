@@ -4,11 +4,16 @@ const ASSET_VERSION = BUILD_VERSION.replace(/^v/, '');
 // Release rule: when a browser-loaded JS module changes, bump its `?v=` in
 // index.html and add the exact same URL here in the same commit.
 const VERSIONED_RELEASE_MODULES = [
+  `./js/records.js?v=${ASSET_VERSION}`,
   `./js/domain/canonical-resolver-input.js?v=${ASSET_VERSION}`,
+  `./js/domain/canonical-decision-result.js?v=${ASSET_VERSION}`,
   `./js/domain/canonical-setup-projection.js?v=${ASSET_VERSION}`,
   `./js/resolver-core.js?v=${ASSET_VERSION}`,
+  `./js/resolver-presentation.js?v=${ASSET_VERSION}`,
   `./js/domain/simplified-trade-state.js?v=${ASSET_VERSION}`,
   `./js/scanner-card-shell.js?v=${ASSET_VERSION}`,
+  `./js/scanner-results-support.js?v=${ASSET_VERSION}`,
+  `./js/scanner-debug.js?v=${ASSET_VERSION}`,
   `./app.js?v=${ASSET_VERSION}`
 ];
 const ASSETS = [

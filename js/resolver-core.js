@@ -2237,6 +2237,16 @@
     const rawPlanEntry = numericValueOrNull(rawDisplayedPlan && rawDisplayedPlan.entry);
     const rawPlanStop = numericValueOrNull(rawDisplayedPlan && rawDisplayedPlan.stop);
     const rawPlanTarget = numericValueOrNull(rawDisplayedPlan && rawDisplayedPlan.target);
+    const configuredMaximumLoss = numericValueOrNull(
+      deps.state && (deps.state.userRiskPerTrade ?? deps.state.maxRisk)
+    );
+    const resolvedPlanRiskPerShare = Number.isFinite(planEntry) && Number.isFinite(planStop) && planEntry > planStop
+      ? planEntry - planStop
+      : null;
+    const resolvedPlanPositionSize = Number.isFinite(resolvedPlanRiskPerShare) && resolvedPlanRiskPerShare > 0
+      && Number.isFinite(configuredMaximumLoss) && configuredMaximumLoss > 0
+      ? Math.floor(configuredMaximumLoss / resolvedPlanRiskPerShare)
+      : null;
     const hasEntry = Number.isFinite(planEntry);
     const hasStop = Number.isFinite(planStop);
     const hasTarget = Number.isFinite(planTarget);
@@ -2963,6 +2973,9 @@
       resolvedPlanEntry:planEntry,
       resolvedPlanStop:planStop,
       resolvedPlanTarget:planTarget,
+      resolvedPlanRiskPerShare,
+      resolvedPlanMaximumLoss:configuredMaximumLoss,
+      resolvedPlanPositionSize,
       resolvedPlanCurrentPrice:currentPrice,
       planCurrency:String((item.marketData && item.marketData.currency) || (item.plan && item.plan.currency) || '').trim().toUpperCase(),
       planUnits:{

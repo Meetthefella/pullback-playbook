@@ -25,15 +25,17 @@
 
   function groupScannerViewsBySection(finalViews, deps){
     const {rankedVisibleSectionForView} = deps;
-    const grouped = {tradeableEntry:[], nearEntry:[], monitorWatch:[], monitorDiminishing:[], avoid:[]};
+    const grouped = {unavailable:[], tradeableEntry:[], nearEntry:[], monitorWatch:[], monitorDiminishing:[], avoid:[]};
     (Array.isArray(finalViews) ? finalViews : []).forEach(view => {
       const sectionKey = rankedVisibleSectionForView(view);
-      if(sectionKey === 'tradeable_entry') grouped.tradeableEntry.push(view);
+      if(sectionKey === 'unavailable') grouped.unavailable.push(view);
+      else if(sectionKey === 'tradeable_entry') grouped.tradeableEntry.push(view);
       else if(sectionKey === 'near_entry') grouped.nearEntry.push(view);
       else if(sectionKey === 'monitor_watch') grouped.monitorWatch.push(view);
       else if(sectionKey === 'monitor_diminishing') grouped.monitorDiminishing.push(view);
       else grouped.avoid.push(view);
     });
+    grouped.unavailable = sortScannerViews(grouped.unavailable);
     grouped.tradeableEntry = sortScannerViews(grouped.tradeableEntry);
     grouped.nearEntry = sortScannerViews(grouped.nearEntry);
     grouped.monitorWatch = sortScannerViews(grouped.monitorWatch);
@@ -59,12 +61,21 @@
 
   function scannerResultSections(finalViews, deps){
     const grouped = groupScannerViewsBySection(finalViews, deps);
+    const unavailable = grouped.unavailable;
     const tradeable = grouped.tradeableEntry;
     const nearEntry = grouped.nearEntry;
     const monitorWatch = grouped.monitorWatch;
     const monitorDiminishing = grouped.monitorDiminishing;
     const avoid = grouped.avoid;
     return [
+      {
+        key:'unavailable',
+        title:'Not assessed',
+        summary: unavailable.length ? `${unavailable.length} setup${unavailable.length === 1 ? '' : 's'} awaiting an authoritative refresh` : 'No unassessed setups',
+        items:unavailable,
+        collapsed:false,
+        empty:'No unassessed setups.'
+      },
       {
         key:'tradeable-entry',
         title:'Tradeable / Entry',

@@ -280,7 +280,12 @@
         version: 0,
         source: '',
         updatedAt: '',
-        reason: ''
+        reason: '',
+        // Current-state authority is an immutable scan publication. Legacy
+        // scanner/review verdicts remain elsewhere as migration metadata only.
+        canonicalPublication: null,
+        canonicalResolverProjection: null,
+        canonicalPublicationPersistence: null
       },
       meta: {
         createdAt,
@@ -772,6 +777,18 @@
     merged.authority.source = String(merged.authority.source || '').trim().toLowerCase();
     merged.authority.updatedAt = String(merged.authority.updatedAt || '');
     merged.authority.reason = String(merged.authority.reason || '');
+    merged.authority.canonicalPublication = merged.authority.canonicalPublication
+      && typeof merged.authority.canonicalPublication === 'object'
+      ? merged.authority.canonicalPublication
+      : null;
+    merged.authority.canonicalResolverProjection = merged.authority.canonicalResolverProjection
+      && typeof merged.authority.canonicalResolverProjection === 'object'
+      ? merged.authority.canonicalResolverProjection
+      : null;
+    merged.authority.canonicalPublicationPersistence = merged.authority.canonicalPublicationPersistence
+      && typeof merged.authority.canonicalPublicationPersistence === 'object'
+      ? merged.authority.canonicalPublicationPersistence
+      : null;
     merged.meta.tags = Array.isArray(merged.meta.tags) ? merged.meta.tags.map(item => String(item || '')).filter(Boolean) : [];
     merged.meta.dataVersion = 2;
     merged.meta.updatedAt = String(merged.meta.updatedAt || merged.meta.createdAt || new Date().toISOString());
@@ -861,6 +878,10 @@
       displayScore: selectedScore,
       qualityAdjustments
     });
+    // Preserve persisted factual setup evidence. It is required to validate a
+    // matching canonical publication after reload; recomputed score metadata
+    // must not erase the facts that publication was based on.
+    const persistedSetupEvidence = merged.setup && typeof merged.setup === 'object' ? merged.setup : {};
     merged.setup = {
       baseScore: baseSetupScore,
       rawScore: baseSetupScore,
@@ -883,6 +904,15 @@
         ? merged.scan.reasons
         : [String(merged.scan.summary || '').trim()].filter(Boolean),
       marketCaution: /below 50 ma/i.test(String(merged.meta.marketStatus || state.marketStatus || ''))
+      ,structureState:String(persistedSetupEvidence.structureState || ''),
+      structureEligibility:String(persistedSetupEvidence.structureEligibility || ''),
+      setupLocationState:String(persistedSetupEvidence.setupLocationState || ''),
+      pullbackZone:String(persistedSetupEvidence.pullbackZone || ''),
+      priceabilityState:String(persistedSetupEvidence.priceabilityState || ''),
+      stabilisationState:String(persistedSetupEvidence.stabilisationState || ''),
+      bounceState:String(persistedSetupEvidence.bounceState || ''),
+      volumeState:String(persistedSetupEvidence.volumeState || ''),
+      trendState:String(persistedSetupEvidence.trendState || '')
     };
     merged.watchlist.debug = merged.watchlist.debug && typeof merged.watchlist.debug === 'object' ? merged.watchlist.debug : {};
     merged.watchlist.debug.score_source_used = scoreSource;

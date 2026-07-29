@@ -414,6 +414,7 @@ async function seedLifecycleScenario(page, ticker){
     record.scan.riskStatus = 'fits_risk';
     record.scan.summary = 'Trend structure is intact, buyers are in control, and the trade plan is ready.';
     record.scan.lastScannedAt = '2026-06-29T09:00:00.000Z';
+    record.scan.updatedAt = record.scan.lastScannedAt;
     record.review.analysisState = {
       normalized:{
         coach_summary:'Constructive setup with buyers in control.'
@@ -433,6 +434,9 @@ async function seedLifecycleScenario(page, ticker){
     try{ trading212PaperEnabled = true; }catch(_error){}
     try{ trading212PaperAvailabilityMessage = 'Paper gateway ready.'; }catch(_error){}
 
+    // Seed an authoritative publication; scan/review aliases above are
+    // historical fixture metadata and must not classify the current state.
+    if(typeof publishCanonicalPublicationForRecord === 'function') publishCanonicalPublicationForRecord(record);
     if(typeof saveState === 'function') saveState();
     if(typeof renderScannerResults === 'function') renderScannerResults();
     if(typeof refreshViewFromMemory === 'function') refreshViewFromMemory();
@@ -451,27 +455,19 @@ async function captureAuditedStage(page, testInfo, snapshots, ticker, stage, con
 function assertWatchlistAddedEntryParity(snapshot){
   const stage = snapshot && snapshot.stage || 'watchlist_added';
   const scan = snapshot && snapshot.appState && snapshot.appState.scan && snapshot.appState.scan.simplifiedState || {};
-  const scanAuthority = snapshot && snapshot.appState && snapshot.appState.authority && snapshot.appState.authority.scanner || {};
-  const shared = snapshot && snapshot.appState && snapshot.appState.authority && snapshot.appState.authority.sharedPresentation || {};
   const replay = snapshot && snapshot.replay && snapshot.replay.result || {};
   const reviewVerdict = String(snapshot && snapshot.appState && snapshot.appState.review && snapshot.appState.review.stateHealth && snapshot.appState.review.stateHealth.canonicalVerdict || '').trim().toLowerCase();
   const replayVerdict = String(replay.reviewCanonicalVerdict || '').trim().toLowerCase();
   const scanVerdict = String(scan.canonicalVerdict || '').trim().toLowerCase();
-  const sharedVerdict = String(shared.canonicalVerdict || shared.finalVerdict || '').trim().toLowerCase();
-  const scanAction = String(scan.actionLabel || '').trim();
-  const sharedAction = String(shared.actionLabel || shared.nextAction || '').trim();
-  const staleNearEntryCopy = /near entry|wait for confirmation|waiting for confirmation/i;
+  const publicationId = String(scan.publicationId || '').trim();
+  const evidenceId = String(scan.evidenceId || '').trim();
+  const publishedAction = String(scan.actionLabel || '').trim();
   if(replayVerdict === 'entry' || reviewVerdict === 'entry'){
-    expect(scanVerdict, `${stage} scan surface must stay scouting-only once canonical review authority exists.`).toBe('near_entry');
-    expect(scanAuthority.scoutingOnly, `${stage} scan diagnostics must mark the scouting-only cap explicitly.`).toBe(true);
-    expect(String(scanAuthority.divergenceType || '').trim().toLowerCase(), `${stage} scan diagnostics must expose intentional scouting divergence.`).toBe('intentional_scouting_divergence');
-    expect(sharedVerdict, `${stage} shared presentation must promote to entry when replay/review is entry.`).toBe('entry');
-    expect(scanAction, `${stage} scan action copy must stay non-final.`).toBe('Scouting only - confirm in Review before treating this as actionable.');
-    expect(sharedAction, `${stage} shared presentation action copy must be entry-ready.`).toBe('Execute only if the trigger remains valid.');
-    expect(String(scan.badgeLabel || ''), `${stage} scan badge should present a capped scouting label.`).toMatch(/Near Entry/i);
-    expect(String(shared.badgeLabel || ''), `${stage} shared badge must not preserve Near Entry copy.`).not.toMatch(/Near Entry/i);
-    expect(String(shared.headline || ''), `${stage} shared headline must not preserve Near Entry copy.`).not.toMatch(/Near Entry/i);
-    expect(String(shared.nextAction || shared.actionLabel || ''), `${stage} shared CTA must not preserve wait-for-confirmation copy.`).not.toMatch(staleNearEntryCopy);
+    expect(scanVerdict, `${stage} Scan must use the same published Entry decision as Review.`).toBe('entry');
+    expect(publicationId, `${stage} must expose the shared publication identity.`).toBeTruthy();
+    expect(evidenceId, `${stage} must expose the shared evidence identity.`).toBeTruthy();
+    expect(publishedAction, `${stage} available action metadata must come from the publication projection.`).toBe('Execute only if the trigger remains valid.');
+    expect(String(scan.badgeLabel || ''), `${stage} Scan badge must not retain a scouting-only cap.`).toMatch(/Entry/i);
   }
 }
 
@@ -729,6 +725,14 @@ async function applyScoreRegressionEdit(page, ticker){
       ? (getTickerRecord(symbol) || upsertTickerRecord(symbol))
       : upsertTickerRecord(symbol);
     if(!record) return;
+    // A saved plan fact changes the canonical evidence. Do not resolve here:
+    // all surfaces must become unavailable until an authoritative refresh.
+    record.plan.firstTarget = Number(record.plan.firstTarget || record.plan.target || 0) + 3;
+    record.plan.target = record.plan.firstTarget;
+    if(typeof renderScannerResults === 'function') renderScannerResults();
+    if(typeof renderWatchlist === 'function') renderWatchlist({source:'score_edit_regression'});
+    if(typeof renderReviewWorkspace === 'function') renderReviewWorkspace({source:'score_edit_regression', requestedTicker:symbol});
+    return;
     const computeScores = candidateRecord => {
       const derivedStates = typeof analysisDerivedStatesFromRecord === 'function'
         ? analysisDerivedStatesFromRecord(candidateRecord)
@@ -1307,6 +1311,38 @@ test('Submitted paper trade does not replace in-progress invalid planner edits',
   await seedLifecycleScenario(page, JOURNEY_TICKER);
   await openReviewDirect(page, JOURNEY_TICKER);
   await addActiveReviewToWatchlistIfEligible(page);
+  const canonicalPaperTradeAuthority = await page.evaluate(ticker => {
+    const record = getTickerRecord(ticker);
+    const context = currentPaperTradeContextForTicker(ticker);
+    const states = ['scan', 'review', 'track'].map(surface => resolveSimplifiedStateForSurface(record, surface, {log:false}));
+    return {
+      context:{
+        publicationId:context.publicationId,
+        evidenceId:context.evidenceId,
+        refreshCycleId:context.refreshCycleId,
+        resolvedStatus:context.resolvedStatus,
+        entryEligibility:context.entryEligibility,
+        paperTradeEligibility:context.paperTradeEligibility,
+        planVisibility:context.planVisibility,
+        entry:context.displayedPlan.entry,
+        stop:context.displayedPlan.stop,
+        target:context.displayedPlan.target,
+        riskPerShare:context.displayedPlan.rewardRisk.riskPerShare,
+        positionSize:context.displayedPlan.riskFit.position_size,
+        triggerSatisfied:context.triggerSatisfied,
+        planValid:context.planValid,
+        blockingGates:context.blockingGates,
+        scoreAvailable:context.scoreAvailable,
+        setupScore:context.setupScore
+      },
+      surfaces:states.map(state => ({publicationId:state.publicationId, evidenceId:state.evidenceId, refreshCycleId:state.refreshCycleId, canonicalVerdict:state.canonicalVerdict}))
+    };
+  }, JOURNEY_TICKER);
+  expect(canonicalPaperTradeAuthority.context).toMatchObject({resolvedStatus:'entry', planVisibility:true, triggerSatisfied:true, planValid:true, scoreAvailable:true});
+  expect(canonicalPaperTradeAuthority.context.entryEligibility.qualified).toBe(true);
+  expect(canonicalPaperTradeAuthority.context.paperTradeEligibility.eligible).toBe(true);
+  expect(canonicalPaperTradeAuthority.context.blockingGates.every(gate => gate.passed === true)).toBe(true);
+  expect(canonicalPaperTradeAuthority.surfaces.every(surface => surface.publicationId === canonicalPaperTradeAuthority.context.publicationId && surface.evidenceId === canonicalPaperTradeAuthority.context.evidenceId && surface.refreshCycleId === canonicalPaperTradeAuthority.context.refreshCycleId && surface.canonicalVerdict === 'entry')).toBe(true);
   await expect(page.locator('#paperTradeBtn')).toBeEnabled();
   await page.locator('#paperTradeBtn').click();
   await expect(page.locator('#paperTradePreview')).toBeVisible();
@@ -1332,11 +1368,10 @@ test('Submitted paper trade does not replace in-progress invalid planner edits',
   const editedPlannerState = await capturePlannerEditingState(page, JOURNEY_TICKER);
   expect(editedPlannerState.stopInput, 'Current planner input must stay blank while the user is editing an invalid stop.').toBe('');
   expect(editedPlannerState.persistedStop, 'Submitted trade history should still retain the original stop separately.').toBe(submittedPlannerState.persistedStop);
-  expect(editedPlannerState.rr, 'Review must stop showing the old submitted R:R after the live stop is cleared.').not.toContain('3.00R');
-  expect(editedPlannerState.rr, `Planner must show a non-actionable validation state instead of restoring submitted numbers.\n${JSON.stringify(editedPlannerState, null, 2)}`).toContain('No actionable plan yet.');
+  expect(editedPlannerState.rr, 'An unsaved draft must not mutate the published plan.').toContain('3.00R');
 });
 
-test('Post-scan setup edits recompute score instead of pinning stale scanner score', async ({page}) => {
+test('Post-scan factual edit becomes unavailable until the next authoritative publication', async ({page}) => {
   await bootLifecycleApp(page);
   await stubPaperTradeGateway(page);
   await seedLifecycleScenario(page, JOURNEY_TICKER);
@@ -1344,39 +1379,52 @@ test('Post-scan setup edits recompute score instead of pinning stale scanner sco
   await addActiveReviewToWatchlistIfEligible(page);
   await openTrackTab(page);
   await waitForUiTransitionSettle(page);
-
+  const before = await page.evaluate(ticker => {
+    const record = getTickerRecord(ticker);
+    const state = resolveSimplifiedStateForSurface(record, 'track', {log:false});
+    return {publicationId:state.publicationId, evidenceId:state.evidenceId, score:state.setupScore, scoreAvailable:state.scoreAvailable};
+  }, JOURNEY_TICKER);
+  expect(before.publicationId).toBeTruthy();
+  expect(before.scoreAvailable).toBe(true);
   await applyScoreRegressionEdit(page, JOURNEY_TICKER);
-  await expect(page.locator('.reviewworkspace-shell .review-summary-right .score.visual-score')).toContainText(/Setup \d+\/10/);
-  const reviewScoreText = await page.locator('.reviewworkspace-shell .review-summary-right .score.visual-score').textContent();
-
-  await openWorkspaceTab(page, 'scan');
   await openTrackTab(page);
   await waitForUiTransitionSettle(page);
-  const trackScoreState = await page.evaluate(ticker => {
+  const unavailable = await page.evaluate(ticker => {
     const record = typeof getTickerRecord === 'function' ? getTickerRecord(ticker) : null;
+    const scan = resolveSimplifiedStateForSurface(record, 'scan', {log:false});
+    const review = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+    const track = resolveSimplifiedStateForSurface(record, 'track', {log:false});
+    const paper = currentPaperTradeContextForTicker(ticker);
     const trackCard = document.querySelector(`[data-watchlist-ticker="${ticker}"]`);
-    const canonicalDisplayedScore = typeof setupScoreForRecord === 'function'
-      ? setupScoreForRecord(record)
-      : (record && record.setup ? record.setup.score : null);
     return {
-      storedSetupScore:Number.isFinite(Number(record && record.setup ? record.setup.score : null)) ? Number(record && record.setup ? record.setup.score : null) : null,
-      canonicalDisplayedScore:Number.isFinite(Number(canonicalDisplayedScore)) ? Number(canonicalDisplayedScore) : null,
-      recomputedScore:Number.isFinite(Number(record && record.setup ? record.setup.scoreRecomputed : null)) ? Number(record && record.setup ? record.setup.scoreRecomputed : null) : null,
-      penaltyAdjustedScore:Number.isFinite(Number(record && record.watchlist && record.watchlist.debug ? record.watchlist.debug.score_recomputed_penalty_adjusted : null)) ? Number(record && record.watchlist && record.watchlist.debug ? record.watchlist.debug.score_recomputed_penalty_adjusted : null) : null,
-      scanScore:Number.isFinite(Number(record && record.scan ? record.scan.score : null)) ? Number(record && record.scan ? record.scan.score : null) : null,
-      scoreSource:String(record && record.setup && record.setup.scoreSource || ''),
+      states:[scan, review, track].map(state => ({publicationStatus:state.publicationStatus, scoreAvailable:state.scoreAvailable, setupScore:state.setupScore, canonicalVerdict:state.canonicalVerdict})),
+      paper:{publicationStatus:paper.publicationStatus, resolvedStatus:paper.resolvedStatus, eligible:paper.eligibility.eligible, reason:paper.eligibility.reasons[0]},
       trackText:String(trackCard && trackCard.querySelector('.score.watchlistscore, .score.visual-score') && trackCard.querySelector('.score.watchlistscore, .score.visual-score').textContent || '').replace(/\s+/g, ' ').trim()
     };
   }, JOURNEY_TICKER);
+  expect(unavailable.states).toEqual([
+    {publicationStatus:'validation_failed', scoreAvailable:false, setupScore:null, canonicalVerdict:''},
+    {publicationStatus:'validation_failed', scoreAvailable:false, setupScore:null, canonicalVerdict:''},
+    {publicationStatus:'validation_failed', scoreAvailable:false, setupScore:null, canonicalVerdict:''}
+  ]);
+  expect(unavailable.paper).toMatchObject({publicationStatus:'validation_failed', resolvedStatus:'unavailable', eligible:false});
+  expect(unavailable.paper.reason).toMatch(/validation failed/i);
+  expect(unavailable.trackText).not.toMatch(/\d+\/10/);
 
-  expect(trackScoreState.recomputedScore, 'Edited setup must produce a recomputed setup score.').not.toBeNull();
-  expect(trackScoreState.penaltyAdjustedScore, 'Edited setup must preserve a recomputed penalty-adjusted score for parity checks.').not.toBeNull();
-  expect(trackScoreState.scanScore, 'Seeded scanner score must exist for stale-score regression coverage.').toBe(9);
-  expect(trackScoreState.recomputedScore, 'Recomputed score must differ from stale scanner score after setup edits.').not.toBe(trackScoreState.scanScore);
-  expect(trackScoreState.canonicalDisplayedScore, 'Canonical displayed setup score must no longer be pinned to stale scan.score after setup edits.').not.toBe(trackScoreState.scanScore);
-  expect(trackScoreState.scoreSource, 'Successful recomputation must not preserve stale scanner score authority.').not.toBe('scan.score(authoritative)');
-  expect(String(reviewScoreText || '').replace(/\s+/g, ' ').trim()).toContain(`Setup ${trackScoreState.canonicalDisplayedScore}/10`);
-  expect(trackScoreState.trackText).toContain(`${trackScoreState.canonicalDisplayedScore}/10`);
+  const after = await page.evaluate(ticker => {
+    const record = getTickerRecord(ticker);
+    const projection = publishCanonicalPublicationForRecord(record);
+    renderScannerResults();
+    renderWatchlist({source:'post_edit_authoritative_refresh'});
+    renderReviewWorkspace({source:'post_edit_authoritative_refresh', requestedTicker:ticker});
+    const scan = resolveSimplifiedStateForSurface(record, 'scan', {log:false});
+    const review = resolveSimplifiedStateForSurface(record, 'review', {log:false});
+    const track = resolveSimplifiedStateForSurface(record, 'track', {log:false});
+    return {projection, states:[scan, review, track].map(state => ({publicationId:state.publicationId, evidenceId:state.evidenceId, refreshCycleId:state.refreshCycleId, publicationStatus:state.publicationStatus, setupScore:state.setupScore, scoreAvailable:state.scoreAvailable, canonicalVerdict:state.canonicalVerdict}))};
+  }, JOURNEY_TICKER);
+  expect(after.projection.publicationId).not.toBe(before.publicationId);
+  expect(after.projection.evidenceId).not.toBe(before.evidenceId);
+  expect(after.states.every(state => state.publicationId === after.projection.publicationId && state.evidenceId === after.projection.evidenceId && state.publicationStatus === 'valid' && state.scoreAvailable === true)).toBe(true);
 });
 
 test('Lifecycle Auditor proves scan-to-diary consistency with replay parity and mutation convergence', async ({page}, testInfo) => {

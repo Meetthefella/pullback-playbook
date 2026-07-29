@@ -14,7 +14,7 @@
 
   function projectionInput(publication){
     const envelope = publication && typeof publication === 'object' ? publication : {};
-    const failed = envelope.publicationStatus === 'validation_failed';
+    const failed = envelope.publicationStatus !== 'valid' || !envelope.canonicalResult;
     const canonical = !failed && envelope.canonicalResult && typeof envelope.canonicalResult === 'object' ? envelope.canonicalResult : null;
     const fallback = envelope.safeFallback && typeof envelope.safeFallback === 'object' ? envelope.safeFallback : {};
     const semantics = canonical && canonical.semantics || {};
@@ -35,6 +35,18 @@
 
   function project(publication, options = {}){
     const input = projectionInput(publication);
+    if(input.failed){
+      return Object.freeze({
+        version:VERSION,
+        resolvedStatus:'unavailable', bucket:'unavailable', bucketLabel:'Not assessed',
+        tone:'unavailable', visualBucket:'unavailable', setupScore:null, scoreAvailable:false,
+        scoreBreakdown:null,
+        bucketReason:'No valid matching canonical publication is available yet.',
+        canonicalStateSource:'canonical_publication_unavailable', canonicalVerdict:'',
+        canonicalEntryEligibility:false, canonicalNearEntryEligibility:false, legacyFallbackUsed:false,
+        diagnostics:Object.freeze({displayedBucket:'unavailable', displayedSetupScore:null, scoreAvailable:false, canonicalBucket:'', canonicalEntryEligibility:false, canonicalNearEntryEligibility:false, planValidity:'unavailable', scoreBreakdown:null, bucketReason:'No valid matching canonical publication is available yet.', legacyFallbackUsed:false})
+      });
+    }
     const presentation = presentationForStatus(input.verdict);
     const entryEligible = input.eligibility.entry && input.eligibility.entry.qualified === true;
     const nearEntryEligible = input.eligibility.nearEntry && input.eligibility.nearEntry.qualified === true;

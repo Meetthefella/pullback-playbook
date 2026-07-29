@@ -608,13 +608,13 @@
     const envelope = publication && typeof publication === 'object' ? publication : {};
     const canonical = envelope.canonicalResult && typeof envelope.canonicalResult === 'object' ? envelope.canonicalResult : null;
     const fallback = envelope.safeFallback && typeof envelope.safeFallback === 'object' ? envelope.safeFallback : null;
-    const failed = envelope.publicationStatus === 'validation_failed';
+    const failed = envelope.publicationStatus !== 'valid' || !canonical;
     const verdict = failed ? String(fallback && fallback.verdict || 'watch').toLowerCase() : String(canonical && canonical.verdict && canonical.verdict.value || 'watch').toLowerCase();
     const semantics = canonical && canonical.semantics || {};
     const plan = semantics.planState || {};
     const publishedPlan = canonical && canonical.plan || {};
     const eligibility = canonical && canonical.eligibility || {};
-    const blocker = failed ? 'Canonical decision validation failed.' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlocker || '');
+    const blocker = failed ? 'Not assessed yet. Run an authoritative refresh to publish a decision.' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlocker || '');
     // The canonical setup projection is the sole authority for published
     // bucket and score. It consumes only this publication envelope.
     const setupProjection = global.CanonicalSetupProjection && typeof global.CanonicalSetupProjection.project === 'function'
@@ -624,10 +624,13 @@
     const visualBucket = setupProjection && setupProjection.visualBucket || (verdict === 'watch' ? 'monitor' : verdict);
     return {
       ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
-      canonicalVerdict:projectedBucket, finalVerdict:projectedBucket, sourceCanonicalVerdict:verdict, publicationStatus:failed ? 'validation_failed' : 'valid',
+      canonicalVerdict:failed ? '' : projectedBucket, finalVerdict:failed ? '' : projectedBucket, sourceCanonicalVerdict:failed ? '' : verdict, publicationStatus:failed ? 'validation_failed' : 'valid',
       canonicalNormVersion:failed ? String(envelope.validation && envelope.validation.normVersion || '') : canonical.normVersion,
       canonicalResultVersion:failed ? '' : canonical.schemaVersion,
       evidenceId:failed ? '' : canonical.snapshot && canonical.snapshot.evidenceId,
+      publicationId:String(envelope.publicationId || ''),
+      refreshCycleId:String(envelope.refreshCycleId || ''),
+      recordIdentity:String(envelope.recordIdentity || ''),
       actionable:failed ? false : canonical.verdict.actionable === true,
       entryGatePass:failed ? false : canonical.gates.entry === true,
       nearEntryGatePass:failed ? false : canonical.gates.nearEntry === true,
@@ -663,7 +666,9 @@
         nextRequiredEvent:failed ? '' : String(canonical && canonical.verdict && canonical.verdict.nextRequiredEvent || ''),
         publicationStatus:failed ? 'validation_failed' : 'valid',
         canonicalResultVersion:failed ? '' : canonical.schemaVersion,
-        evidenceId:failed ? '' : canonical.snapshot && canonical.snapshot.evidenceId
+        evidenceId:failed ? '' : canonical.snapshot && canonical.snapshot.evidenceId,
+        publicationId:String(envelope.publicationId || ''),
+        refreshCycleId:String(envelope.refreshCycleId || '')
       },
       setupProjection,
       setupScore:setupProjection ? setupProjection.setupScore : 0,
@@ -675,8 +680,8 @@
       classificationDiagnostics:setupProjection ? setupProjection.diagnostics : null,
       canonicalBucket:projectedBucket,
       resolvedStatus:setupProjection ? setupProjection.resolvedStatus : verdict,
-      visualBucket, tone:setupProjection ? setupProjection.tone : visualBucket, badgeLabel:projectedBucket === 'near_entry' ? 'Near Entry' : (projectedBucket === 'entry' ? 'Entry' : (projectedBucket === 'avoid' ? 'Avoid' : 'Watch')),
-      actionLabel:failed ? 'Decision unavailable - validation failed.' : (projectedBucket === 'entry' ? 'Execute only if the trigger remains valid.' : 'Wait for the next canonical requirement.'),
+      visualBucket, tone:setupProjection ? setupProjection.tone : visualBucket, badgeLabel:failed ? 'Not assessed' : (projectedBucket === 'near_entry' ? 'Near Entry' : (projectedBucket === 'entry' ? 'Entry' : (projectedBucket === 'avoid' ? 'Avoid' : 'Watch'))),
+      actionLabel:failed ? 'Decision unavailable — refresh required.' : (projectedBucket === 'entry' ? 'Execute only if the trigger remains valid.' : 'Wait for the next canonical requirement.'),
       mainBlocker:blocker,
       compatibility:{compatibilityOnly:true, mayFeedDecisionLogic:false, reviewVersion:'post-stabilisation-release', sourceCanonicalFields:['verdict','semantics','eligibility','plan','snapshot.evidenceId'], aliases:{
         visualBucket:{category:'A', sourceCanonicalFields:['verdict.value'], transformation:'watch_to_monitor_visual_group', compatibilityOnly:true, mayFeedDecisionLogic:false},
