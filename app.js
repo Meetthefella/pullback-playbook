@@ -14458,7 +14458,7 @@ function currentCanonicalDecisionForLifecycle(record, globalVerdict){
 function applyCanonicalCurrentDecisionToLifecycleSnapshot(snapshot, currentDecision){
   const historical = snapshot && typeof snapshot === 'object' ? snapshot : {};
   const current = currentDecision && typeof currentDecision === 'object' ? currentDecision : {};
-  const verdict = normalizeGlobalVerdictKey(current.canonicalVerdict || current.finalVerdict || 'watch') || 'watch';
+  const verdict = normalizeGlobalVerdictKey(current.setupProjection && current.setupProjection.bucket || current.canonicalBucket || current.canonicalVerdict || current.finalVerdict || 'watch') || 'watch';
   const badge = getBadge(verdict);
   const historicalState = normalizeGlobalVerdictKey(historical.state || '');
   const bucket = ({entry:'tradeable_entry', near_entry:'tradeable_entry', watch:'monitor_watch', avoid:'low_priority_avoid', dead:'low_priority_avoid'})[verdict] || 'monitor_watch';
@@ -14484,6 +14484,10 @@ function applyCanonicalCurrentDecisionToLifecycleSnapshot(snapshot, currentDecis
       decisiveBlockerCode:String(current.decisiveBlockerCode || ''),
       decisiveBlockerCategory:String(current.decisiveBlockerCategory || '')
     },
+    setupScore:Number.isFinite(Number(current.setupScore)) ? Number(current.setupScore) : 0,
+    scoreBreakdown:current.scoreBreakdown || null,
+    bucketReason:String(current.bucketReason || ''),
+    legacyFallbackUsed:current.legacyFallbackUsed === true,
     lifecycleHistory:{
       previousState:historicalState || '',
       previousLabel:String(historical.label || ''),
@@ -19135,12 +19139,17 @@ function getFinalClassification(view){
 
 function canonicalScanPresentationFromPublication(publication = {}){
   const failed = publication.publicationStatus === 'validation_failed';
-  const verdict = normalizeGlobalVerdictKey(publication.canonicalVerdict || (failed && publication.safeFallback && publication.safeFallback.verdict) || 'watch');
+  const setupProjection = publication && publication.setupProjection && typeof publication.setupProjection === 'object'
+    ? publication.setupProjection
+    : (window.CanonicalSetupProjection && typeof window.CanonicalSetupProjection.project === 'function'
+      ? window.CanonicalSetupProjection.project(publication && publication.debug && publication.debug.publication)
+      : null);
+  const verdict = normalizeGlobalVerdictKey(setupProjection && setupProjection.resolvedStatus || publication.canonicalVerdict || (failed && publication.safeFallback && publication.safeFallback.verdict) || 'watch');
   const plan = failed ? null : publication.canonicalPlan;
   const planVisible = !failed && !!(plan && plan.visibility && plan.visibility.mayShowPlan);
-  const bucket = failed ? 'monitor' : normalizeVisualBucketForPairing(publication.visualBucket || (verdict === 'watch' ? 'monitor' : verdict), verdict);
-  const section = failed ? 'monitor_watch' : (verdict === 'entry' ? 'tradeable_entry' : (verdict === 'near_entry' ? 'near_entry' : (verdict === 'avoid' ? 'avoid' : 'monitor_watch')));
-  const sortPriority = failed ? 90 : ({entry:10, near_entry:20, watch:30, avoid:50}[verdict] || 90);
+  const bucket = setupProjection && setupProjection.visualBucket || normalizeVisualBucketForPairing(publication.visualBucket || (verdict === 'watch' ? 'monitor' : verdict), verdict);
+  const section = verdict === 'entry' ? 'tradeable_entry' : (verdict === 'near_entry' ? 'near_entry' : (verdict === 'avoid' ? 'avoid' : 'monitor_watch'));
+  const sortPriority = ({entry:10, near_entry:20, watch:30, avoid:50}[verdict] || 90);
   const blocker = String(publication.decisiveBlocker || publication.mainBlocker || '').trim();
   return {
     canonicalVerdict:verdict,
@@ -19148,6 +19157,12 @@ function canonicalScanPresentationFromPublication(publication = {}){
     canonicalNormVersion:String(publication.canonicalNormVersion || ''),
     canonicalResultVersion:String(publication.canonicalResultVersion || ''),
     evidenceId:String(publication.evidenceId || ''),
+    setupScore:setupProjection ? setupProjection.setupScore : 0,
+    scoreAvailable:setupProjection ? setupProjection.scoreAvailable === true : false,
+    scoreBreakdown:setupProjection ? setupProjection.scoreBreakdown : null,
+    bucketReason:setupProjection ? setupProjection.bucketReason : '',
+    canonicalStateSource:setupProjection ? setupProjection.canonicalStateSource : 'canonical_publication_legacy_adapter',
+    legacyFallbackUsed:setupProjection ? setupProjection.legacyFallbackUsed === true : true,
     actionable:failed ? false : publication.actionable === true,
     entryEligibility:failed ? null : publication.entryEligibility,
     nearEntryEligibility:failed ? null : publication.nearEntryEligibility,
@@ -19155,10 +19170,10 @@ function canonicalScanPresentationFromPublication(publication = {}){
     decisiveBlockerCategory:failed ? 'validation' : String(publication.decisiveBlockerCategory || ''),
     visualBucket:bucket,
     presentationBucket:bucket,
-    tone:bucket,
+    tone:setupProjection && setupProjection.tone || bucket,
     scanSection:section,
     sortPriority,
-    badgeLabel:failed ? 'Decision unavailable' : globalVerdictLabel(verdict),
+    badgeLabel:failed && !setupProjection ? 'Decision unavailable' : globalVerdictLabel(verdict),
     summary:failed ? 'Current decision unavailable; setup remains non-actionable.' : (blocker || String(publication.actionLabel || 'Review canonical requirements.').trim()),
     planState:failed ? 'unavailable' : String(publication.planState || publication.planStatus || 'unknown'),
     planStatus:failed ? 'unavailable' : String(publication.planStatus || publication.planState || 'unknown'),
@@ -19166,10 +19181,11 @@ function canonicalScanPresentationFromPublication(publication = {}){
     planVisible,
     resolvedRR:failed ? null : (plan && plan.rewardRisk && plan.rewardRisk.resolvedRr),
     diagnostics:{
-      source:'canonical_publication',
+      source:'canonical_setup_projection',
       compatibilityOnly:true,
       mayFeedDecisionLogic:false,
-      sourceCanonicalFields:['verdict','eligibility','semantics','plan','snapshot.evidenceId']
+      sourceCanonicalFields:['verdict','eligibility','semantics','plan','snapshot.evidenceId'],
+      classification:setupProjection && setupProjection.diagnostics || null
     }
   };
 }
@@ -19183,7 +19199,7 @@ function canonicalScanViewFromPublication(record, publication = {}){
   const target = plan && plan.levels && plan.levels.firstTarget && plan.levels.firstTarget.value;
   const rr = plan && plan.rewardRisk && plan.rewardRisk.resolvedRr;
   const risk = plan && plan.risk || {};
-  const setupScore = Number.isFinite(Number(item.setup && item.setup.score)) ? Number(item.setup.score) : 0;
+  const setupScore = presentation.scoreAvailable === true && Number.isFinite(Number(presentation.setupScore)) ? Number(presentation.setupScore) : null;
   const verdict = presentation.canonicalVerdict;
   const setupState = verdict === 'entry' ? 'entry' : (verdict === 'near_entry' ? 'watch' : (verdict === 'avoid' ? 'broken' : 'watch'));
   const planState = presentation.planStatus;
@@ -19226,9 +19242,13 @@ function canonicalScanViewFromPublication(record, publication = {}){
     capitalFit:risk.exposureCap != null ? 'known' : 'unknown',
     setupScore,
     score:setupScore,
-    setupScoreDisplay:`Setup ${setupScore}/10`,
-    scoreLabel:`Setup ${setupScore}/10`,
+    setupScoreDisplay:setupScore === null ? 'Setup unavailable' : `Setup ${setupScore}/10`,
+    scoreLabel:setupScore === null ? 'Setup unavailable' : `Setup ${setupScore}/10`,
     bucket:presentation.visualBucket,
+    scoreBreakdown:presentation.scoreBreakdown,
+    bucketReason:presentation.bucketReason,
+    canonicalStateSource:presentation.canonicalStateSource,
+    legacyFallbackUsed:presentation.legacyFallbackUsed,
     finalClassification:verdict === 'avoid' ? 'filtered' : (verdict === 'entry' || verdict === 'near_entry' ? 'tradeable' : 'early'),
     globalVerdict:{
       finalVerdict:verdict,
@@ -19471,6 +19491,31 @@ function renderScannerDecisionTraceContent(view){
       valueNode.textContent = replacements[label];
     }
   });
+  const classification = simplified.classificationDiagnostics || simplified.debug && simplified.debug.classification;
+  if(classification && typeof classification === 'object'){
+    const rows = [
+      ['displayedBucket', classification.displayedBucket],
+      ['displayedSetupScore', classification.displayedSetupScore],
+      ['canonicalBucket', classification.canonicalBucket],
+      ['canonicalEntryEligibility', classification.canonicalEntryEligibility],
+      ['canonicalNearEntryEligibility', classification.canonicalNearEntryEligibility],
+      ['structureState', classification.structureState],
+      ['supportState', classification.supportState],
+      ['buyerControlState', classification.buyerControlState],
+      ['confirmationState', classification.confirmationState],
+      ['planValidity', classification.planValidity],
+      ['scoreBreakdown', JSON.stringify(classification.scoreBreakdown || {})],
+      ['bucketReason', classification.bucketReason],
+      ['legacyFallbackUsed', classification.legacyFallbackUsed]
+    ];
+    host.innerHTML += `<div class="diagnostic-panel-shell watchlist-debug-block" data-diagnostic-panel="Canonical Setup Projection"><details class="compact-details diagnostic-panel-details"><summary>Canonical Setup Projection</summary><div class="watchlist-debug-grid tiny">${rows.map(([label, value]) => `<div><strong>${escapeHtml(label)}</strong><div>${escapeHtml(String(value == null ? '(none)' : value))}</div></div>`).join('')}</div></details></div>`;
+  }
+  const classProjection = view && view.projectionClassDiagnostics;
+  if(classProjection && typeof classProjection === 'object'){
+    const rows = ['previousAccentClass','projectedAccentClass','previousVisualTone','projectedVisualTone','previousVisualState','projectedVisualState','finalClassName']
+      .map(label => [label, classProjection[label]]);
+    host.innerHTML += `<div class="diagnostic-panel-shell watchlist-debug-block" data-diagnostic-panel="Projected Card Classes"><details class="compact-details diagnostic-panel-details"><summary>Projected Card Classes</summary><div class="watchlist-debug-grid tiny">${rows.map(([label, value]) => `<div><strong>${escapeHtml(label)}</strong><div>${escapeHtml(String(value == null ? '(none)' : value))}</div></div>`).join('')}</div></details></div>`;
+  }
   return host.innerHTML;
 }
 
@@ -21387,12 +21432,36 @@ function setupScoreTraceForRecord(record){
   };
 }
 
+const canonicalSetupProjectionInFlight = new WeakSet();
+
+function canonicalSetupProjectionForRecord(record){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item || !window.CanonicalSetupProjection || typeof window.CanonicalSetupProjection.project !== 'function') return null;
+  if(canonicalSetupProjectionInFlight.has(item)) return null;
+  canonicalSetupProjectionInFlight.add(item);
+  try{
+    const canonical = resolveGlobalVerdict(item, {setupScoreForRecord:rawSetupScoreForRecord});
+    const publication = canonical && canonical.canonicalPublication;
+    return publication ? window.CanonicalSetupProjection.project(publication, {baseScore:rawSetupScoreForRecord(item)}) : null;
+  }catch(_error){
+    return null;
+  }finally{
+    canonicalSetupProjectionInFlight.delete(item);
+  }
+}
+
 function setupScoreForRecord(record){
+  const projection = canonicalSetupProjectionForRecord(record);
+  if(projection && Number.isFinite(Number(projection.setupScore))) return Number(projection.setupScore);
+  if(projection && projection.scoreAvailable === false) return null;
+  // One-release compatibility alias: only used before a canonical publication
+  // exists or during a guarded resolver re-entry; diagnostics expose it.
   return setupScoreTraceForRecord(record).score;
 }
 
 function setupScoreDisplayForRecord(record){
-  return `Setup ${setupScoreForRecord(record)}/10`;
+  const score = setupScoreForRecord(record);
+  return Number.isFinite(Number(score)) ? `Setup ${score}/10` : 'Setup unavailable';
 }
 
 function rawSetupScoreForRecord(record){
@@ -23135,6 +23204,7 @@ function resolveSimplifiedStateForSurface(record, surface = 'review', options = 
     const mapped = window.SimplifiedTradeState.resolveRecordState(item, {
       publication,
       surface,
+      baseScore:rawSetupScoreForRecord(item),
       log:false
     });
     return {
@@ -35095,6 +35165,15 @@ function shouldShowActionableRR(view){
 function projectTickerForCard(record, options = {}){
   const item = normalizeTickerRecordReadOnly(record);
   const surface = String(options.surface || '').trim().toLowerCase();
+  const canonicalSurface = surface || 'review';
+  const canonicalPublicationState = resolveSimplifiedStateForSurface(item, canonicalSurface, {
+    log:false,
+    source:'card_canonical_setup_projection',
+    reason:'card_canonical_setup_projection'
+  });
+  const canonicalSetupProjection = canonicalPublicationState && canonicalPublicationState.setupProjection && typeof canonicalPublicationState.setupProjection === 'object'
+    ? canonicalPublicationState.setupProjection
+    : null;
   const authoritativeScanSurface = surface === 'scan'
     ? authoritativePersistedScanSnapshotForScanSurface(item)
     : null;
@@ -35114,19 +35193,21 @@ function projectTickerForCard(record, options = {}){
       includeExecutionDowngrade:options.includeExecutionDowngrade !== false,
       includeRuntimeFallback:options.includeRuntimeFallback !== false
     });
-    const effectiveDisplayStage = authoritativeScanSurface
-      ? normalizeAnalysisVerdict(authoritativeScanSurface.canonicalVerdict)
-      : displayStage;
+    const effectiveDisplayStage = canonicalSetupProjection
+      ? globalVerdictLabel(canonicalSetupProjection.bucket)
+      : (authoritativeScanSurface ? normalizeAnalysisVerdict(authoritativeScanSurface.canonicalVerdict) : displayStage);
     const provisionalSetupUiState = getSetupUiState(item, {displayStage, derivedStates});
     const planCheckState = planCheckStateForRecord(item, {effectivePlan, displayedPlan});
     const planUiState = getPlanUiState(item, {displayedPlan, effectivePlan, planCheckState, setupState:provisionalSetupUiState.state});
     const setupUiState = getSetupUiState(item, {displayStage:effectiveDisplayStage, derivedStates, planUiState});
-    const canonicalSetupScore = setupScoreForRecord(item);
-    const effectiveSetupScore = Number.isFinite(Number(canonicalSetupScore))
+    const canonicalSetupScore = canonicalSetupProjection ? canonicalSetupProjection.setupScore : setupScoreForRecord(item);
+    const effectiveSetupScore = canonicalSetupProjection && canonicalSetupProjection.scoreAvailable !== true
+      ? null
+      : (Number.isFinite(Number(canonicalSetupScore))
       ? Math.max(0, Math.min(10, Math.round(Number(canonicalSetupScore))))
       : (authoritativeScanSurface && Number.isFinite(Number(authoritativeScanSurface.score))
         ? Math.max(0, Math.min(10, Math.round(Number(authoritativeScanSurface.score))))
-        : 0);
+        : 0));
     const rrValue = displayedPlan.status === 'valid'
       ? displayedPlan.rewardRisk.rrRatio
       : numericOrNull(item.scan.estimatedRR);
@@ -35154,7 +35235,13 @@ function projectTickerForCard(record, options = {}){
       setupUiState,
       planUiState,
       setupScore:effectiveSetupScore,
-      setupScoreDisplay:`Setup ${effectiveSetupScore}/10`,
+      setupScoreDisplay:effectiveSetupScore === null ? 'Setup unavailable' : `Setup ${effectiveSetupScore}/10`,
+      scoreBreakdown:canonicalSetupProjection ? canonicalSetupProjection.scoreBreakdown : null,
+      bucketReason:canonicalSetupProjection ? canonicalSetupProjection.bucketReason : '',
+      canonicalStateSource:canonicalSetupProjection ? canonicalSetupProjection.canonicalStateSource : 'legacy_card_score_adapter',
+      legacyFallbackUsed:canonicalSetupProjection ? canonicalSetupProjection.legacyFallbackUsed === true : true,
+      simplifiedState:canonicalPublicationState,
+      scanPresentation:canonicalSurface === 'scan' ? canonicalScanPresentationFromPublication(canonicalPublicationState) : null,
       convictionTier:convictionTierLabel(item.setup.convictionTier || ''),
       planState:displayedPlan.status,
       planStateLabel:planUiState.label,
@@ -54588,7 +54675,9 @@ function resolveGlobalVerdict(record, deps = {}){
     applySetupConfirmationPlanGate:applyPlanGate,
     deriveCurrentPlanState:() => displayedPlan,
     evaluatePlanRealism:deps.evaluatePlanRealism || evaluatePlanRealism,
-    setupScoreForRecord:deps.setupScoreForRecord || setupScoreForRecord,
+    // Resolver input retains its existing raw setup-quality signal. Published
+    // presentation scores are derived only after the canonical result exists.
+    setupScoreForRecord:deps.setupScoreForRecord || rawSetupScoreForRecord,
     canonicalSetupScoreForRecord:deps.canonicalSetupScoreForRecord || rawSetupScoreForRecord,
     buildCumulativePenaltyTrace:deps.buildCumulativePenaltyTrace || cumulativePenaltyTraceForRecord,
     isHostileMarketStatus:deps.isHostileMarketStatus || isHostileMarketStatus,

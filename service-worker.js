@@ -1,10 +1,19 @@
 const BUILD_VERSION = new URL(self.location.href).searchParams.get('v') || 'dev';
 const CACHE = `pullback-playbook-cache-v${BUILD_VERSION}`;
+const ASSET_VERSION = BUILD_VERSION.replace(/^v/, '');
+// Release rule: when a browser-loaded JS module changes, bump its `?v=` in
+// index.html and add the exact same URL here in the same commit.
+const VERSIONED_RELEASE_MODULES = [
+  `./js/domain/canonical-setup-projection.js?v=${ASSET_VERSION}`,
+  `./js/domain/simplified-trade-state.js?v=${ASSET_VERSION}`,
+  `./js/scanner-card-shell.js?v=${ASSET_VERSION}`,
+  `./app.js?v=${ASSET_VERSION}`
+];
 const ASSETS = [
   './',
   './index.html',
   './styles.css',
-  './app.js',
+  ...VERSIONED_RELEASE_MODULES,
   './scanner-presets.json',
   './manifest.webmanifest',
   './icon-192.png',

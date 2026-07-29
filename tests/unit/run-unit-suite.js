@@ -23,6 +23,18 @@ const cases = [
     groups:['all', 'resolver', 'pure']
   },
   {
+    id:'canonical-setup-projection',
+    label:'Canonical setup projection assertions',
+    script:'scripts/run-canonical-setup-projection-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
+    id:'browser-asset-versions',
+    label:'Browser asset-version assertions',
+    script:'scripts/run-browser-asset-version-assertions.js',
+    groups:['all', 'pure']
+  },
+  {
     id:'resolver-authority-switch',
     label:'Resolver authority-switch assertions',
     script:'scripts/run-resolver-authority-switch-assertions.js',

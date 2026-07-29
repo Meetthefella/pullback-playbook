@@ -603,7 +603,7 @@
     return diagnostics;
   }
 
-  function mapCanonicalDecisionToSimplifiedState(record, publication, surface){
+  function mapCanonicalDecisionToSimplifiedState(record, publication, surface, options = {}){
     const item = record && typeof record === 'object' ? record : {};
     const envelope = publication && typeof publication === 'object' ? publication : {};
     const canonical = envelope.canonicalResult && typeof envelope.canonicalResult === 'object' ? envelope.canonicalResult : null;
@@ -615,12 +615,16 @@
     const publishedPlan = canonical && canonical.plan || {};
     const eligibility = canonical && canonical.eligibility || {};
     const blocker = failed ? 'Canonical decision validation failed.' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlocker || '');
-    // The historical `monitor` bucket is retained only as visual grouping for
-    // canonical Watch. It never changes verdict, eligibility, or actionability.
-    const visualBucket = verdict === 'watch' ? 'monitor' : verdict;
+    // The canonical setup projection is the sole authority for published
+    // bucket and score. It consumes only this publication envelope.
+    const setupProjection = global.CanonicalSetupProjection && typeof global.CanonicalSetupProjection.project === 'function'
+      ? global.CanonicalSetupProjection.project(envelope, {baseScore:options.baseScore})
+      : null;
+    const projectedBucket = setupProjection && setupProjection.bucket || verdict;
+    const visualBucket = setupProjection && setupProjection.visualBucket || (verdict === 'watch' ? 'monitor' : verdict);
     return {
       ticker:String(item.ticker || item.symbol || '').trim().toUpperCase(),
-      canonicalVerdict:verdict, finalVerdict:verdict, publicationStatus:failed ? 'validation_failed' : 'valid',
+      canonicalVerdict:projectedBucket, finalVerdict:projectedBucket, sourceCanonicalVerdict:verdict, publicationStatus:failed ? 'validation_failed' : 'valid',
       canonicalNormVersion:failed ? String(envelope.validation && envelope.validation.normVersion || '') : canonical.normVersion,
       canonicalResultVersion:failed ? '' : canonical.schemaVersion,
       evidenceId:failed ? '' : canonical.snapshot && canonical.snapshot.evidenceId,
@@ -650,7 +654,8 @@
       decisiveBlockerCode:failed ? 'canonical_norm_validation_failed' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlockerCode || ''),
       decisiveBlockerCategory:failed ? 'validation' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlockerCategory || ''),
       canonicalDecisionProjection:{
-        verdict,
+        verdict:projectedBucket,
+        sourceCanonicalVerdict:verdict,
         actionable:failed ? false : canonical.verdict.actionable === true,
         decisiveBlocker:blocker,
         decisiveBlockerCode:failed ? 'canonical_norm_validation_failed' : String(canonical && canonical.verdict && canonical.verdict.decisiveBlockerCode || ''),
@@ -660,15 +665,41 @@
         canonicalResultVersion:failed ? '' : canonical.schemaVersion,
         evidenceId:failed ? '' : canonical.snapshot && canonical.snapshot.evidenceId
       },
-      visualBucket, tone:visualBucket, badgeLabel:verdict === 'near_entry' ? 'Near Entry' : (verdict === 'entry' ? 'Entry' : (verdict === 'avoid' ? 'Avoid' : 'Watch')),
-      actionLabel:failed ? 'Decision unavailable - validation failed.' : (verdict === 'entry' ? 'Execute only if the trigger remains valid.' : 'Wait for the next canonical requirement.'),
+      setupProjection,
+      setupScore:setupProjection ? setupProjection.setupScore : 0,
+      scoreAvailable:setupProjection ? setupProjection.scoreAvailable === true : false,
+      scoreBreakdown:setupProjection ? setupProjection.scoreBreakdown : null,
+      bucketReason:setupProjection ? setupProjection.bucketReason : 'Canonical setup projection unavailable.',
+      canonicalStateSource:setupProjection ? setupProjection.canonicalStateSource : 'canonical_publication_mapper_fallback',
+      legacyFallbackUsed:setupProjection ? setupProjection.legacyFallbackUsed === true : true,
+      classificationDiagnostics:setupProjection ? setupProjection.diagnostics : null,
+      canonicalBucket:projectedBucket,
+      resolvedStatus:setupProjection ? setupProjection.resolvedStatus : verdict,
+      visualBucket, tone:setupProjection ? setupProjection.tone : visualBucket, badgeLabel:projectedBucket === 'near_entry' ? 'Near Entry' : (projectedBucket === 'entry' ? 'Entry' : (projectedBucket === 'avoid' ? 'Avoid' : 'Watch')),
+      actionLabel:failed ? 'Decision unavailable - validation failed.' : (projectedBucket === 'entry' ? 'Execute only if the trigger remains valid.' : 'Wait for the next canonical requirement.'),
       mainBlocker:blocker,
       compatibility:{compatibilityOnly:true, mayFeedDecisionLogic:false, reviewVersion:'post-stabilisation-release', sourceCanonicalFields:['verdict','semantics','eligibility','plan','snapshot.evidenceId'], aliases:{
         visualBucket:{category:'A', sourceCanonicalFields:['verdict.value'], transformation:'watch_to_monitor_visual_group', compatibilityOnly:true, mayFeedDecisionLogic:false},
         planDisplay:{category:'compatibility_alias', sourceCanonicalFields:['plan.levels.entry','plan.levels.stop','plan.levels.firstTarget','plan.rewardRisk','plan.visibility','plan.provenance'], transformation:'one_way_plan_payload_projection', compatibilityOnly:true, mayFeedDecisionLogic:false},
         canonicalDecisionProjection:{category:'compatibility_alias', sourceCanonicalFields:['verdict','snapshot.evidenceId','schemaVersion'], transformation:'one_way_decision_projection', compatibilityOnly:true, mayFeedDecisionLogic:false}
       }},
-      debug:{surface, source:'canonical-publication-mapper', publication:envelope, resolvedState:failed ? null : canonical, visualState:null, compatibilityOnly:true}
+      debug:{
+        surface,
+        source:'canonical-publication-mapper',
+        publication:envelope,
+        resolvedState:failed ? null : canonical,
+        visualState:null,
+        classification:setupProjection ? setupProjection.diagnostics : {
+          displayedBucket:projectedBucket,
+          displayedSetupScore:0,
+          canonicalBucket:verdict,
+          canonicalEntryEligibility:false,
+          canonicalNearEntryEligibility:false,
+          structureState:'unknown', supportState:'unknown', buyerControlState:'unknown', confirmationState:'unknown',
+          planValidity:'unknown', scoreBreakdown:null, bucketReason:'Canonical setup projection unavailable.', legacyFallbackUsed:true
+        },
+        compatibilityOnly:true
+      }
     };
   }
 
@@ -911,7 +942,7 @@
     const publication = options.publication && typeof options.publication === 'object'
       ? options.publication
       : missingPublication();
-    return mapCanonicalDecisionToSimplifiedState(record, publication, options.surface || options.context || 'scanner');
+    return mapCanonicalDecisionToSimplifiedState(record, publication, options.surface || options.context || 'scanner', options);
   }
 
   global.SimplifiedTradeState = {
