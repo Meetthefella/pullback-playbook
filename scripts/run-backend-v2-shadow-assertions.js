@@ -1,0 +1,25 @@
+const assert = require('assert');
+require('../js/backend-v2/canonical-assessment.js');
+require('../js/backend-v2/legacy-adapter.js');
+
+const adapter = global.BackendV2LegacyAdapter;
+const record = {ticker:'HWM', marketData:{asOf:'2026-08-03T15:30:00Z', price:101, ma20:99, ma50:95, ma200:90, volume:200, avgVolume:150, currency:'USD'}, derivedStates:{stabilisationState:'clear', bounceState:'confirmed', buyerControlState:'confirmed', confirmationState:'confirmed'}, plan:{entry:100, stop:97, firstTarget:107}};
+const input = adapter.fromRecord(record, {snapshotId:'hwm-shadow', risk:{version:3, maxLossGbp:40}, marketStatus:'above_50ma'});
+assert.equal(input.setup.confirmation, true);
+const absentEvidence = adapter.fromRecord({...record, derivedStates:{}}, {risk:{version:3, maxLossGbp:40}});
+assert.equal(Object.prototype.hasOwnProperty.call(absentEvidence.setup, 'confirmation'), true);
+assert.equal(absentEvidence.setup.confirmation, undefined);
+const assessment = adapter.publishForRecord(record, {snapshotId:'hwm-shadow', risk:{version:3, maxLossGbp:40}, marketStatus:'above_50ma', createdAt:'2026-08-03T15:31:00Z'});
+assert.equal(assessment.setupState, 'entry');
+const matching = adapter.compare({canonicalResult:{verdict:{value:'entry'}}, riskSettingsVersion:3}, assessment);
+assert.equal(matching.matches, true);
+const mismatch = adapter.compare({canonicalResult:{verdict:{value:'watch'}}, riskSettingsVersion:2}, assessment);
+assert.equal(mismatch.matches, false);
+assert.equal(mismatch.differences.length, 2);
+const opaqueVersionAssessment = adapter.publishForRecord(record, {snapshotId:'hwm-shadow', risk:{version:'execution-risk-settings-v1', maxLossGbp:40}, marketStatus:'above_50ma', createdAt:'2026-08-03T15:31:00Z'});
+assert.equal(opaqueVersionAssessment.riskSettingsVersion, 'execution-risk-settings-v1');
+assert.equal(opaqueVersionAssessment.risk.executable, true);
+const opaqueVersionComparison = adapter.compare({canonicalResult:{verdict:{value:'entry'}}, riskSettingsVersion:'execution-risk-settings-v1'}, opaqueVersionAssessment);
+assert.equal(opaqueVersionComparison.matches, true);
+assert.equal(opaqueVersionComparison.differences.some(item => item.field === 'riskSettingsVersion'), false);
+console.log('backend-v2 shadow assertions passed');

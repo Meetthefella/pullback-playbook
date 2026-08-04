@@ -36244,6 +36244,64 @@ async function fetchMarketData(symbol, options = {}){
   throw new Error(lastError || `Market data request failed for ${ticker}.`);
 }
 
+async function sha256Hex(value){
+  const bytes = value instanceof Uint8Array ? value : new TextEncoder().encode(String(value));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function shadowJourneyEndpoint(){
+  const origin = runtimeApiOriginOverride();
+  return resolveApiEndpointWithOrigin(origin, '/.netlify/functions/live-input-journey') || '/.netlify/functions/live-input-journey';
+}
+
+function renderBackendV2JourneyDiagnostics(record){
+  const box = $('backendV2JourneyDiagnostics');
+  if(!box) return;
+  const journey = record && record.authority && record.authority.backendV2LiveJourney;
+  box.textContent = journey && typeof journey === 'object'
+    ? JSON.stringify(journey, null, 2)
+    : 'No runtime diagnostics available.';
+}
+
+async function loadBackendV2ShadowJourney(){
+  const ticker = normalizeTicker($('backendV2JourneyTicker') && $('backendV2JourneyTicker').value);
+  const asOf = String($('backendV2JourneyAsOf') && $('backendV2JourneyAsOf').value || '').trim();
+  const status = $('backendV2JourneyStatus');
+  if(!ticker || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) throw new Error('Enter a ticker and an as-of date.');
+  const provider = normalizeDataProvider(state.dataProvider);
+  if(provider !== 'fmp') throw new Error('Shadow Journey is configured for Financial Modeling Prep only in this deployment. Select FMP in API Settings.');
+  if(status) status.textContent = 'Requesting paired market packet and chart...';
+  const params = new URLSearchParams({ticker, asOf, provider, plan:String(state.apiPlan || DEFAULT_API_PLAN)});
+  const response = await fetch(`${shadowJourneyEndpoint()}?${params.toString()}`);
+  const packet = await response.json();
+  if(!response.ok || packet.ok !== true) throw new Error(packet.error || 'Shadow journey packet request failed.');
+  const bars = Array.isArray(packet.bars) ? packet.bars : [];
+  const pngBytes = Uint8Array.from(atob(String(packet.chartPngBase64 || '')), char => char.charCodeAt(0));
+  const [barHash, pngHash] = await Promise.all([sha256Hex(JSON.stringify(bars)), sha256Hex(pngBytes)]);
+  const market = packet.marketPacket && typeof packet.marketPacket === 'object' ? packet.marketPacket : {};
+  const ordered = bars.length === 200 && bars.every((bar, index) => index === 0 || String(bars[index - 1].date) >= String(bar.date));
+  const packetHistory = Array.isArray(market.history) ? market.history : [];
+  if(packet.ticker !== ticker || packet.asOf !== asOf || packet.barsHash !== barHash || packet.chartHash !== pngHash || !ordered || packetHistory.length !== 200 || JSON.stringify(packetHistory) !== JSON.stringify(bars) || !market.currency || market.quoteUnits !== market.currency || !market.price) throw new Error('Paired packet validation failed.');
+  const record = upsertTickerRecord(ticker);
+  // A new bar run begins with no Review image. This prevents a chart retained
+  // from a prior run becoming evidence for the new immutable publication.
+  clearReviewChartImageSources(record.review);
+  const card = normalizeCard({ticker, marketData:{...market, history:bars}, price:market.price, companyName:market.companyName, exchange:market.exchange, tradingViewSymbol:market.tradingViewSymbol, source:'backend_v2_shadow_journey'});
+  mergeLegacyCardIntoRecord(record, card, {fromScanner:false, authoritySource:'backend_v2_shadow_journey', authorityReason:'Cryptographically paired test packet.'});
+  record.marketData.asOf = asOf;
+  record.marketData.history = bars;
+  publishCanonicalPublicationForRecord(record);
+  const publication = record.authority.canonicalPublication || {};
+  const shadow = record.authority.backendV2Shadow && record.authority.backendV2Shadow.assessment || {};
+  record.authority.backendV2LiveJourney = {runId:String(packet.runId), barHash, pngHash, reviewImageId:'', reviewImageHash:'', snapshotId:String(publication.evidenceId || ''), publicationId:String(publication.publicationId || ''), retrievedPublicationId:String(canonicalPublicationForRecord(record) && canonicalPublicationForRecord(record).publicationId || ''), canonicalAssessmentId:String(publication.canonicalResult && publication.canonicalResult.snapshot && publication.canonicalResult.snapshot.id || publication.evidenceId || ''), shadowAssessmentId:String(shadow.assessmentId || ''), shadowSourcePublicationId:String(publication.publicationId || ''), bars:200, firstDate:String(bars[199] && bars[199].date || ''), lastDate:String(bars[0] && bars[0].date || ''), currency:String(market.currency), quoteUnits:String(market.quoteUnits), score:{total:numericOrNull(record.setup && record.setup.score), components:(record.setup && record.setup.scoreBreakdown) || (record.scan && record.scan.scoreBreakdown) || {}}, discoveryStatus:String(record.scan && record.scan.resolvedVerdict || ''), executionStatus:String(publication.executionSizingValid || 'unavailable'), planAuthorityState:String(publication.validationStatus || ''), executionAuthorityState:String(publication.executionSizingValid || 'unavailable'), publicationImmutableAfterImageUpload:true};
+  commitTickerState();
+  setActiveReviewTicker(ticker); setActiveWorkspaceTab('review'); renderReviewWorkspace({source:'backend_v2_shadow_journey', requestedTicker:ticker});
+  if(status) status.textContent = `Run ${packet.runId}: 200 bars and paired PNG imported. Choose Screenshot to upload the generated chart.`;
+  renderBackendV2JourneyDiagnostics(record);
+  return packet;
+}
+
 async function fetchMarketDataBatch(symbols, options = {}){
   const requested = uniqueTickers(symbols).sort();
   if(!requested.length) return {};
@@ -50760,6 +50818,7 @@ function renderReviewWorkspace(options = {}){
   box.dataset.reviewVisualSource = reviewVisualStateSource;
   box.dataset.renderedReviewTicker = normalizeTicker(record.ticker || '');
   box.dataset.renderedReviewRequestToken = String(currentRenderedReviewRequestToken() || '');
+  box.dataset.renderedPublicationId = String(canonicalPublicationForRecord(record) && canonicalPublicationForRecord(record).publicationId || '');
   ensureLiveFxRateForCurrency(displayedPlan.capitalFit.quote_currency, () => {
     if(activeReviewTicker() === record.ticker) calculate({persist:false});
   });
@@ -51092,6 +51151,7 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
   const reader = new FileReader();
   reader.onload = async () => {
     const dataUrl = String(reader.result || '');
+    const retainedImageHash = await sha256Hex(new Uint8Array(await file.arrayBuffer()));
     const dimensions = await readImageDataUrlDimensions(dataUrl);
     const uploadedAt = new Date().toISOString();
     const imageId = simpleStableHash(dataUrl);
@@ -51158,7 +51218,8 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       requestId:attachmentRequestId,
       source:'file_upload',
       uploadedAt,
-      imageId
+      imageId,
+      contentHash:retainedImageHash
     };
     record.review.chartImageOriginal = {
       name:file.name,
@@ -51171,7 +51232,8 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       source:'file_upload',
       dataUrlField:'chartRef.dataUrl',
       uploadedAt,
-      imageId
+      imageId,
+      contentHash:retainedImageHash
     };
     record.review.chartImagePreview = {
       name:file.name,
@@ -51185,7 +51247,8 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       objectFit:'cover',
       croppedByCssOnly:true,
       uploadedAt,
-      imageId
+      imageId,
+      contentHash:retainedImageHash
     };
     record.review.chartImageVerificationSource = {
       source:'chartImageOriginal',
@@ -51197,10 +51260,21 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
       cropOrResizeOccurred:false,
       limited:false,
       uploadedAt,
-      imageId
+      imageId,
+      contentHash:retainedImageHash
     };
     record.review.chartAvailable = true;
     record.review.importedFromScreenshot = true;
+    const journey = record.authority && record.authority.backendV2LiveJourney;
+    if(journey && typeof journey === 'object'){
+      const publication = record.authority && record.authority.canonicalPublication || {};
+      journey.reviewImageId = imageId;
+      journey.reviewImageHash = retainedImageHash;
+      journey.publicationIdAfterImageUpload = String(publication.publicationId || '');
+      journey.publicationUnchangedAfterImageUpload = journey.publicationIdAfterImageUpload === String(journey.publicationId || '');
+      journey.reviewImageMatchesJourneyPng = retainedImageHash === String(journey.pngHash || '');
+    }
+    refreshBackendV2InputCapture(record, 'chart_import');
     const preAiVerificationRequestId = nextReviewAiAnalysisRequestId();
     if(record.review.chartAttachmentContext) record.review.chartAttachmentContext.requestId = preAiVerificationRequestId;
     if(record.review.chartRef) record.review.chartRef.requestId = preAiVerificationRequestId;
@@ -51226,6 +51300,7 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
     record.review.lastReviewedAt = new Date().toISOString();
     record.meta.updatedAt = record.review.lastReviewedAt;
     commitTickerState();
+    renderBackendV2JourneyDiagnostics(record);
     if(typeof console !== 'undefined' && console.info){
       console.info(previousImageId ? '[CHART_ATTACHMENT_REPLACED]' : '[CHART_ATTACHMENT_CREATED]', {
         source:String(source || 'change_chart'),
@@ -51284,6 +51359,15 @@ function handleChartSelection(ticker, file, source = 'change_chart'){
     if(statusBox) statusBox.innerHTML = '<span class="badtext">Could not read that chart file.</span>';
   };
   reader.readAsDataURL(file);
+}
+
+function refreshBackendV2InputCapture(record, source = 'unknown'){
+  const item = record && typeof record === 'object' ? record : null;
+  if(!item || !window.BackendV2InputCapture || typeof window.BackendV2InputCapture.captureForRecord !== 'function') return null;
+  item.authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
+  const capture = window.BackendV2InputCapture.captureForRecord(item, {source});
+  item.authority.backendV2InputCapture = capture;
+  return capture;
 }
 
 async function importLatestChart(ticker){
@@ -53189,6 +53273,11 @@ click('setupTypeLedger', () => openAdvancedScannerSettings('setup'));
 click('testerSetupConfirmBtn', completeTesterSetup);
 click('testerSetupOpenScannerBtn', () => openAdvancedScannerSettings('mode'));
 click('marketStatusPill', () => setControlFocus('market'));
+click('backendV2JourneyLoadBtn', () => {
+  loadBackendV2ShadowJourney().catch(error => {
+    if($('backendV2JourneyStatus')) $('backendV2JourneyStatus').textContent = String(error && error.message || 'Shadow journey request failed.');
+  });
+});
 click('accountRiskPill', () => setControlFocus('account'));
 click('scannerModePill', () => openAdvancedScannerSettings('mode'));
 click('setupTypePill', () => openAdvancedScannerSettings('setup'));
@@ -54929,6 +55018,33 @@ function publishCanonicalPublicationForRecord(record){
   }, {...identity, riskSettingsId:executionRiskSettings.id, riskSettingsVersion:executionRiskSettings.version});
   item.authority = item.authority && typeof item.authority === 'object' ? item.authority : {};
   item.authority.canonicalPublication = publication;
+  refreshBackendV2InputCapture(item, 'canonical_publication');
+  // Shadow mode only: v2 never feeds this publication or any rendered state.
+  // It is kept in-memory so disagreement is visible without contaminating the
+  // persistence format or allowing a second decision path into the UI.
+  if(window.BackendV2LegacyAdapter && typeof window.BackendV2LegacyAdapter.publishForRecord === 'function'){
+    try{
+      const v2Assessment = window.BackendV2LegacyAdapter.publishForRecord(item, {
+        snapshotId:publication.evidenceId,
+        marketStatus:state.marketStatus,
+        // Keep the current settings identity opaque. It is comparison evidence
+        // only; backend v2 remains unable to grant live execution authority.
+        risk:{version:executionRiskSettings.version, maxLossGbp:executionRiskSettings.maximumLoss}
+      });
+      item.authority.backendV2Shadow = {
+        assessment:v2Assessment,
+        report:window.BackendV2LegacyAdapter.compare(publication, v2Assessment),
+        generatedAt:new Date().toISOString()
+      };
+    }catch(error){
+      item.authority.backendV2Shadow = {
+        assessment:null,
+        report:{schemaVersion:'backend-v2-shadow-report-v1', matches:false, differences:[{field:'publication', legacy:'available', v2:'unavailable'}]},
+        generatedAt:new Date().toISOString(),
+        error:String(error && error.message || 'Backend v2 shadow publication failed.')
+      };
+    }
+  }
   const snapshot = {...resolved};
   delete snapshot.canonicalPublication;
   delete snapshot.canonicalDecisionResult;

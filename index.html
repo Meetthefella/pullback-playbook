@@ -383,6 +383,14 @@
           </div>
           <div id="apiStatus" class="subtle">No API test run yet.</div>
         </div>
+        <div class="panelbox" id="backendV2JourneyPanel">
+          <strong>Backend v2 Shadow Journey</strong>
+          <div class="tiny" style="margin-top:6px">Diagnostic-only: imports a cryptographically paired packet for Review. It does not change Scan, Track, or Paper Trade authority.</div>
+          <div class="row" style="margin-top:10px"><div><label>Ticker</label><input id="backendV2JourneyTicker" value="CAT" maxlength="10" /></div><div><label>As-of date</label><input id="backendV2JourneyAsOf" type="date" /></div></div>
+          <div class="actions"><button class="secondary compactbutton" id="backendV2JourneyLoadBtn" type="button">Load Shadow Journey Packet</button></div>
+          <div class="tiny" id="backendV2JourneyStatus">No shadow journey packet loaded.</div>
+          <pre class="tiny" id="backendV2JourneyDiagnostics" aria-live="polite">No runtime diagnostics available.</pre>
+        </div>
         <div class="panelbox">
           <strong>App Help</strong>
           <div class="tiny" style="margin-top:10px">Replay the guided walkthrough without changing your saved workflow data.</div>
@@ -478,6 +486,9 @@
 <script defer src="./js/domain/canonical-resolver-input.js?v=4.5.11"></script>
 <script defer src="./js/domain/canonical-decision-result.js?v=4.5.11"></script>
 <script defer src="./js/domain/canonical-setup-projection.js?v=4.5.11"></script>
+<script defer src="./js/backend-v2/canonical-assessment.js?v=5.0.0"></script>
+<script defer src="./js/backend-v2/legacy-adapter.js?v=5.0.0"></script>
+<script defer src="./js/backend-v2/input-capture.js?v=5.0.0"></script>
 <script defer src="./js/resolver-core.js?v=4.5.11"></script>
 <script defer src="./js/resolver-presentation.js?v=4.5.11"></script>
 <script defer src="./js/chart-guru-phase-policy.js?v=4.5.4"></script>

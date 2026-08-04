@@ -5,6 +5,30 @@ const root = path.resolve(__dirname, '..', '..');
 
 const cases = [
   {
+    id:'backend-v2',
+    label:'Backend v2 invariant assertions',
+    script:'scripts/run-backend-v2-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
+    id:'backend-v2-shadow',
+    label:'Backend v2 shadow adapter assertions',
+    script:'scripts/run-backend-v2-shadow-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
+    id:'backend-v2-input-capture',
+    label:'Backend v2 input-capture assertions',
+    script:'scripts/run-backend-v2-input-capture-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
+    id:'live-input-journey-provider',
+    label:'Live input journey provider assertions',
+    script:'scripts/run-live-input-journey-assertions.js',
+    groups:['all', 'resolver', 'pure']
+  },
+  {
     id:'resolver-gates',
     label:'Resolver gate assertions',
     script:'scripts/run-resolver-gate-assertions.js',

@@ -39,6 +39,11 @@
     "test:resolver-gates": "node scripts/run-resolver-gate-assertions.js",
     "test:canonical-decision-baseline": "node scripts/run-canonical-decision-baseline-assertions.js",
     "test:canonical-norm": "node scripts/run-canonical-norm-assertions.js",
+    "test:backend-v2": "node scripts/run-backend-v2-assertions.js",
+    "test:backend-v2:shadow": "node scripts/run-backend-v2-shadow-assertions.js",
+    "test:backend-v2:input-capture": "node scripts/run-backend-v2-input-capture-assertions.js",
+    "test:live-input-journey": "node scripts/run-live-input-journey-assertions.js",
+    "test:ui:backend-v2:deployed-shadow": "playwright test --config=playwright.deployed-shadow.config.js backend-v2-deployed-shadow-journey.spec.js --workers=1 --trace=on",
     "test:trade-execution": "node scripts/run-trade-execution-handler-tests.js"
   },
   "dependencies": {
