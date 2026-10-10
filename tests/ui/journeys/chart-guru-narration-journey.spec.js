@@ -25,7 +25,7 @@ const {
   listBenchmarkFolders,
   loadBenchmarkCaseByTicker
 } = require('../../fixtures/chart-guru-benchmark-library.js');
-const analyseSetupModule = require('../../../netlify/functions/analyse-setup.js');
+const analyseSetupModule = require('../../../netlify/functions/analyse-setup.mjs');
 
 const API_ORIGIN = 'https://velvety-clafoutis-8a92bf.netlify.app';
 const RUN_TIMESTAMP = new Date().toISOString().replace(/[:.]/g, '-');

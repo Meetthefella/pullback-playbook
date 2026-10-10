@@ -5,7 +5,7 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
 const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-const hooks = require(path.join(root, 'netlify', 'functions', 'analyse-setup.js')).__test;
+const hooks = require(path.join(root, 'netlify', 'functions', 'analyse-setup.mjs')).__test;
 
 function extract(name){
   const start = appSource.indexOf(`function ${name}(`);

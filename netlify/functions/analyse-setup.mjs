@@ -159,11 +159,10 @@ const PRIMARY_ANALYSIS_SCHEMA = {
 };
 
 function jsonResponse(statusCode, body){
-  return {
-    statusCode,
+  return new Response(JSON.stringify(body), {
+    status: statusCode,
     headers: corsHeaders,
-    body: JSON.stringify(body)
-  };
+  });
 }
 
 function extractOutputText(payload){
@@ -267,7 +266,8 @@ async function sendOpenAiRequest(apiKey, requestBody){
   const timeout = setTimeout(() => controller.abort(), OPENAI_TIMEOUT_MS);
 
   try{
-    const upstream = await fetch('https://api.openai.com/v1/responses', {
+    const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
+    const upstream = await fetch(`${baseUrl.replace(/\/+$/, '')}/responses`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -685,10 +685,10 @@ function finaliseCanonicalNarrationContract(selectedContract = {}, deterministic
   };
 }
 
-function narrationRuntimeIdentity(event = {}){
-  const headers = safeObject(event.headers);
-  const requestHost = normaliseString(headers.host || headers.Host, '');
-  const requestOrigin = normaliseString(headers.origin || headers.Origin, '');
+function narrationRuntimeIdentity(request){
+  const requestUrl = new URL(request.url);
+  const requestHost = normaliseString(request.headers.get('host') || requestUrl.host, '');
+  const requestOrigin = normaliseString(request.headers.get('origin'), '');
   const context = process.env.CONTEXT || process.env.NETLIFY_CONTEXT || '';
   const commitRef = process.env.COMMIT_REF || '';
   const deployId = process.env.DEPLOY_ID || '';
@@ -697,7 +697,7 @@ function narrationRuntimeIdentity(event = {}){
   return {
     requestOrigin,
     requestHost,
-    functionEndpoint:normaliseString(event.rawPath || event.path, '') || '/.netlify/functions/analyse-setup',
+    functionEndpoint:requestUrl.pathname,
     deployUrl,
     deployId,
     commitRef,
@@ -2406,12 +2406,12 @@ function normaliseAnalysis(obj, payload = {}){
   };
 }
 
-exports.handler = async function handler(event){
-  if(event.httpMethod === 'OPTIONS'){
+export default async function handler(request){
+  if(request.method === 'OPTIONS'){
     return jsonResponse(200, { ok: true });
   }
 
-  if(event.httpMethod !== 'POST'){
+  if(request.method !== 'POST'){
     return jsonResponse(405, { error: 'Method not allowed' });
   }
 
@@ -2420,13 +2420,13 @@ exports.handler = async function handler(event){
 
   if(!apiKey){
     return jsonResponse(500, {
-      error: 'OPENAI_API_KEY is not configured on the server.'
+      error: 'Netlify AI Gateway credentials are unavailable. Check gateway availability and redeploy.'
     });
   }
 
   let body;
   try{
-    body = JSON.parse(event.body || '{}');
+    body = JSON.parse(await request.text() || '{}');
   }catch(err){
     return jsonResponse(400, { error: 'Invalid JSON body.' });
   }
@@ -2724,7 +2724,7 @@ exports.handler = async function handler(event){
     const finalisation = finaliseCanonicalNarrationContract(selectedNarrationContract, structuredFacts.deterministicEventPacket);
     const finalContract = finalisation.finalContract;
     const finalContractSnapshot = narrationContractSnapshot(finalContract);
-    const runtimeIdentity = narrationRuntimeIdentity(event);
+    const runtimeIdentity = narrationRuntimeIdentity(request);
     const narrationContractTrace = {
       phaseBeforeRepair:finalisation.phaseRepair.before,
       phaseAfterRepair:finalisation.phaseRepair.after,
@@ -2851,7 +2851,7 @@ exports.handler = async function handler(event){
     delete analysis.traderInterpretation;
     analysis.canonicalNarrationContract = cloneNarrationContract(fallbackFinalContract);
     analysis.chartCoach.diagnostics = analysis.chartCoach.diagnostics || {};
-    const fallbackResponseDiagnostics = narrationResponseDiagnostics(fallbackFinalContract, fallbackFinalisation.phaseRepair, narrationRuntimeIdentity(event));
+    const fallbackResponseDiagnostics = narrationResponseDiagnostics(fallbackFinalContract, fallbackFinalisation.phaseRepair, narrationRuntimeIdentity(request));
     if(!narrationResponseDiagnosticsAreConsistent(fallbackResponseDiagnostics, fallbackFinalContract)){
       return jsonResponse(500, {error:'Chart Guru diagnostics could not be serialised consistently.'});
     }
@@ -2903,9 +2903,9 @@ exports.handler = async function handler(event){
     analysis,
     diagnostics:safeObject(safeObject(analysis.chartCoach).diagnostics).narration || null
   });
-};
+}
 
-exports.__test = {
+export const __test = {
   buildRequestBody,
   buildStrictSchemaRequestBody,
   buildVerificationOnlyContent,

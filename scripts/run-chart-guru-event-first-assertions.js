@@ -6,7 +6,7 @@ const assert = require('assert');
 const root = path.resolve(__dirname, '..');
 const appPath = path.join(root, 'app.js');
 const appSource = fs.readFileSync(appPath, 'utf8');
-const analyseSetupModule = require(path.join(root, 'netlify', 'functions', 'analyse-setup.js'));
+const analyseSetupModule = require(path.join(root, 'netlify', 'functions', 'analyse-setup.mjs'));
 const {loadBenchmarkCases} = require(path.join(root, 'tests', 'fixtures', 'chart-guru-benchmark-library.js'));
 const fixtures = loadBenchmarkCases();
 
@@ -337,7 +337,7 @@ function verifyStalledFollowThroughSerialization(){
 
 function verifyNetlifyNormalizationAndTutorBoundary(){
   const hooks = analyseSetupModule.__test;
-  assert.ok(hooks, 'analyse-setup.js must expose a __test surface for contract assertions.');
+  assert.ok(hooks, 'analyse-setup.mjs must expose a __test surface for contract assertions.');
 
   for(const fixture of fixtures){
     const sourcePacket = buildEventPacketSandbox().buildDeterministicEventPacketFromChartCoach(fixture.deterministicChartCoach);
