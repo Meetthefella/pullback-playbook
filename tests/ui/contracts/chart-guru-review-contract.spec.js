@@ -2,7 +2,7 @@ const {test, expect} = require('@playwright/test');
 const path = require('path');
 
 const {loadBenchmarkCases} = require('../../fixtures/chart-guru-benchmark-library.js');
-const analyseSetupModule = require('../../../netlify/functions/analyse-setup.js');
+const analyseSetupModule = require('../../../netlify/functions/analyse-setup.mjs');
 const fixtures = loadBenchmarkCases();
 
 function buildDeterministicEventPacketFromFixture(chartCoach = {}){

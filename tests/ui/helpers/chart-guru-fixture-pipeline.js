@@ -1,4 +1,4 @@
-const analyseSetupModule = require('../../../netlify/functions/analyse-setup.js');
+const analyseSetupModule = require('../../../netlify/functions/analyse-setup.mjs');
 const {
   loadBenchmarkCases,
   loadBenchmarkCaseByTicker,

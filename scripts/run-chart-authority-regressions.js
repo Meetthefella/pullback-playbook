@@ -5,7 +5,7 @@ const assert = require('assert');
 
 const root = path.resolve(__dirname, '..');
 const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-const serverSource = fs.readFileSync(path.join(root, 'netlify', 'functions', 'analyse-setup.js'), 'utf8');
+const serverSource = fs.readFileSync(path.join(root, 'netlify', 'functions', 'analyse-setup.mjs'), 'utf8');
 
 function loadBrowserModule(relativePath, sandbox){
   const source = fs.readFileSync(path.join(root, relativePath), 'utf8');
@@ -118,10 +118,11 @@ function extractConstAssignment(constName){
 }
 
 async function runNetlifyCanonicalizationRegression(){
-  const modulePath = path.join(root, 'netlify', 'functions', 'analyse-setup.js');
+  const modulePath = path.join(root, 'netlify', 'functions', 'analyse-setup.mjs');
   delete require.cache[modulePath];
   process.env.OPENAI_API_KEY = 'test-key';
   process.env.OPENAI_MODEL = 'gpt-4o-mini';
+  process.env.OPENAI_BASE_URL = 'https://gateway.example.test/v1/';
 
   const trustedMarketContext = {
     ticker:'NVDA',
@@ -223,12 +224,32 @@ async function runNetlifyCanonicalizationRegression(){
     whatNext:'Watch for price to reach a clearer support area.'
   };
 
-  const {handler, __test} = require(modulePath);
+  const {default:handler, __test} = require(modulePath);
+  const optionsResponse = await handler(new Request('https://example.test/api/analyse-setup', {method:'OPTIONS'}));
+  assert.ok(optionsResponse instanceof Response, 'Modern handler must return a Web Response');
+  assert.strictEqual(optionsResponse.status, 200, 'Preflight requests must remain supported');
+  assert.strictEqual(optionsResponse.headers.get('access-control-allow-origin'), '*', 'Existing CORS behavior must remain intact');
+  assert.strictEqual(optionsResponse.headers.get('cache-control'), 'no-store', 'Analysis responses must remain uncached');
+  assert.deepStrictEqual(await optionsResponse.json(), {ok:true});
+  const methodResponse = await handler(new Request('https://example.test/api/analyse-setup'));
+  assert.strictEqual(methodResponse.status, 405, 'Unsupported methods must remain rejected');
+  const invalidJsonResponse = await handler(new Request('https://example.test/api/analyse-setup', {method:'POST', body:'{'}));
+  assert.strictEqual(invalidJsonResponse.status, 400, 'Malformed request JSON must remain rejected');
+  const missingFieldsResponse = await handler(new Request('https://example.test/api/analyse-setup', {method:'POST', body:'{}'}));
+  assert.strictEqual(missingFieldsResponse.status, 400, 'Ticker, market status and prompt must remain required');
+  const testCredential = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  const missingCredentialsResponse = await handler(new Request('https://example.test/api/analyse-setup', {method:'POST'}));
+  assert.strictEqual(missingCredentialsResponse.status, 500, 'Unavailable gateway credentials must return a clear failure');
+  assert.ok(/Netlify AI Gateway/.test((await missingCredentialsResponse.json()).error), 'Credential failures must direct users to the gateway, not manual key setup');
+  process.env.OPENAI_API_KEY = testCredential;
   const normalizedInterpretation = __test.normalizeTraderInterpretation(traderInterpretation, {});
   assert.ok(/early repair attempt/i.test(normalizedInterpretation.traderRead), 'Legacy trader-interpretation normalization remains directly covered without an outbound request');
   const invokeHandler = async (sequence, payloadOverrides = {}) => {
     const fetchCalls = [];
     global.fetch = async (url, options = {}) => {
+      assert.strictEqual(url, 'https://gateway.example.test/v1/responses', 'Every AI request must use the injected gateway base URL');
+      assert.ok(options.headers.Authorization === `Bearer ${process.env.OPENAI_API_KEY}`, 'AI requests must authenticate with the injected credential');
       fetchCalls.push({url, options});
       const requestBody = JSON.parse(options.body || '{}');
       const step = sequence[Math.max(0, fetchCalls.length - 1)] || sequence[sequence.length - 1];
@@ -243,8 +264,8 @@ async function runNetlifyCanonicalizationRegression(){
       };
     };
 
-    const response = await handler({
-      httpMethod:'POST',
+    const response = await handler(new Request('https://example.test/.netlify/functions/analyse-setup', {
+      method:'POST',
       body:JSON.stringify({
         payload:{
           ticker:'NVDA',
@@ -254,8 +275,8 @@ async function runNetlifyCanonicalizationRegression(){
         },
         prompt:'Return JSON only.'
       })
-    });
-    return {response, fetchCalls, body:JSON.parse(response.body)};
+    }));
+    return {response, fetchCalls, body:await response.json()};
   };
 
   const successRun = await invokeHandler([
@@ -264,7 +285,7 @@ async function runNetlifyCanonicalizationRegression(){
   ]);
 
   assert.strictEqual(successRun.fetchCalls.length, 2, 'Expected primary analysis followed by canonical final prose');
-  assert.strictEqual(successRun.response.statusCode, 200, 'Handler should succeed');
+  assert.strictEqual(successRun.response.status, 200, 'Handler should succeed');
   const firstRequest = JSON.parse(successRun.fetchCalls[0].options.body || '{}');
   const secondRequest = JSON.parse(successRun.fetchCalls[1].options.body || '{}');
   const body = successRun.body;
@@ -346,7 +367,7 @@ async function runNetlifyCanonicalizationRegression(){
   ]);
   const malformedResponse = malformedResponseRun.response;
   const malformedBody = malformedResponseRun.body;
-  assert.strictEqual(malformedResponse.statusCode, 200, 'Malformed JSON with trusted market context should still return usable analysis');
+  assert.strictEqual(malformedResponse.status, 200, 'Malformed JSON with trusted market context should still return usable analysis');
   assert.ok(/malformed json/i.test(String(malformedBody.analysis.parseWarning || '')), 'Malformed JSON fallback should record a parse warning');
   const malformedSummary = String(malformedBody.analysis.candleStructureAnalysis && malformedBody.analysis.candleStructureAnalysis.summary || '');
   assert.ok(/below the 20MA/i.test(malformedSummary) && /below the 50MA/i.test(malformedSummary) && /above the 200MA/i.test(malformedSummary), 'Malformed JSON fallback should include deterministic candle summary with canonical MA relationships');
@@ -357,7 +378,7 @@ async function runNetlifyCanonicalizationRegression(){
     {payload:{output_text:JSON.stringify(aiPayload)}},
     {ok:false, status:500, payload:{error:{message:'Final prose exploded'}}}
   ]);
-  assert.strictEqual(finalFailureRun.response.statusCode, 200, 'Final-prose failure should degrade to deterministic 200');
+  assert.strictEqual(finalFailureRun.response.status, 200, 'Final-prose failure should degrade to deterministic 200');
   assert.strictEqual(finalFailureRun.body.analysis.chartCoach && finalFailureRun.body.analysis.chartCoach.source, 'deterministic_fallback', 'Final-prose failure should use deterministic fallback');
 
   const retryRun = await invokeHandler([
@@ -3031,7 +3052,7 @@ function runServerCandleOrderRegression(){
     'normalizeServerCandleSequenceOrder',
     'deterministicServerCandleSummary'
   ].forEach(name => {
-    vm.runInContext(extractFunctionSource(serverSource, name), sandbox, {filename:`analyse-setup.js#${name}`});
+    vm.runInContext(extractFunctionSource(serverSource, name), sandbox, {filename:`analyse-setup.mjs#${name}`});
   });
 
   const canonicalValues = {
@@ -3174,7 +3195,7 @@ function runReviewChartGuruDisplayRegression(){
 
 function runSourceAssertions(){
   const appSource = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
-  const serverSource = fs.readFileSync(path.join(root, 'netlify', 'functions', 'analyse-setup.js'), 'utf8');
+  const serverSource = fs.readFileSync(path.join(root, 'netlify', 'functions', 'analyse-setup.mjs'), 'utf8');
   assert(appSource.includes('trustedMarketContext:'), 'App prompt payload must include trustedMarketContext');
   assert(appSource.includes("'candleStructureAnalysis'"), 'Prompt output keys must include candleStructureAnalysis');
   assert(appSource.includes("'chartCoach'"), 'Prompt output keys must include chartCoach');

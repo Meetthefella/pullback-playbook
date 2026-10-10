@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const hooks = require('../netlify/functions/analyse-setup').__test;
+const hooks = require('../netlify/functions/analyse-setup.mjs').__test;
 
 const rendererFields = ['version','phase','dominantEvent','eventSequence','structure','support','buyerResponse','buyerControl','followThrough','trend','volume','market','dominantBlocker','nextRequiredEvent','verdict','evidenceFactIds'].sort();
 

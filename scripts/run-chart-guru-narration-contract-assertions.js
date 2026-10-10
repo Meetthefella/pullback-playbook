@@ -4,7 +4,7 @@
  * are not narration inputs and the renderer receives only the canonical contract.
  */
 const assert = require('assert');
-const hooks = require('../netlify/functions/analyse-setup').__test;
+const hooks = require('../netlify/functions/analyse-setup.mjs').__test;
 const {loadBenchmarkCases} = require('../tests/fixtures/chart-guru-benchmark-library.js');
 
 function deterministicEngine(chartCoach){
